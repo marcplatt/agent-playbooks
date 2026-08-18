@@ -21,7 +21,7 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 
 | Playbook | Use |
 |---|---|
-| [Lane Coordination Standard](playbooks/lane-coordination-standard.md) | Coordinate bounded serial lanes and proven parallel work with exact-head evidence, serialized merges, and prepared human-review gates. |
+| [Lane Planning and Execution Standard](playbooks/lane-coordination-standard.md) | Plan and execute a bounded queue of existing lanes with an implementation-readiness gate, safe serial or parallel flow, exact-head evidence, prepared human review, and serialized merges. |
 
 ## Using a playbook
 
@@ -33,7 +33,7 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 Example:
 
 ```text
-Use the Lane Coordination Standard.
+Use the Lane Planning and Execution Standard.
 Lanes: AE-18.13, AE-18.14, AE-18.11, AE-18.12
 Objective: complete the approved lanes without adding successors.
 ```
