@@ -1,0 +1,70 @@
+milestone_session:
+  id: "{{stable_session_id}}"
+  system_reference: "{{system_reference}}"
+  project_root: "{{absolute_path}}"
+  current_hrm: null
+  target_hrm: "{{target_hrm}}"
+  milestone_contract: "{{path}}"
+  milestone_outcome: "{{operator_visible_outcome}}"
+  status: planned
+  review_questions: []
+  closure_criteria: []
+  authority_envelope:
+    planning_changes: false
+    routine_code_integration: false
+    provider_writes: false
+    canary: false
+    deployment: false
+    production_activation: false
+    destructive_migration: false
+    credential_or_permission_change: false
+  activation_posture: read_only
+  approved_lane_bundle: []
+  operator_banner:
+    capabilities_complete: []
+    capabilities_remaining: []
+    blockers: []
+    decisions_requested: []
+    integrated_head_sha: null
+    next_action: resolve_target_hrm
+  review_package:
+    status: not_started
+    path_or_url: null
+    review_head_sha: null
+    test_evidence: []
+    known_limitations: []
+    external_mutations: 0
+  findings:
+    ledger: null
+    open: []
+    blocking: []
+    remediation_bundle: []
+  closure:
+    decision: pending
+    decided_by: null
+    decided_at: null
+    rationale: null
+    released_next_bundle: []
+  cleanup:
+    primary_checkout: null
+    removed_worktrees: []
+    retained_worktrees: []
+    no_other_project_touched: false
+
+lanes:
+  - id: "{{lane_id}}"
+    assigned_hrm: "{{target_hrm}}"
+    milestone_contribution: []
+    contract: "{{path}}"
+    state: queued
+    dependencies: []
+    worktree: null
+    branch: null
+    base_sha: null
+    candidate_head_sha: null
+    main_sha: null
+    validation_class: application_behavior
+    exact_checks: []
+    full_suite_triggers: []
+    external_mutations: 0
+    cleanup_disposition: pending

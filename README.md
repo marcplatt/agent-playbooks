@@ -21,7 +21,14 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 
 | Playbook | Use |
 |---|---|
-| [Lane Planning and Execution Standard](playbooks/lane-coordination-standard.md) | Plan and execute a bounded queue of existing lanes with an implementation-readiness gate, behavior-and-reach test planning, live HOTL design batching, risk-scaled exact-head validation, prepared human review, and serialized merges. |
+| [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance a system to an operator-selected HRM by resolving evidence and milestone contracts, deriving and publishing the necessary lane bundle, coordinating review/remediation, and requiring explicit human closure without implying activation. |
+| [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute an approved milestone bundle with behavior-and-reach test planning, live HOTL design batching, risk-scaled exact-head validation, deterministic integration, milestone review/remediation states, and safe automatic worktree cleanup. |
+
+## Templates and examples
+
+- [HRM review package](templates/hrm-review-package.md)
+- [HRM session ledger](templates/hrm-session-ledger.yaml)
+- [Example HRM-directed session](examples/hrm-directed-session.example.yaml)
 
 ## Draft playbooks
 
@@ -34,16 +41,23 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 
 1. Open the selected playbook and supply its required inputs.
 2. Paste the text under **Prompt** into a Codex task.
-3. Keep the coordinator at the outcome and authority level; builders and reviewers receive bounded assignments.
+3. Name the system, target HRM, milestone outcome, and authority envelope; do not reconstruct a lane queue unless constraining legacy work.
 4. Review only prepared UI, UX, function, scope, activation, or irreversible-action gates.
 
 Example:
 
 ```text
-Use the Lane Planning and Execution Standard.
-Lanes: AE-18.13, AE-18.14, AE-18.11, AE-18.12
-Objective: complete the approved lanes without adding successors.
+Use the System Build and Human Review Milestone Standard.
+System: SYS-EXAMPLE-001 in the current project.
+Target HRM: HRM-2.
+Milestone outcome: the operator can complete and correct the local workflow and
+understand failures without external writes.
+Activation posture: read-only.
 ```
+
+The system-build playbook derives the approved lane bundle and invokes the lane
+coordinator. Direct lane-coordinator use is reserved for an already-approved milestone
+session contract or a bounded legacy/recovery constraint.
 
 The intended personal Codex skill entrypoint is `$alpine-workflows`; until that skill is installed, the Markdown playbooks are the canonical invocation source.
 
