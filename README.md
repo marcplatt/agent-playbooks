@@ -21,7 +21,7 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 
 | Playbook | Use |
 |---|---|
-| [Lane Planning and Execution Standard](playbooks/lane-coordination-standard.md) | Plan and execute a bounded queue of existing lanes with an implementation-readiness gate, safe serial or parallel flow, exact-head evidence, prepared human review, and serialized merges. |
+| [Lane Planning and Execution Standard](playbooks/lane-coordination-standard.md) | Plan and execute a bounded queue of existing lanes with an implementation-readiness gate, behavior-and-reach test planning, live HOTL design batching, risk-scaled exact-head validation, prepared human review, and serialized merges. |
 
 ## Using a playbook
 
