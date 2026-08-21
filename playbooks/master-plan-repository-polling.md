@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYNC-001
 title: Bidirectional Master-Plan Repository Polling and Lane Intake
-version: "0.3"
+version: "0.4"
 status: draft
 owner: Alpine Structures
 mode: bidirectional-master-plan-repository-polling
@@ -238,9 +238,10 @@ DRAFT A BOUNDED LANE WHEN READY
     reference the exact master-plan source range, accepted work order or record IDs,
     contract versions, target base SHA, dependencies, owned files, implementation
     manifest changes, checker, acceptance scenarios, evidence, rollback/recovery,
-    human milestones, and explicit non-goals. Include an evidence-based QUICK, SERIAL,
-    PARALLEL, or CRITICAL scheduling hint, but leave execution release and merge order
-    to the Lane Planning and Execution Standard.
+    assigned target HRM, and explicit non-goals. Include an evidence-based QUICK, SERIAL,
+    PARALLEL, or CRITICAL scheduling hint, but leave milestone-bundle derivation and
+    release to the System Build and Human Review Milestone Standard and execution order
+    to the HRM Bundle Coordination Standard.
 21. The lane must state production_effect: none and distinguish documentation, planned
     implementation, implementation, deployment, and production verification. A lane
     draft never grants implementation or external-write authority.
@@ -547,6 +548,10 @@ poll:
 
 ## Change note
 
+- **0.4 — 2026-08-21:** Routes a drafted lane into the HRM-first workflow: the system-
+  build playbook derives and releases milestone bundles, and the lane coordinator owns
+  execution order. A draft now names its assigned target HRM rather than an informal
+  human milestone.
 - **0.3 — 2026-08-20:** Fixes both synchronization sources to literal `origin/main`.
   Feature branches, draft PRs, local commits, dirty worktrees, and repositories without
   a durable `main` branch cannot produce organization-level mirror records.

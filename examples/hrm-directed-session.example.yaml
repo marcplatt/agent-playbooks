@@ -1,0 +1,81 @@
+system_build_session:
+  id: MS-EXAMPLE-2026-08-21-HRM-2
+  system_reference: SYS-EXAMPLE-001
+  project_root: /example/project
+  current_hrm:
+    id: HRM-1
+    status: closed
+  target_hrm:
+    id: HRM-2
+    title: Operator workflow review
+    outcome: The operator can complete and correct the local workflow and understand failures without external writes.
+    review_questions:
+      - Are all required controls present and understandable?
+      - Can the operator recover safely from invalid and stale input?
+    closure_criteria:
+      - All blocking workflow findings are resolved or explicitly deferred.
+      - The integrated review head passes the approved bundle checks.
+    closure_authority: human_operator
+    release_effect: Makes the controlled-canary planning bundle eligible; it does not authorize a canary.
+  status: executing
+  authority_envelope:
+    planning_changes: true
+    routine_code_integration: true
+    provider_writes: false
+    canary: false
+    deployment: false
+    production_activation: false
+  activation_posture: read_only
+  acceptance_matrix:
+    - acceptance_id: ACC-EXAMPLE-021
+      requirement_ids: [REQ-EXAMPLE-014]
+      positive_scenarios: [complete_the_local_workflow]
+      negative_scenarios: [reject_invalid_input_with_recovery_guidance]
+      boundary_scenarios: [stale_input_requires_refresh]
+      validation_class: ui_interaction
+      exact_checks:
+        - npm run build
+        - "browser scenario: complete, correct, and retry the affected workflow with keyboard-only input"
+      full_suite_triggers: []
+  lane_bundle:
+    source: derived
+    approval_status: approved
+    lanes:
+      - id: EX-02.1
+        milestone_contribution: [complete_the_local_workflow]
+        requirement_ids: [REQ-EXAMPLE-014]
+        dependencies: []
+        classification: serial
+        validation_class: ui_interaction
+        contract: docs/lanes/EX-02.1.md
+        publication_sha: 1111111111111111111111111111111111111111
+        state: executing
+      - id: EX-02.2
+        milestone_contribution: [recover_from_stale_input]
+        requirement_ids: [REQ-EXAMPLE-015]
+        dependencies: [EX-02.1]
+        classification: serial
+        validation_class: application_behavior
+        contract: docs/lanes/EX-02.2.md
+        publication_sha: 1111111111111111111111111111111111111111
+        state: approved
+  operator_banner:
+    capabilities_complete: []
+    capabilities_remaining:
+      - Complete and correct the local workflow.
+      - Recover safely from stale input.
+    blockers: []
+    decisions_requested: []
+    integrated_head_sha: null
+    next_action: Execute EX-02.1 through the HRM bundle coordinator.
+  review_package:
+    status: not_started
+    external_mutations: 0
+  findings:
+    ledger: findings/HRM-2.jsonl
+    open: []
+    blocking: []
+    remediation_bundle: []
+  closure:
+    decision: pending
+    released_next_bundle: []

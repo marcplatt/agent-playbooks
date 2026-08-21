@@ -1,21 +1,40 @@
 ---
 playbook_id: AP-LANE-001
-title: Lane Planning and Execution Standard
-version: "2.2"
+title: HRM Bundle Coordination Standard
+version: "3.0"
 status: active
 owner: Alpine Structures
-mode: lane-planning-and-execution
+mode: hrm-bundle-execution
 human_readable: true
 machine_readable: true
-required_inputs: [lane_list, objective]
+required_inputs: [system_reference, target_hrm, milestone_outcome]
 optional_inputs:
+  - milestone_session_contract
+  - approved_lane_bundle
+  - manual_lane_bundle
+  - current_hrm
+  - review_questions
   - required_order
-  - authority_exceptions
-  - human_review_requirements
+  - authority_envelope
+  - activation_posture
   - target_time_or_priority
+  - primary_checkout
+  - worktree_cleanup_policy
+  - completion_mode
+  - operating_profile
+  - integration_mode
+  - legacy_baseline_sha
+  - protected_governance_paths
+  - standing_merge_authority
+  - supervisor_rotation_limits
 controls:
   - project-rules-first
+  - target-hrm-first
+  - approved-milestone-bundle
+  - no-operator-lane-enumeration
   - bounded-scope
+  - prospective-adoption-baseline
+  - contradiction-register
   - queue-dependency-graph
   - implementation-readiness-gate
   - dedicated-worktree
@@ -27,86 +46,190 @@ controls:
   - risk-based-review
   - release-boundary-regression
   - bounded-correction-loops
-  - serialized-merges
+  - deterministic-integration
+  - single-writer-integration
+  - exception-only-human-interruption
+  - milestone-review-and-remediation
+  - explicit-human-closure
   - post-merge-verification
-  - human-review-gates
+  - post-merge-worktree-cleanup
+  - unique-work-preservation
+  - primary-checkout-main-sync
+  - durable-supervisor-ledger
   - phase-timing-ledger
 ---
 
-# Lane Planning and Execution Standard
+# HRM Bundle Coordination Standard
 
-Use this playbook to plan and execute a bounded queue of existing lanes at the
-highest practical level of abstraction. The coordinator owns state, authority,
-dependencies, evidence, validation class, and merge order; builders implement;
-risk-scaled review verifies frozen candidates. Active human-on-the-loop UI design is
-an iteration phase, not a sequence of acceptance candidates. Parallel coding is used
-only when dependencies and file ownership prove independence. Otherwise, preparation,
-CI, review, and acceptance setup overlap while the critical path remains serial.
+Use this playbook to execute an approved implementation bundle toward one Human Review
+Milestone (HRM). The target HRM is the work session's operator-visible outcome. Lanes
+are bounded, auditable implementation units derived by the System Build and Human Review
+Milestone Standard; they are not the normal operator-facing session target.
+
+The coordinator owns session state, authority, dependencies, evidence, validation,
+integration, milestone readiness, and cleanup. Builders implement; risk-scaled checks
+and reviews verify frozen candidates. Active human-on-the-loop UI design is an informal
+iteration phase inside the milestone session, not a sequence of acceptance candidates
+or milestones. The session remains open through review and approved remediation until
+the operator explicitly closes or defers the target HRM.
 
 ## Inputs
 
-- **Lanes:** `{{lane_list}}`
-- **Objective:** `{{objective}}`
-- **Required order:** `{{required_order_or_none}}`
-- **Authority exceptions:** `{{authority_exceptions_or_none}}`
-- **Human review:** `{{human_review_requirements_or_default}}`
+- **System or project:** `{{system_reference}}`
+- **Target HRM:** `{{target_hrm}}`
+- **Milestone outcome:** `{{milestone_outcome}}`
+- **Milestone session contract:** `{{milestone_session_contract_or_discover}}`
+- **Approved lane bundle:** `{{approved_lane_bundle_or_derive_from_session_contract}}`
+- **Manual lane bundle:** `{{manual_lane_bundle_or_none}}`
+- **Current HRM:** `{{current_hrm_or_discover}}`
+- **Review questions:** `{{review_questions_or_session_contract}}`
+- **Required order:** `{{required_order_or_dependency_graph}}`
+- **Authority envelope:** `{{authority_envelope_or_project_policy}}`
+- **Activation posture:** `{{activation_posture_or_safe_current_state}}`
 - **Target time or priority:** `{{target_time_or_priority_or_none}}`
+- **Primary checkout:** `{{primary_checkout_or_discover}}`
+- **Worktree cleanup:** `{{worktree_cleanup_policy_or_automatic_after_verified_merge}}`
+- **Completion mode:** `{{completion_mode_or_false}}`
+- **Operating profile:** `{{operating_profile_or_one-human}}`
+- **Integration mode:** `{{integration_mode_or_project-policy}}`
+- **Legacy baseline SHA:** `{{legacy_baseline_sha_or_discover}}`
+- **Protected governance paths:** `{{protected_governance_paths_or_project-policy}}`
+- **Standing merge authority:** `{{standing_merge_authority_or_project-policy}}`
+- **Supervisor rotation limits:** `{{supervisor_rotation_limits_or_default}}`
+
+The normal caller is the system-build playbook, which supplies the approved bundle. A
+manual bundle is a legacy or emergency constraint, not an invitation to make the
+operator reconstruct the plan.
+
+## Quick-start example
+
+```text
+Use the HRM Bundle Coordination Standard.
+System: SYS-EXAMPLE-001.
+Target HRM: HRM-2.
+Milestone outcome: an operator can complete the bounded workflow and understand every
+failure without production side effects.
+Milestone session contract: milestones/HRM-2.md.
+Approved lane bundle: derive from that contract.
+Activation posture: read-only.
+```
 
 ## Prompt
 
 ```text
-Coordinate only these lanes: {{lane_list}}.
+Coordinate the approved implementation bundle for this milestone session.
 
-Objective: {{objective}}.
-Required order: {{required_order_or_none}}.
-Authority exceptions: {{authority_exceptions_or_none}}.
-Human review: {{human_review_requirements_or_default}}.
+System: {{system_reference}}.
+Current HRM: {{current_hrm_or_discover}}.
+Target HRM: {{target_hrm}}.
+Milestone outcome: {{milestone_outcome}}.
+Milestone session contract: {{milestone_session_contract_or_discover}}.
+Approved lane bundle: {{approved_lane_bundle_or_derive_from_session_contract}}.
+Manual lane bundle: {{manual_lane_bundle_or_none}}.
+Review questions: {{review_questions_or_session_contract}}.
+Required order: {{required_order_or_dependency_graph}}.
+Authority envelope: {{authority_envelope_or_project_policy}}.
+Activation posture: {{activation_posture_or_safe_current_state}}.
 Target time or priority: {{target_time_or_priority_or_none}}.
+Primary checkout: {{primary_checkout_or_discover}}.
+Worktree cleanup: {{worktree_cleanup_policy_or_automatic_after_verified_merge}}.
+Completion mode: {{completion_mode_or_false}}.
+Operating profile: {{operating_profile_or_one-human}}.
+Integration mode: {{integration_mode_or_project-policy}}.
+Legacy baseline SHA: {{legacy_baseline_sha_or_discover}}.
+Protected governance paths: {{protected_governance_paths_or_project-policy}}.
+Standing merge authority: {{standing_merge_authority_or_project-policy}}.
+Supervisor rotation limits: {{supervisor_rotation_limits_or_default}}.
 
-Obey every applicable AGENTS.md and approved lane contract. Do not discover, create,
-or begin additional lanes. One lane remains one branch, one dedicated worktree, and
-one PR unless the owning project explicitly requires otherwise.
+The target HRM, not a list of lanes, is the work session's controlling objective. Obey
+every applicable AGENTS.md, approved system plan, milestone contract, and lane contract.
+Do not ask the operator to enumerate lanes. If the target HRM is undefined, the bundle
+is absent or unapproved, or the bundle cannot plausibly satisfy the milestone outcome,
+return control to the system-build playbook for amendment and approval. Do not discover,
+create, silently enlarge, or begin additional lanes in this execution playbook.
+
+Use one change unit per branch, dedicated worktree, PR, and merge decision unless the
+owning project explicitly requires otherwise. Treat approved repository policy at the
+current main SHA as the durable automation authority. Record a contradiction instead of
+silently selecting between conflicting instructions.
 
 AUTHORITY AND ROLES
 
-1. The coordinator owns the queue ledger, authority, dependencies, worktrees, agent
-   assignments, evidence, human gates, correction decisions, merge order, and report.
-   It does not duplicate a broad code review; if it performs one, it counts toward
-   the reviewer limit.
-2. Give agents only applicable rules, lane spec, worktree, branch, exact base/head,
-   allowed files, checker, and bounded assignment. Do not fork full chat history.
-   Builders edit; contract auditors and reviewers are read-only.
-3. Keep full logs in the PR or an artifact. Require compact handoffs with state,
-   exact SHA, evidence, findings, unresolved decisions, and next authorized action.
+1. The coordinator or merge supervisor owns the milestone-session ledger, authority
+   classification, lane dependencies, worktrees, assignments, evidence, human gates,
+   correction decisions, integration order, cleanup, continuity, and report. A
+   deterministic merge controller, when configured, is the routine integration writer.
+2. The system-build playbook owns HRM definition, gap analysis, lane creation or
+   rebaselining, findings disposition, and the canonical milestone package. The lane
+   coordinator executes only the approved bundle and returns scope-changing discoveries
+   to that owner.
+3. Give builders only applicable rules, lane spec, worktree, branch, exact base/head,
+   allowed files, checker, assigned HRM, and bounded assignment. Builders edit; contract
+   auditors and reviewers are read-only. Agents never count as human approvers.
+4. Apply the operating profile explicitly. In ONE HUMAN mode, agents never count as the
+   human approver and routine policy-compliant integration may be automatic. In TWO
+   HUMANS mode, protected or high-risk changes require the non-authoring human when
+   project policy says so. In MANY COLLABORATORS mode, use ownership review, protected
+   rules, and a hosted merge queue when available. Human review is required only by the
+   milestone contract, risk or protected-path policy, a classified exception, or
+   reserved business/production authority.
+5. Keep full logs in the PR or an artifact. Require compact handoffs with target HRM,
+   state, exact SHA, policy SHA, evidence, findings, unresolved decisions, exception
+   class, cleanup disposition, and next authorized action.
 
-PLAN THE QUEUE ONCE
+ESTABLISH THE MILESTONE SESSION
 
-4. Reconcile origin/main, worktrees, branches, PRs, CI, lane states, dependencies,
-   and file ownership for the complete named queue. Build its dependency graph.
-5. Record each lane's contract, state, dependencies, base, worktree, branch, owned
-   files, checker, validation class, risk, reviewer requirement, human gate, PR/head,
-   merge order, timing, and next action in one compact execution ledger.
-6. Classify lanes as QUICK, SERIAL, PARALLEL, or CRITICAL. Parallel implementation
-   requires proven dependency and ownership independence. Name safe parallel pairs;
-   if none exist, say so and identify read-only preparation or gates that can overlap.
+6. Fetch and reconcile current main, then read applicable repository policy, system
+   plan, target milestone contract, requirements, contracts, decisions, findings,
+   approved lane specs, and predecessor handoffs. Prove the target HRM has a defined
+   outcome, review questions, closure criteria, authority envelope, activation posture,
+   and approved lane bundle.
+7. Record the lifecycle `planned -> executing -> review_ready -> in_review ->
+   remediation -> awaiting_closure -> closed|deferred|blocked`. `review_ready` is a
+   prepared human checkpoint, not completion or approval. Do not release or begin work
+   assigned to a later HRM while this milestone remains open.
+8. When completion mode is enabled, record one adoption SHA on main and treat earlier
+   history as the legacy baseline. Reconcile contradictory rules once in a register,
+   including lane versus change-unit granularity, documentation publication, business
+   approval versus merge authority, draft versus implementation-ready state, integration
+   mode, and merge method. Build a completion manifest mapping every named lane or change
+   unit to complete, deferred, cancelled, blocked_external, or active. Do not rewrite old
+   merges, rename established lane IDs, or backfill historical evidence. Apply the new
+   contract prospectively to open and future changes.
+9. Maintain an operator-facing milestone banner throughout the session: system, current
+   HRM, target HRM, milestone outcome, capabilities complete, capabilities remaining,
+   blockers, decisions requested, activation posture, integrated head, and next action.
+   Lane progress is supporting detail beneath this view.
+
+PLAN THE APPROVED BUNDLE ONCE
+
+10. Reconcile origin/main, worktrees, branches, PRs, CI, lane states, dependencies, and
+    file ownership for the approved bundle. A manual bundle may narrow execution but may
+    not silently replace the canonical milestone contract.
+11. Record each lane's requirement and milestone coverage, contract, state, dependencies,
+    base, worktree, branch, owned files, checker, validation class, risk, reviewer policy,
+    PR/head, merge policy, policy SHA, order, cleanup disposition, timing, exception
+    class, and next action in the milestone-session ledger.
+12. Classify lanes as QUICK, SERIAL, PARALLEL, or CRITICAL. Parallel implementation
+    requires proven dependency and ownership independence. Name safe parallel pairs;
+    otherwise overlap only read-only preparation, CI, review, or acceptance setup.
 
 PROVE READINESS BEFORE CODING
 
-7. A read-only contract auditor must reconcile the next eligible lane against current
-   main before a builder starts. Prove that its sources/adapters, reads, write gates,
-   transition and recovery hooks, session/completion rules, outbox/artifact ownership,
-   allowed files, policies, provider state, checker, and human acceptance artifact are
-   explicit and implementable. Confirm secrets, PII, mutation, rollback, and read-back
-   boundaries.
-8. Complete the exact test plan below, then mark the lane READY, READY WITH APPROVED
-   AMENDMENT, or BLOCKED. A merely planned, contradictory, unknown-contract, or test-
-   unspecified lane does not enter implementation.
-9. Batch all foreseeable gaps into one approval packet: observed reality, proposed
-   contract amendment, effects, files/owners, alternatives, safe default, and
-   recommendation. Ask once, then update the authoritative contract before building.
-   Design lane checkers to be risk-scaled. An existing mandatory lane checker remains
-   binding; never silently skip it. If it is disproportionate, prepare one explicit
-   lane-doc amendment for approval instead of repeatedly bypassing or running it.
+13. A read-only contract audit must reconcile each next eligible lane against current
+    main and the target HRM. Prove its sources/adapters, reads, write gates, transition
+    and recovery hooks, session/completion rules, outbox/artifact ownership, allowed
+    files, policies, provider state, checker, test plan, and milestone acceptance
+    contribution are explicit and implementable. Confirm secrets, PII, mutation,
+    rollback, and read-back boundaries.
+14. Complete the exact test plan below, then mark the lane READY, READY WITH APPROVED
+    AMENDMENT, or BLOCKED. A merely planned, contradictory, unknown-contract, or test-
+    unspecified lane does not enter implementation.
+15. Batch foreseeable gaps into one amendment packet: observed reality, effect on the
+    target HRM, proposed correction, files/owners, alternatives, safe default, and
+    recommendation. Return the packet to the system-build playbook. An existing mandatory
+    checker remains binding; if disproportionate, amend the lane contract explicitly
+    instead of silently bypassing or repeatedly running it.
 
 SELECT THE EXACT TEST PLAN
 
@@ -238,18 +361,20 @@ change to the contract and human acceptance.
 
 RUN THE FASTEST SAFE FLOW
 
-10. Assign one builder per released lane. Multiple builders may run only for lanes
+16. Assign one builder per released lane. Multiple builders may run only for lanes
     proved PARALLEL and READY. During serial work, use a free slot for the next lane's
     read-only readiness audit, checker preparation, or acceptance scenarios.
-11. Builders stay inside approved files and behavior, preserve safety seams and human
+17. Builders stay inside approved files and behavior, preserve safety seams and human
     control, add tests, and run focused checks. An undeclared file, policy, dependency,
-    contract, or external write returns to the coordinator as a scope divergence.
-12. During active human UI/UX design, keep one preview live and batch operator feedback.
+    contract, HRM obligation, or external write returns to the coordinator as a scope
+    divergence; it is not absorbed into the active lane.
+18. During active human UI/UX design, keep one preview live and batch operator feedback.
     Do not freeze a candidate, start exact-head review, push a candidate commit, or run
     a repository-wide suite after each presentational adjustment. Apply the batch through
     hot reload, retain the operator's design feedback as iteration history, and freeze
-    only when the operator declares the design batch ready.
-13. At candidate freeze—or the operator-declared design freeze for a UI lane—classify
+    only when the operator declares the design batch ready. These previews are informal
+    checkpoints inside the milestone session and do not open or close the HRM.
+19. At candidate freeze—or the operator-declared design freeze for a UI lane—classify
     the final diff and apply its validation class:
 
     - UI PRESENTATION — CSS, spacing, static wording, labels, visual grouping, or button
@@ -274,14 +399,14 @@ RUN THE FASTEST SAFE FLOW
     - RELEASE BUNDLE — several merged lanes approaching activation. It has no design-
       iteration validation; run the full suite once against the integrated exact head.
 
-14. Freeze one acceptance commit, verify its ownership boundary, run the applicable
+20. Freeze one acceptance commit, verify its ownership boundary, run the applicable
     checks plus every still-mandatory lane checker, push, and bind the PR body, human
     acceptance, automated evidence, and required review to the candidate head SHA.
-15. Run applicable CI and risk-scaled exact-head review concurrently. Blocking findings
+21. Run applicable CI and risk-scaled exact-head review concurrently. Blocking findings
     require a violated invariant plus a reproduction, failing test, or concrete contract
     mismatch. A presentation-only lane needs lightweight automated visual/accessibility
     evidence and operator approval, not an independent code reviewer.
-16. A repository-wide suite is required only when at least one of these is true:
+22. A repository-wide suite is required only when at least one of these is true:
 
     - shared domain, contract, persistence, authentication, or provider code changed;
     - a public API, schema, state transition, or dependency changed;
@@ -294,129 +419,333 @@ RUN THE FASTEST SAFE FLOW
     CSS, static wording, layout, responsive spacing, and bounded control simplification
     do not independently trigger a full suite. Escalate immediately if targeted checks
     show that a supposedly isolated UI change is coupled to deeper behavior.
-17. Deduplicate and reproduce findings, then send one correction batch. A new commit
+23. Deduplicate and reproduce findings, then send one correction batch. A new commit
     makes the prior SHA no longer the exact head and invalidates evidence or approval
     that claims that candidate or covers its changed surface; it does not erase reusable
     contract facts or operator feedback from design iteration. Reclassify the new diff
     and rerun only its applicable checks and reviews. After two material correction
     rounds, stop patch cycling and reassess readiness, decomposition, and contract.
 
-PREPARE HUMAN ACCEPTANCE
+INTEGRATE AND VERIFY
 
-18. Interrupt the human only for one batched contract/scope decision; a prepared UI,
-    UX, or functional review; an unresolved authority decision; or action-time approval
-    for a canary, external/production mutation, deployment, or irreversible migration.
-19. During UI design, present the live working tree as an explicitly non-frozen preview
-    and collect feedback in batches. At freeze, present the exact head and only the
-    needed judgment with expected outcomes, known limits, safety state, and a suitable
-    artifact: running local UI plus script, deterministic functional scenarios, or
-    mutation-disabled provider dry run/read-back. Prior discussion, iteration feedback,
-    a lane doc, or a general instruction to finish is not action-time approval for an
-    external or irreversible operation.
+24. A PR is ELIGIBLE only when its current base, merge policy, lane contract, target-HRM
+    coverage, dependencies, scope, mandatory exact-head checks, review policy, protected
+    paths, current head SHA, and clean merge state all pass. `Ready for review` means
+    implementation completeness, not business approval or milestone closure.
+25. Use exactly one integration writer: a hosted merge queue, deterministic expected-head
+    controller, or coordinator in manual mode. The merge call must bind the expected
+    head SHA and record checked base/head, policy version, CI run, review/audit evidence,
+    merge identity, operator, and decision mode. A reasoning task supervises exceptions;
+    it does not race the integration writer.
+26. Marking an implementation-complete PR ready, applying routine labels, updating a
+    clean base, retrying one transient CI failure, enabling auto-merge, merging an
+    eligible PR, recording evidence, and removing its eligible worktree are preauthorized
+    only when repository policy and standing merge authority allow them. Keep merge
+    authority separate from business, milestone, canary, deployment, and production
+    authority.
+27. If a branch is behind but clean, update and recheck it according to project policy.
+    Classify unresolved conditions as needs-human-ci, needs-human-conflict,
+    needs-human-governance, needs-human-evidence, or controller-stuck. Never weaken a
+    check, auto-resolve a content conflict, invent evidence, or merge under stale state.
+28. Before every serialized merge decision, fetch and re-read origin/main and verify the
+    head and gates. Merge one dependency-ordered candidate, read back the remote merge
+    and main SHA, wait for required post-merge CI, and record a compact handoff before
+    releasing the next. Reconcile any ambiguous mutation result before retrying.
 
-SERIALIZE AND VERIFY MERGES
+PREPARE AND REVIEW THE TARGET HRM
 
-20. One coordinator is the only merger. A PR is READY TO MERGE only when its exact
-    head has all applicable checks, every mandatory checker, required CI, risk-scaled
-    review, human approval, scope, ownership, and dependencies. Git supplies merge
-    primitives; the coordinator is the queue unless a hosted merge queue is explicitly
-    enabled.
-21. Before every merge, fetch and re-read origin/main and verify the PR head and gates.
-    Merge one PR, read back the remote merge/main SHA, wait for required post-merge CI,
-    and record a compact handoff before releasing the next. Reconcile any ambiguous
-    mutation result before retrying.
+29. Once the approved bundle is integrated, validate the integrated exact head. For a
+    bundle of lighter-weight lanes, run scoped lane checks and one combined regression
+    suite at this boundary when the milestone contract or full-suite triggers require
+    it. Run the full suite again before any production canary or release.
+30. Publish one milestone review package containing the system and target HRM; milestone
+    outcome and decisions requested; capabilities completed in operator language; exact
+    integrated revision and configuration; live preview or deterministic scenarios;
+    tests aggregated by validation class; limitations and blockers; external-mutation
+    and activation posture; cleanup/integration receipt; provisional downstream impact;
+    and the exact effect of closure. Move the session to REVIEW READY and pause for the
+    operator. A visible UI, completed lane list, or ended meeting is not HRM closure.
+31. Interrupt the human only for a prepared milestone/UI/UX/functional review; one
+    batched scope, policy, or contract decision; persistent CI or content conflict;
+    missing or contradictory evidence; protected governance change; unresolved
+    authority; or action-time approval for a canary, external/production mutation,
+    deployment, credential/permission change, or irreversible migration. Routine merge
+    and cleanup operations within standing authority are not human gates.
+32. Record review findings append-only with stable identifiers and return them to the
+    system-build playbook for classification. Verified defects against already-approved
+    requirements may become published remediation lanes and execute without another
+    scope decision. Missing functions, policy or authority changes, new persistence or
+    external effects, or changed milestone outcomes require one batched operator approval.
+33. Keep the same milestone session and target HRM through approved remediation. Pause
+    downstream work, execute only the published remediation bundle, revalidate affected
+    evidence, rebaseline downstream specifications, and republish the review package.
+    Do not silently enlarge the original lane or start a new milestone session.
+34. Close or defer the HRM only on the operator's explicit decision after every finding
+    has a classification, owner, blocking status, disposition, and required evidence.
+    Closure makes the next approved bundle eligible but does not start it. HRM closure
+    never by itself authorizes a canary, provider write, deployment, migration, or
+    production activation.
+
+CLOSE AND CLEAN WORKTREES
+
+35. After each lane's remote-main and required post-merge checks are verified, inventory
+    this project only with `git worktree list --porcelain`. Resolve every path to an exact
+    absolute path under the current repository's registered worktrees. Never scan, prune,
+    switch, or delete a sibling repository or a broad parent directory. Move the lane to
+    CLEANUP PENDING; mark it COMPLETE only after the worktree is removed or retained with
+    an exact, evidence-backed reason.
+36. A lane worktree is automatically eligible for removal only when all are true:
+
+    - the lane is terminal and its exact merge/main SHA was read back from the remote;
+    - the branch head is an ancestor of `origin/main`; or a squash/cherry-pick merge has
+      authoritative merged-PR read-back plus exact proof that every lane commit and owned-
+      path change is incorporated or explicitly superseded on `origin/main`;
+    - staged, unstaged, and untracked status is empty, and no nested repository/submodule
+      contains uncommitted work;
+    - ignored paths contain no non-reproducible review artifacts, training data, evidence,
+      databases, exports, or operator files; disposable caches/dependencies are removable
+      only when repository policy identifies them as reproducible;
+    - no user-owned process, active milestone preview, or live review session depends on
+      the worktree; and
+    - the worktree is neither locked nor the designated primary checkout.
+
+37. Dirty or ambiguous means RETAIN. Inspect staged, unstaged, untracked, ignored,
+    submodule, and nested-repository state. Compare with `origin/main` when useful, but
+    never assume a merged branch makes later working-tree changes disposable. Do not
+    reset, clean, stash, overwrite, switch away, or use forced worktree removal. Record
+    the exact unique diff/artifact or unresolved condition and the next recovery action.
+38. Before removing an eligible worktree, stop only task-owned preview/test processes
+    whose command and working directory identify that exact path. Do not kill a user-owned
+    or ambiguous process. Use `git worktree remove <exact-absolute-path>` without `--force`;
+    never use recursive filesystem deletion. Read back that the path is absent and run
+    `git worktree prune` only for this repository's stale administrative records.
+39. Worktree removal does not authorize local or remote branch deletion. Delete a branch
+    only when repository policy separately requires it and remote merge/read-back plus
+    unique-work checks pass. Otherwise preserve the branch reference; folder cleanup is
+    complete without branch deletion.
+40. At milestone closure or deferral, normalize the designated primary checkout. First
+    retain any worktree still hosting operator review evidence until that evidence has a
+    durable approved home, then verify the primary checkout has no
+    staged, unstaged, untracked, nested-repository, or preservation-sensitive ignored
+    work. If `main` is held by an eligible clean temporary worktree, remove that temporary
+    worktree first. Then switch the primary checkout to `main`, fetch, and run a fast-
+    forward-only pull from `origin main`. Never reset, force-switch, stash, or discard to
+    make the primary checkout clean. If it is dirty or unmerged, retain it and report the
+    blocker instead of moving it.
+41. Finish with a project-scoped cleanup receipt: worktrees removed with merge proof;
+    worktrees retained with exact dirty/unmerged/locked/process/artifact reason; primary
+    checkout path, branch, local SHA, remote SHA, clean status, and pull result; pruned
+    administrative entries; preserved branches; and confirmation that no other project
+    was touched. Do not claim complete cleanup while an unexplained worktree remains.
+
+SUPERVISE AND HAND OFF
+
+42. Durable state lives in live Git/hosting state, repository policy at main, checked-in
+    milestone/change records, and one milestone-session ledger, in that order. Task
+    context is a cache, not the audit record. Remain quiet while routine integration is
+    healthy; alert only for a classified exception, the prepared HRM, reserved authority,
+    or controller failure.
+43. Rotate a long-running supervisor at configured limits, defaulting to 20 merge
+    decisions, 14 days, 3 exception investigations, policy-version change, context
+    compaction, or inability to reconstruct state from live evidence. Reconcile live
+    state, record exact heads and next actions, and ensure exactly one integration writer
+    survives the handoff.
 
 MEASURE AND REPORT
 
-22. Timestamp readiness, build, UI iteration, design freeze, check, CI/review, correction
-    rounds, human wait, merge, and post-merge verification. Separate active, automated-
-    wait, and human-wait time.
-23. Report completed, blocked, and unmerged lanes separately with branch, PR, final
-    head, validation class, gates, correction rounds, human decision, merge/main SHA,
-    external mutations, elapsed-time breakdown, and next action. State the critical
-    path, useful parallel work, avoidable delay, and one process improvement for the
-    next run.
-24. For a queue of lighter-weight lanes, use scoped lane checks and one combined full-
-    suite run after integration. Run the full suite again before any production canary
-    or release.
-25. Never describe a draft, local test, notification, proposal, visible UI, or queued
-    merge as merged, deployed, activated, or production-verified evidence.
+44. Timestamp session readiness, lane readiness/build, UI iteration, design freeze,
+    checks, CI/review, corrections, integration, milestone-review readiness, human wait,
+    remediation, closure, post-merge verification, and cleanup. Separate active,
+    automated-wait, and human-wait time.
+45. Report the target HRM first: outcome, status, capabilities complete/remaining,
+    review decisions, findings, integrated head, activation posture, closure effect, and
+    next action. Report completed, blocked, deferred, cancelled, blocked-external, and
+    unmerged lanes as supporting detail with branch, PR, exact head, validation evidence,
+    merge/main SHA, cleanup disposition, external mutations, and timing.
+46. State the critical path, useful parallel work, avoidable delay, routine interruptions
+    avoided, and one improvement for the next milestone session. Never describe a draft,
+    local test, notification, proposal, visible UI, queued merge, or closed planning gate
+    as merged, deployed, activated, or production-verified evidence.
 ```
 
 ## Machine-readable ledger contract
 
 ```yaml
-lane:
-  id: "{{lane_id}}"
-  state: "queued|readiness_audit|blocked_contract|awaiting_amendment_approval|ready_to_build|building|design_iteration|candidate_frozen|checking|reviewing|correcting|awaiting_human_acceptance|ready_to_merge|merging|verifying_main|complete|blocked"
-  classification: "quick|serial|parallel|critical"
-  validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
-  design_phase: "not_applicable|iterating|frozen"
-  contract: "{{path}}"
-  dependencies: []
-  base_sha: null
-  worktree: null
-  branch: null
-  allowed_files: []
-  checker: null
-  test_plan:
-    changed_surfaces: []
-    affected_consumers: []
-    changed_invariants: []
-    risk_modifiers: []
-    acceptance_coverage:
-      - criterion: "{{criterion}}"
-        positive_check_ids: []
-        negative_check_ids: []
-        boundary_check_ids: []
-    checks:
-      - id: "{{check_id}}"
-        surface: "{{changed_surface}}"
-        phase: "iteration|frozen_candidate|integrated_release"
-        command_or_scenario: "{{exact_command_or_scenario}}"
-        expected_signal: "{{expected_result}}"
-        artifact: "{{artifact_or_log}}"
-        timeout_seconds: null
-        fixtures_environment: "{{isolated_fixture_and_runtime}}"
-        mutation_safety: "none|fake|disposable_local|dry_run|approved_live"
-    not_applicable:
-      - category: "{{test_category}}"
-        reason: "{{bounded_reason}}"
-    full_suite:
-      required: false
-      triggers: []
-    base_reproduction: null
-    execution_reconciliation:
-      candidate_head_sha: null
-      passed: []
-      failed: []
-      skipped: []
-      timed_out: []
-      new_warnings: []
-  reviewer_requirement: null
-  reviewer_count: null
-  deterministic_review_scenario: null
-  human_milestone: null
-  operator_design_ready: false
-  pr: null
-  candidate_head_sha: null
-  correction_round: 0
-  merge_sha: null
-  main_sha: null
-  external_mutations: 0
-  next_authorized_action: readiness_audit
-  timing:
-    readiness_started_at: null
-    readiness_finished_at: null
-    build_started_at: null
-    candidate_frozen_at: null
-    human_wait_seconds: 0
-    automated_wait_seconds: 0
-    completed_at: null
+milestone_session:
+  id: "{{session_id}}"
+  system_reference: "{{system_reference}}"
+  current_hrm: null
+  target_hrm: "{{target_hrm}}"
+  milestone_contract: "{{path}}"
+  milestone_outcome: "{{operator_visible_outcome}}"
+  status: "planned|executing|review_ready|in_review|remediation|awaiting_closure|closed|deferred|blocked"
+  review_questions: []
+  closure_criteria: []
+  authority_envelope:
+    planning_changes: false
+    routine_code_integration: false
+    provider_writes: false
+    canary: false
+    deployment: false
+    production_activation: false
+    destructive_migration: false
+    credential_or_permission_change: false
+  activation_posture: "local|read_only|shadow|canary|enabled"
+  operator_banner:
+    capabilities_complete: []
+    capabilities_remaining: []
+    blockers: []
+    decisions_requested: []
+    integrated_head_sha: null
+    next_action: null
+  approved_lane_bundle: []
+  manual_lane_constraint: []
+  completion_mode: false
+  adoption_sha: null
+  legacy_baseline_sha: null
+  policy_sha: null
+  contradictions: []
+  completion_manifest:
+    complete: []
+    deferred: []
+    cancelled: []
+    blocked_external: []
+    active: []
+  operating_profile: "one-human|two-human|many-collaborators"
+  integration:
+    mode: "manual|expected-head-controller|hosted-merge-queue"
+    writer: null
+    standing_merge_authority: null
+    protected_governance_paths: []
+  review_package:
+    status: "not_started|draft|published|superseded|accepted|deferred"
+    path_or_url: null
+    review_head_sha: null
+    configuration_profile: null
+    scenarios: []
+    known_limitations: []
+    test_evidence: []
+    external_mutations: 0
+    closure_effect: null
+  findings:
+    ledger: null
+    open: []
+    blocking: []
+    remediation_bundle: []
+  closure:
+    decision: "pending|closed|deferred"
+    decided_by: null
+    decided_at: null
+    rationale: null
+    released_next_bundle: []
+  supervisor:
+    generation: 1
+    task_id: null
+    ledger_url: null
+    decisions_supervised: 0
+    exception_investigations: 0
+    rotate_after_decisions: 20
+    rotate_after_days: 14
+    rotate_after_exceptions: 3
+
+lanes:
+  - id: "{{lane_id}}"
+    change_id: "{{change_id_or_lane_id}}"
+    assigned_hrm: "{{target_hrm}}"
+    milestone_contribution: []
+    state: "queued|readiness_audit|blocked_contract|awaiting_amendment_approval|ready_to_build|building|design_iteration|candidate_frozen|checking|reviewing|correcting|eligible|merging|verifying_main|cleanup_pending|complete|deferred|cancelled|blocked_external|blocked"
+    classification: "quick|serial|parallel|critical"
+    validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
+    design_phase: "not_applicable|iterating|frozen"
+    contract: "{{path}}"
+    dependencies: []
+    base_sha: null
+    worktree: null
+    branch: null
+    allowed_files: []
+    checker: null
+    test_plan:
+      changed_surfaces: []
+      affected_consumers: []
+      changed_invariants: []
+      risk_modifiers: []
+      acceptance_coverage:
+        - criterion: "{{criterion}}"
+          positive_check_ids: []
+          negative_check_ids: []
+          boundary_check_ids: []
+      checks:
+        - id: "{{check_id}}"
+          phase: "iteration|frozen_candidate|integrated_release"
+          command_or_scenario: "{{exact_command_or_scenario}}"
+          expected_signal: "{{expected_result}}"
+          artifact: "{{artifact_or_log}}"
+          mutation_safety: "none|fake|disposable_local|dry_run|approved_live"
+      not_applicable: []
+      full_suite:
+        required: false
+        triggers: []
+      execution_reconciliation:
+        candidate_head_sha: null
+        passed: []
+        failed: []
+        skipped: []
+        timed_out: []
+        new_warnings: []
+    reviewer_requirement: null
+    deterministic_review_scenario: null
+    pr: null
+    candidate_head_sha: null
+    checked_base_sha: null
+    checked_head_sha: null
+    implementation_complete: false
+    handoff_complete: false
+    merge_policy: "automatic|human"
+    policy_sha: null
+    exception_class: null
+    correction_round: 0
+    merge_sha: null
+    main_sha: null
+    external_mutations: 0
+    worktree_cleanup:
+      candidate_path: null
+      merge_proof: "ancestor|merged_pr_content_equivalence|unproved"
+      status_clean: false
+      nested_repositories_clean: false
+      ignored_audit_complete: false
+      preservation_sensitive_ignored_paths: []
+      process_audit_complete: false
+      active_milestone_preview: false
+      locked: false
+      eligible: false
+      disposition: "pending|removed|retained_dirty|retained_unmerged|retained_locked|retained_process|retained_artifact|retained_preview|retained_primary|blocked"
+      retained_reason: null
+      path_absent_readback: false
+      branch_preserved: true
+    next_authorized_action: readiness_audit
+
+milestone_cleanup:
+  policy: automatic_after_verified_merge
+  project_root: null
+  primary_checkout: null
+  expected_main_sha: null
+  local_main_sha: null
+  remote_main_sha: null
+  primary_checkout_clean: false
+  fast_forward_pull: "pending|passed|blocked"
+  removed_worktrees: []
+  retained_worktrees:
+    - path: null
+      reason: null
+      recovery_action: null
+  pruned_administrative_entries: []
+  preserved_branches: []
+  no_other_project_touched: false
 ```
 
 ## Change note
 
+- **3.0 — 2026-08-21:** Makes the target HRM the work-session objective and lanes derived execution units; adds milestone readiness/review/remediation/closure states, operator-facing milestone reporting, prospective completion baselines, contradiction handling, operating profiles, deterministic single-writer integration, exception-only interruption, durable supervision, and safe project-scoped worktree cleanup. HRM closure remains separate from canary, deployment, provider-write, migration, and production authority.
 - **2.2 — 2026-08-21:** Adds behavior-and-reach test selection with exact command/scenario planning, required checks for CSS/markup, JavaScript, backend logic, data transformations and datasets, persistence/migrations, private refactors, shared core/dependencies, APIs/providers, configuration, and documentation, plus cross-cutting risk modifiers, base-vs-head failure handling, and planned-versus-executed evidence reconciliation.
 - **2.1 — 2026-08-21:** Separates live HOTL UI iteration from a frozen acceptance candidate; adds validation classes, explicit full-suite triggers, risk-scaled review, proportional SHA evidence invalidation, and integrated-head regression backstops while preserving mandatory lane checkers and critical integration gates.
 - **2.0 — 2026-08-18:** Adds a pre-build readiness audit, one batched amendment packet, explicit serial/parallel classification, bounded coordinator/reviewer roles, consolidated corrections with a two-round reassessment threshold, prepared acceptance, phase timing, and critical-path reporting.
