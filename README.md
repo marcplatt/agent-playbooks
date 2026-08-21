@@ -23,6 +23,13 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 |---|---|
 | [Lane Planning and Execution Standard](playbooks/lane-coordination-standard.md) | Plan and execute a bounded queue of existing lanes with an implementation-readiness gate, behavior-and-reach test planning, live HOTL design batching, risk-scaled exact-head validation, prepared human review, and serialized merges. |
 
+## Draft playbooks
+
+| Playbook | Use |
+|---|---|
+| [Master-Plan Policy Amendment and Propagation](playbooks/master-plan-policy-amendment.md) | Elicit and version one or more policy amendments, determine implied contract and authority changes, and propagate approved records through every registered affected repository. |
+| [Bidirectional Master-Plan Repository Polling and Lane Intake](playbooks/master-plan-repository-polling.md) | Run one task per application repository to turn accepted master-plan changes into mirrors/lanes and merged repository changes into implementation receipts, evidence pointers, drift findings, or amendment proposals. |
+
 ## Using a playbook
 
 1. Open the selected playbook and supply its required inputs.
