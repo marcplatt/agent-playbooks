@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "1.1"
+version: "1.2"
 status: active
 owner: Alpine Structures
 mode: hrm-directed-system-build
@@ -10,6 +10,9 @@ machine_readable: true
 required_inputs: [system_reference, target_hrm, milestone_outcome]
 optional_inputs:
   - project_hrm_map
+  - implementation_manifest
+  - brownfield_capability_inventory
+  - system_node_registry
   - project_root
   - current_hrm
   - review_questions
@@ -28,6 +31,11 @@ controls:
   - target-hrm-first
   - project-defined-milestones
   - milestone-contract-before-implementation
+  - independently-closable-hrm
+  - brownfield-capability-parity
+  - first-class-standalone-system-nodes
+  - explicit-input-boundary-disposition
+  - manual-lane-constraint-cannot-suppress-planning
   - authority-and-provenance
   - scenario-and-test-matrix-before-decomposition
   - derived-lane-bundle
@@ -74,13 +82,17 @@ The operator should normally need to know only:
 Do not make the operator reconstruct dependencies or enumerate lanes. Keep routine lane
 execution quiet and report progress through the HRM banner. A manual lane
 list may constrain a legacy or recovery session, but it cannot replace the canonical
-system plan, project HRM map, milestone contract, or gap analysis.
+system plan, project HRM map, milestone contract, or gap analysis, and it cannot suppress
+an input record, contract request, discovery, planning amendment, deferral, or blocker.
 
 ## Inputs
 
 - **System or project:** `{{system_reference}}`
 - **Project root:** `{{project_root_or_discover}}`
 - **Project HRM map:** `{{project_hrm_map_or_discover}}`
+- **Implementation manifest:** `{{implementation_manifest_or_discover}}`
+- **Brownfield capability inventory:** `{{brownfield_capability_inventory_or_discover}}`
+- **System-node registry:** `{{system_node_registry_or_discover}}`
 - **Current HRM:** `{{current_hrm_or_discover}}`
 - **Target HRM:** `{{target_hrm}}`
 - **Milestone outcome:** `{{milestone_outcome}}`
@@ -111,7 +123,8 @@ Activation posture: read-only.
 Milestone identifiers are project-defined stable IDs. `HRM-0` through `HRM-4` are useful
 archetypes, not a mandatory universal sequence. A project may define `HRM-O`, repeat a
 workflow milestone, or use a qualified ID when its system plan records the outcome,
-closure authority, prerequisites, and release effect unambiguously.
+activation posture, closure authority, prerequisites, closure effect, and downstream
+release effect unambiguously.
 
 All intended project HRMs must appear in one versioned map at inception, before
 implementation lanes begin. Publication means the control structure is complete; it
@@ -124,8 +137,10 @@ a versioned rebaseline with supersession and downstream impact, not a rewritten 
 | Plan and contract | Outcome, authority, lifecycle, boundaries, contracts, requirements, test architecture, lane map, and milestone schedule are approved. |
 | Read-only vertical slice | Real inputs, interpretation, provenance, safe failure, and missing functions are reviewable without external writes. |
 | Operator workflow | A human can perform realistic work, correct it, and understand controls, states, explanations, and failures. |
-| Controlled canary | One explicitly authorized effect reaches the exact destination and has read-back, reconciliation, receipt, retry, and rollback evidence. |
 | Activation readiness | Permissions, monitoring, privacy, recovery, runbook, support ownership, residual risk, and the separate activation decision are reviewable. |
+| Controlled canary | One explicitly authorized effect reaches the exact destination and has read-back, reconciliation, receipt, retry, and rollback evidence. |
+| Production observation | A separately activated, bounded production window has current health, reconciliation, operator-impact, and rollback evidence. |
+| Autonomy readiness | Lifecycle policy, eligibility, confidence, escalation, monitoring, audit, disablement, and human override are reviewable after sufficient production evidence exists. |
 
 ## Prompt
 
@@ -135,6 +150,9 @@ Advance this system to one Human Review Milestone.
 System: {{system_reference}}.
 Project root: {{project_root_or_discover}}.
 Project HRM map: {{project_hrm_map_or_discover}}.
+Implementation manifest: {{implementation_manifest_or_discover}}.
+Brownfield capability inventory: {{brownfield_capability_inventory_or_discover}}.
+System-node registry: {{system_node_registry_or_discover}}.
 Current HRM: {{current_hrm_or_discover}}.
 Target HRM: {{target_hrm}}.
 Milestone outcome: {{milestone_outcome}}.
@@ -177,22 +195,29 @@ RESOLVE THE TARGET HRM
 
 5. Fetch and reconcile current main and inspect project rules, worktrees, branches, PRs,
    CI, running revisions, system plan, requirements, invariants, policies, contracts,
-   decisions, scenarios, tests, the project-wide HRM map, milestone records, contract-
-   update requests, findings, lanes, and handoffs. Classify
+   decisions, scenarios, tests, the project-wide HRM map, milestone records, implementation
+   manifest, brownfield capability/parity inventory, system-node registry, contract-update
+   requests, input records, findings, lanes, and handoffs. Classify
    material claims as verified-current, historical-needs-revalidation, proposed, or
    unknown-blocked.
 6. Treat milestone IDs as project-defined opaque identifiers. Verify that one canonical,
    versioned map publishes all intended HRMs from planning through activation, with each
    milestone's outcome, prerequisites, review questions/scenarios, evidence freshness,
    in-scope requirements/contracts, activation posture, closure criteria and authority,
-   downstream release effect, and finding/rebaseline policy. Resolve the exact target
-   from that map; do not infer a universal numbered sequence.
+   closure effect, downstream release effect, and finding/rebaseline policy. Resolve the
+   exact target from that map; do not infer a universal numbered sequence. Reject or split
+   an umbrella objective such as `production ready`, `complete`, or `fully autonomous`
+   when it combines operator workflow, activation readiness, canary, production
+   observation, or later autonomy. One operator decision must be able to close the HRM.
 7. If the complete map is absent, the target is missing/inadequate, or a future HRM is
-   only an informal lane label, stop implementation. Propose one consolidated project-
-   planning amendment that publishes or repairs the full HRM journey. Preserve unknowns
-   as `unknown-blocked`. Obtain the required operator approval and publish the map before
-   deriving implementation lanes. For an existing project, apply this prospectively and
-   do not manufacture historical HRM evidence.
+   only an informal lane label, stop implementation. The same stop applies when the
+   system plan, target milestone contract, requirements ledger, implementation manifest,
+   `CTRQ` surface, affected brownfield capability inventory, or system-node registry is
+   absent. Propose one consolidated planning amendment that publishes or repairs the
+   canonical package and full HRM journey. Preserve unknowns as `unknown-blocked`. Obtain
+   required operator approval and publish the package before deriving implementation
+   lanes. For an existing project, apply this prospectively and do not manufacture
+   historical HRM evidence.
 8. Determine the last explicitly closed or deferred milestone from durable records. A
    review meeting, merged lane, local preview, green suite, or completed implementation
    is not evidence that an HRM closed.
@@ -205,13 +230,16 @@ CREATE THE MILESTONE SESSION CONTRACT
    - project HRM map path, version, and target entry;
    - current and target HRM;
    - operator-visible outcome and review questions;
-   - prerequisites and closure criteria;
+   - independently closable decision, prerequisites, closure criteria, closure effect,
+     and downstream release effect;
    - requirements, invariants, policies, contracts, and acceptance scenarios in scope;
    - authority envelope and exact activation posture;
    - evidence freshness requirements and authoritative sources;
    - expected review artifact and configuration;
    - finding classifications and remediation rules;
    - open, resolved, and blocking contract-update requests;
+   - open input requirements and primary dispositions;
+   - brownfield parity obligations and affected system nodes;
    - provisional downstream effects; and
    - primary checkout and cleanup policy.
 
@@ -229,14 +257,23 @@ CREATE THE MILESTONE SESSION CONTRACT
     Record one adoption SHA, preserve established IDs and history, build a contradiction
     register, and map every named lane or change unit to complete, deferred, cancelled,
     blocked_external, or active. Apply the new session contract to open and future work.
-    Do not rewrite historical merges or manufacture missing evidence.
+    Do not rewrite historical merges or manufacture missing evidence. Before changing an
+    established operator surface, inventory every current control, journey, disclosure,
+    correction/recovery path, and audit surface as required operator workflow, advanced
+    operator capability, developer/audit capability, intentionally superseded, or unknown.
+    Bind the target HRM to a required parity set and approved removals/relocations.
 
 ANALYZE THE SYSTEM BEFORE LANES
 
 13. Trace the outcome end to end through actors, authority, provenance, states, storage,
     APIs/providers, failure/retry/recovery, privacy, observability, and activation. Map
     every relevant requirement and invariant to a human-readable positive, negative,
-    and boundary scenario where applicable.
+    and boundary scenario where applicable. Register every executable component as a
+    first-class system node even when it is local, standalone, manually installed,
+    outside Git, or governed by a non-PR workflow. Record contract and deployment owners,
+    canonical location/workflow, versioned interfaces, readiness/compatibility evidence,
+    topology, configuration, start/restart, health, monitoring, recovery, rollback, and
+    read-back/reconciliation. Never model a standalone bridge as a consumer worktree.
 14. Compare the target contract with verified current behavior and evidence. Record each
     gap as already satisfied, implementation needed, discovery needed, human decision
     needed, contract update needed, blocked external, or accepted limitation. Resolve
@@ -244,13 +281,22 @@ ANALYZE THE SYSTEM BEFORE LANES
     disabled. For a missing or inadequate inter-system promise, create a stable `CTRQ`
     contract-update request addressed to the owning system. The request may state the
     observed gap, affected HRMs, required decision, safe default, and evidence needed; it
-    must not invent or adopt the missing answer.
+    must not invent or adopt the missing answer. For every input requirement, freeze the
+    smallest boundary and record a stable input ID, exact observation, affected HRM and
+    requirement/scenario, safe posture, evidence, owner, consequence, and proven-
+    independent permitted work. Assign one primary disposition: human decision, `CTRQ`,
+    read-only discovery, planning amendment/rebaseline, accepted limitation, named-HRM
+    deferral, or `blocked_external`.
 15. Freeze only affected boundaries when evidence changes. A new product outcome, policy,
     schema meaning, persistence model, provider mutation, public contract, or activation
     step requires a planning amendment; it is not an implementation inference. The
     coordinator may publish a documentation-only `CTRQ` under standing repository rules,
     but adoption of new business meaning, authority, compatibility, or external effects
-    remains an operator decision.
+    remains an operator decision. A manual or legacy lane constraint cannot suppress any
+    required input record or disposition and cannot force a later observation/autonomy
+    lane to remain active before its prerequisites exist. An exact-head review that
+    reproduces a real defect and fails closed is healthy implementation review; preserve
+    that stop while separately assessing any contributing planning or decomposition gap.
 
 DESIGN TEST COVERAGE BEFORE DECOMPOSITION
 
@@ -317,7 +363,10 @@ DERIVE AND PUBLISH THE LANE BUNDLE
     acceptance, hard stops, handoff, and assigned target HRM.
 21. Use dependency and file-ownership evidence to mark lanes serial or safely parallel.
     A manual lane constraint may narrow the proposal, but if it leaves the HRM outcome
-    unsatisfied, report the gap rather than pretending the milestone is reachable.
+    unsatisfied, report the gap rather than pretending the milestone is reachable. Do not
+    stuff missing planning, contract, bridge readiness, or later-HRM work into a catch-all
+    lane merely to preserve the supplied queue. Reclassify, defer, block, or add bounded
+    lanes and records through the system-build contract as required.
 22. When the bundle preserves the published HRM outcome, contract meaning, authority,
     activation posture, and review surface, derive and publish its canonical lane records
     through the repository-approved integration path under standing planning authority;
@@ -345,7 +394,10 @@ RUN PREVIEWS AND THE FORMAL REVIEW
     - exact integrated revision, configuration, data window, and activation posture;
     - live preview or deterministic review scenarios and expected outcomes;
     - test evidence aggregated by change and risk class;
+    - brownfield capability/parity evidence and approved exceptions;
+    - affected standalone/local system-node readiness and deployment boundaries;
     - known limitations, blockers, and unresolved questions;
+    - open input requirements and their primary dispositions;
     - open, resolved, and blocking contract-update requests;
     - external-mutation count and boundary/read-back evidence;
     - cleanup and integration receipt;
@@ -410,11 +462,15 @@ system_build_session:
   project_root: "{{absolute_path}}"
   source_documents:
     system_plan: null
+    implementation_manifest: null
+    brownfield_capability_inventory: null
+    system_node_registry: null
     requirements: []
     contracts: []
     decisions: []
     milestones: []
     findings: []
+    input_records: []
   hrm_map:
     path: "{{path}}"
     version: "{{version}}"
@@ -429,10 +485,14 @@ system_build_session:
     title: "{{title}}"
     milestone_contract: "{{path}}"
     outcome: "{{milestone_outcome}}"
+    closability:
+      independently_closable: false
+      composite_states: []
     review_questions: []
     prerequisites: []
     closure_criteria: []
     closure_authority: human_operator
+    closure_effect: null
     release_effect: null
   status: "resolving|defining|bundle_derivation|executing|review_ready|in_review|remediation|awaiting_closure|closed|deferred|blocked"
   authority_envelope:
@@ -456,6 +516,25 @@ system_build_session:
       cancelled: []
       blocked_external: []
       active: []
+  brownfield_parity:
+    required_operator_capabilities: []
+    advanced_operator_capabilities: []
+    developer_or_audit_capabilities: []
+    intentionally_superseded: []
+    unknown: []
+    approved_removals_or_relocations: []
+  system_nodes:
+    - id: "{{system_node_id}}"
+      kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
+      contract_owner: null
+      deployment_owner: null
+      canonical_location: null
+      workflow: "git|non_git|provider_managed|manual|unknown"
+      provided_interfaces: []
+      consumed_interfaces: []
+      readiness_evidence: []
+      topology: null
+      restart_health_recovery_rollback: []
   evidence_gap_analysis:
     verified_satisfied: []
     implementation_needed: []
@@ -494,6 +573,7 @@ system_build_session:
     blockers: []
     decisions_requested: []
     contract_requests: []
+    input_requirements: []
     function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
     integrated_head_sha: null
     next_action: null
@@ -504,6 +584,9 @@ system_build_session:
     configuration_profile: null
     scenarios: []
     test_evidence: []
+    brownfield_parity_evidence: []
+    system_node_readiness: []
+    input_requirements: []
     known_limitations: []
     external_mutations: 0
     cleanup_receipt: null
@@ -517,6 +600,18 @@ system_build_session:
     open: []
     resolved: []
     blocking: []
+  input_requirements:
+    - id: "INP-###"
+      observation: null
+      affected_hrm: "{{target_hrm}}"
+      affected_requirement_or_scenario: []
+      frozen_boundary: null
+      safe_posture: null
+      owner: null
+      consequence_if_unresolved: null
+      permitted_continuation: []
+      disposition: "human_decision|ctrq|read_only_discovery|planning_amendment|accepted_limitation|deferred_to_hrm|blocked_external"
+      disposition_reference: null
   noise_posture:
     routine_lane_updates: quiet
     hrm_stop: noisy
@@ -538,6 +633,11 @@ system_build_session:
 
 ## Change note
 
+- **1.2 — 2026-08-22:** Adds an independently-closable HRM gate that rejects composite
+  `production ready` objectives; requires brownfield capability/parity inventory and
+  first-class standalone/local system-node records; defines stable input-boundary
+  dispositions; prevents manual lane constraints from suppressing planning records; and
+  distinguishes healthy fail-closed exact-head review from upstream planning weakness.
 - **1.1 — 2026-08-21:** Makes the complete project HRM map the inception-time control
   surface; permits autonomous, non-adopting `CTRQ` contract-update requests and routine
   lane derivation under unchanged HRM meaning; keeps lane execution quiet; makes

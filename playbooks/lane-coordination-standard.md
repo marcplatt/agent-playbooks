@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "3.1"
+version: "3.2"
 status: active
 owner: Alpine Structures
 mode: hrm-bundle-execution
@@ -10,6 +10,9 @@ machine_readable: true
 required_inputs: [system_reference, target_hrm, milestone_outcome]
 optional_inputs:
   - project_hrm_map
+  - implementation_manifest
+  - brownfield_capability_inventory
+  - system_node_registry
   - milestone_session_contract
   - published_lane_bundle
   - approved_lane_bundle
@@ -32,9 +35,14 @@ optional_inputs:
 controls:
   - project-rules-first
   - complete-hrm-map-prerequisite
+  - independently-closable-hrm-prerequisite
+  - brownfield-capability-parity
+  - first-class-standalone-system-nodes
+  - explicit-input-boundary-return
   - target-hrm-first
   - published-milestone-bundle
   - no-operator-lane-enumeration
+  - manual-lane-constraint-cannot-suppress-inputs
   - bounded-scope
   - prospective-adoption-baseline
   - contradiction-register
@@ -83,6 +91,9 @@ the operator explicitly closes or defers the target HRM.
 
 - **System or project:** `{{system_reference}}`
 - **Project HRM map:** `{{project_hrm_map_or_session_contract}}`
+- **Implementation manifest:** `{{implementation_manifest_or_session_contract}}`
+- **Brownfield capability inventory:** `{{brownfield_capability_inventory_or_session_contract}}`
+- **System-node registry:** `{{system_node_registry_or_session_contract}}`
 - **Target HRM:** `{{target_hrm}}`
 - **Milestone outcome:** `{{milestone_outcome}}`
 - **Milestone session contract:** `{{milestone_session_contract_or_discover}}`
@@ -129,6 +140,9 @@ Coordinate the published implementation bundle for this milestone session.
 
 System: {{system_reference}}.
 Project HRM map: {{project_hrm_map_or_session_contract}}.
+Implementation manifest: {{implementation_manifest_or_session_contract}}.
+Brownfield capability inventory: {{brownfield_capability_inventory_or_session_contract}}.
+System-node registry: {{system_node_registry_or_session_contract}}.
 Current HRM: {{current_hrm_or_discover}}.
 Target HRM: {{target_hrm}}.
 Milestone outcome: {{milestone_outcome}}.
@@ -154,10 +168,11 @@ Supervisor rotation limits: {{supervisor_rotation_limits_or_default}}.
 The target HRM, not a list of lanes, is the work session's controlling objective. It
 must resolve from the complete, versioned project HRM map published at inception. Obey
 every applicable AGENTS.md, approved system plan, milestone contract, and lane contract.
-Do not ask the operator to enumerate lanes. If the map or target is undefined, the
-bundle is absent, or the bundle cannot plausibly satisfy the milestone outcome, return
-control to the system-build playbook for rebaseline. Do not discover, create, silently
-enlarge, or begin additional lanes in this execution playbook.
+Do not ask the operator to enumerate lanes. If the map or target is undefined or not
+independently closable, the canonical planning package is absent, the bundle is absent,
+or the bundle cannot plausibly satisfy the milestone outcome, return control to the
+system-build playbook for rebaseline. Do not discover, create, silently enlarge, or begin
+additional lanes in this execution playbook. A manual bundle cannot suppress that return.
 
 Use one change unit per branch, dedicated worktree, PR, and merge decision unless the
 owning project explicitly requires otherwise. Treat approved repository policy at the
@@ -193,11 +208,14 @@ ESTABLISH THE MILESTONE SESSION
 
 6. Fetch and reconcile current main, then read applicable repository policy, system
    plan, complete project HRM map and version, target milestone contract, requirements,
-   contracts, contract-update requests, decisions, findings, published lane specs, and
-   predecessor handoffs. Prove the target HRM exists in the map and has a defined outcome,
-   review questions, closure criteria, authority envelope, activation posture, and lane
-   bundle. If the full map is absent or silently incomplete, stop and return a rebaseline
-   request; do not manufacture missing milestones.
+   implementation manifest, contracts, contract-update requests, input records, brownfield
+   capability/parity inventory or explicit not-applicable record, system-node registry,
+   decisions, findings, published lane
+   specs, and predecessor handoffs. Prove the target HRM exists in the map and has one
+   independently closable outcome, review questions, closure criteria, closure effect,
+   authority envelope, activation posture, downstream release effect, and lane bundle.
+   If the canonical package is absent or silently incomplete, stop and return a rebaseline
+   request; do not manufacture missing milestones or bridge readiness.
 7. Record the lifecycle `planned -> executing -> review_ready -> in_review ->
    remediation -> awaiting_closure -> closed|deferred|blocked`. `review_ready` is a
    conspicuous hard human checkpoint, not completion or approval. Do not solve around
@@ -210,7 +228,11 @@ ESTABLISH THE MILESTONE SESSION
    mode, and merge method. Build a completion manifest mapping every named lane or change
    unit to complete, deferred, cancelled, blocked_external, or active. Do not rewrite old
    merges, rename established lane IDs, or backfill historical evidence. Apply the new
-   contract prospectively to open and future changes.
+   contract prospectively to open and future changes. For an affected established UI,
+   require a capability/parity inventory that classifies required operator, advanced
+   operator, developer/audit, intentionally superseded, and unknown capabilities. Do not
+   accept simplification that makes required work unreachable without an approved HRM-
+   level removal or relocation.
 9. Maintain an operator-facing milestone banner throughout the session: system, current
    HRM, target HRM, milestone outcome, capabilities complete, capabilities remaining,
    blockers, contract-update requests, decisions requested, function review state,
@@ -221,8 +243,10 @@ PLAN THE PUBLISHED BUNDLE ONCE
 
 10. Reconcile origin/main, worktrees, branches, PRs, CI, lane states, dependencies, and
     file ownership for the published bundle. A legacy approved bundle or manual bundle
-    may narrow execution but may
-    not silently replace the canonical milestone contract.
+    may narrow execution but may not silently replace the canonical milestone contract,
+    suppress a required input
+    record/disposition, or keep a later production-observation/autonomy lane active before
+    its prerequisites exist.
 11. Record each lane's requirement and milestone coverage, contract, state, dependencies,
     base, worktree, branch, owned files, checker, validation class, risk, reviewer policy,
     PR/head, merge policy, policy SHA, order, cleanup disposition, timing, exception
@@ -238,7 +262,11 @@ PROVE READINESS BEFORE CODING
     and recovery hooks, session/completion rules, outbox/artifact ownership, allowed
     files, policies, provider state, checker, test plan, and milestone acceptance
     contribution are explicit and implementable. Confirm secrets, PII, mutation,
-    rollback, and read-back boundaries.
+    rollback, and read-back boundaries. When a lane touches a standalone, local, manually
+    operated, provider-managed, or non-Git bridge, verify its first-class system-node
+    identity, contract and deployment owners, canonical workflow, versioned interface,
+    readiness evidence, topology, configuration, start/restart, health, recovery,
+    rollback, and reconciliation. Never create a consumer worktree as a proxy for it.
 14. Complete the exact test plan below, then mark the lane READY, READY WITH APPROVED
     AMENDMENT, or BLOCKED. A merely planned, contradictory, unknown-contract, or test-
     unspecified lane does not enter implementation.
@@ -249,7 +277,11 @@ PROVE READINESS BEFORE CODING
     blocks dependent work but never supplies the missing answer. Return material HRM-
     meaning changes to the system-build playbook. An existing mandatory checker remains
     binding; if disproportionate, amend the lane contract explicitly instead of silently
-    bypassing or repeatedly running it.
+    bypassing or repeatedly running it. For any input requirement, freeze the smallest
+    boundary and return a stable record with observation, affected HRM/requirement/scenario,
+    safe posture, evidence, owner, consequence, and permitted independent work. Its primary
+    disposition is human decision, `CTRQ`, read-only discovery, planning amendment,
+    accepted limitation, named-HRM deferral, or `blocked_external`.
 
 SELECT THE EXACT TEST PLAN
 
@@ -387,7 +419,8 @@ RUN THE FASTEST SAFE FLOW
 17. Builders stay inside approved files and behavior, preserve safety seams and human
     control, add tests, and run focused checks. An undeclared file, policy, dependency,
     contract, HRM obligation, or external write returns to the coordinator as a scope
-    divergence; it is not absorbed into the active lane.
+    divergence and stable input requirement; it is not absorbed into the active lane or
+    hidden because a manual queue forbids new records.
 18. During active human UI/UX design, keep one preview live and batch operator feedback.
     Do not freeze a candidate, start exact-head review, push a candidate commit, or run
     a repository-wide suite after each presentational adjustment. Apply the batch through
@@ -395,7 +428,9 @@ RUN THE FASTEST SAFE FLOW
     only when the operator declares the design batch ready. These previews are informal
     checkpoints inside the milestone session and do not open or close the HRM.
 19. At candidate freeze—or the operator-declared design freeze for a UI lane—classify
-    the final diff and apply its validation class:
+    the final diff and apply its validation class. For a brownfield UI, first reconcile
+    the candidate against the required parity inventory and prove every retained operator
+    journey remains reachable; missing established capability blocks candidate freeze:
 
     - UI PRESENTATION — CSS, spacing, static wording, labels, visual grouping, or button
       placement. During iteration use live preview and human review. At freeze run
@@ -444,7 +479,10 @@ RUN THE FASTEST SAFE FLOW
     makes the prior SHA no longer the exact head and invalidates evidence or approval
     that claims that candidate or covers its changed surface; it does not erase reusable
     contract facts or operator feedback from design iteration. Reclassify the new diff
-    and rerun only its applicable checks and reviews. After two material correction
+    and rerun only its applicable checks and reviews. A blocking exact-head review that
+    reproduces a real defect and fails closed is a healthy implementation control, not by
+    itself a planning failure; preserve the stop and separately return any contributing
+    planning/decomposition weakness. After two material correction
     rounds, stop patch cycling and reassess readiness, decomposition, and contract.
 
 INTEGRATE AND VERIFY
@@ -483,8 +521,10 @@ PREPARE AND REVIEW THE TARGET HRM
     and target HRM; milestone outcome and decisions requested; capabilities completed in
     operator language; exact
     integrated revision and configuration; live preview or deterministic scenarios;
-    tests aggregated by validation class; limitations and blockers; external-mutation
-    and activation posture; open/resolved/blocking contract-update requests;
+    tests aggregated by validation class; brownfield parity evidence and exceptions;
+    affected standalone/local system-node readiness and deployment boundaries; limitations
+    and blockers; external-mutation and activation posture; open input requirements and
+    their dispositions; open/resolved/blocking contract-update requests;
     cleanup/integration receipt; provisional downstream impact; explicit operator
     function/UI/UX acceptance fields; and the exact effect of closure. Move the session
     to REVIEW READY, make the stop noisy, and pause for the operator. A visible UI,
@@ -608,13 +648,24 @@ milestone_session:
     path: "{{path}}"
     version: "{{version}}"
     complete_at_inception: true
+  source_documents:
+    system_plan: null
+    implementation_manifest: null
+    requirements_ledger: null
+    brownfield_capability_inventory: null
+    system_node_registry: null
   current_hrm: null
   target_hrm: "{{target_hrm}}"
   milestone_contract: "{{path}}"
   milestone_outcome: "{{operator_visible_outcome}}"
+  closability:
+    independently_closable: false
+    composite_states: []
   status: "planned|executing|review_ready|in_review|remediation|awaiting_closure|closed|deferred|blocked"
   review_questions: []
   closure_criteria: []
+  closure_effect: null
+  downstream_release_effect: null
   authority_envelope:
     planning_changes: false
     routine_code_integration: false
@@ -631,6 +682,7 @@ milestone_session:
     blockers: []
     decisions_requested: []
     contract_update_requests: []
+    input_requirements: []
     function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
     integrated_head_sha: null
     next_action: null
@@ -648,6 +700,24 @@ milestone_session:
     cancelled: []
     blocked_external: []
     active: []
+  brownfield_parity:
+    required_operator_capabilities: []
+    advanced_operator_capabilities: []
+    developer_or_audit_capabilities: []
+    intentionally_superseded: []
+    unknown: []
+    approved_removals_or_relocations: []
+    candidate_reachability_evidence: []
+  system_nodes:
+    - id: "{{system_node_id}}"
+      kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
+      contract_owner: null
+      deployment_owner: null
+      canonical_location: null
+      workflow: "git|non_git|provider_managed|manual|unknown"
+      interface_versions: []
+      readiness_evidence: []
+      deployment_boundary: null
   operating_profile: "one-human|two-human|many-collaborators"
   integration:
     mode: "manual|expected-head-controller|hosted-merge-queue"
@@ -662,6 +732,9 @@ milestone_session:
     scenarios: []
     known_limitations: []
     test_evidence: []
+    brownfield_parity_evidence: []
+    system_node_readiness: []
+    input_requirements: []
     external_mutations: 0
     closure_effect: null
   findings:
@@ -673,6 +746,18 @@ milestone_session:
     open: []
     resolved: []
     blocking: []
+  input_requirements:
+    - id: "INP-###"
+      observation: null
+      affected_hrm: "{{target_hrm}}"
+      affected_requirement_or_scenario: []
+      frozen_boundary: null
+      safe_posture: null
+      owner: null
+      consequence_if_unresolved: null
+      permitted_continuation: []
+      disposition: "human_decision|ctrq|read_only_discovery|planning_amendment|accepted_limitation|deferred_to_hrm|blocked_external"
+      disposition_reference: null
   noise_posture:
     routine_lane_updates: quiet
     hrm_stop: noisy
@@ -795,6 +880,11 @@ milestone_cleanup:
 
 ## Change note
 
+- **3.2 — 2026-08-22:** Requires an independently closable target and complete brownfield
+  planning package, validates established UI parity and standalone/local system nodes,
+  returns stable input-boundary dispositions despite manual queue constraints, and
+  preserves healthy fail-closed exact-head defect review while routing upstream planning
+  weaknesses separately.
 - **3.1 — 2026-08-21:** Requires the complete inception-time HRM map and map version,
   routes missing inter-system promises through non-adopting `CTRQ` records, keeps routine
   lane execution quiet, makes `review_ready` a noisy hard stop, and moves explicit

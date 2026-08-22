@@ -7,13 +7,25 @@ milestone_session:
     version: "{{map_version}}"
     source_sha: null
     all_intended_hrms_published: false
+  planning_package:
+    system_plan: null
+    requirements_ledger: null
+    implementation_manifest: null
+    contract_update_request_surface: null
+    brownfield_capability_inventory: null
+    system_node_registry: null
   current_hrm: null
   target_hrm: "{{target_hrm}}"
   milestone_contract: "{{path}}"
   milestone_outcome: "{{operator_visible_outcome}}"
+  closability:
+    independently_closable: false
+    composite_states: []
   status: planned
   review_questions: []
   closure_criteria: []
+  closure_effect: null
+  downstream_release_effect: null
   authority_envelope:
     planning_changes: false
     routine_code_integration: false
@@ -29,6 +41,36 @@ milestone_session:
     open: []
     blocking: []
     resolved: []
+  input_requirements:
+    - id: "INP-###"
+      observation: null
+      affected_hrm: "{{target_hrm}}"
+      affected_requirement_or_scenario: []
+      frozen_boundary: null
+      safe_posture: null
+      owner: null
+      consequence_if_unresolved: null
+      permitted_continuation: []
+      disposition: "human_decision|ctrq|read_only_discovery|planning_amendment|accepted_limitation|deferred_to_hrm|blocked_external"
+      disposition_reference: null
+  brownfield_parity:
+    required_operator_capabilities: []
+    advanced_operator_capabilities: []
+    developer_or_audit_capabilities: []
+    intentionally_superseded: []
+    unknown: []
+    approved_removals_or_relocations: []
+    candidate_reachability_evidence: []
+  system_nodes:
+    - id: "{{system_node_id}}"
+      kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
+      contract_owner: null
+      deployment_owner: null
+      canonical_location: null
+      workflow: "git|non_git|provider_managed|manual|unknown"
+      interface_versions: []
+      readiness_evidence: []
+      deployment_boundary: null
   noise_posture:
     routine_lane_execution: quiet
     current: quiet
@@ -39,6 +81,7 @@ milestone_session:
     blockers: []
     decisions_requested: []
     contract_update_requests: []
+    input_requirements: []
     integrated_head_sha: null
     next_action: resolve_target_hrm
   review_package:

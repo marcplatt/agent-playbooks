@@ -1,10 +1,11 @@
 contract_update_request:
-  schema_version: agent_playbooks.contract_update_request.v1
+  schema_version: agent_playbooks.contract_update_request.v2
   id: "{{stable_ctrq_id}}"
   status: "open|acknowledged|evidence_needed|decision_needed|amended|propagated|resolved|rejected"
   created_at: null
   created_by_role: hrm_orchestrator
   originating_context:
+    input_requirement_id: "{{input_requirement_id}}"
     system_reference: "{{consumer_system}}"
     target_hrm: "{{hrm_id}}"
     milestone_session: null
@@ -15,6 +16,9 @@ contract_update_request:
   provider:
     system_reference: "{{provider_system}}"
     accountable_role: null
+    deployment_owner: null
+    system_node_kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
+    workflow: "git|non_git|provider_managed|manual|unknown"
     canonical_contract_surface: null
     request_route: null
   consumers:
@@ -66,6 +70,8 @@ contract_update_request:
     accepted_contract_id: null
     accepted_contract_version: null
     provider_sha: null
+    provider_version_or_revision: null
+    readiness_evidence: []
     propagated_repositories: []
     consumer_read_back: []
     resolved_at: null

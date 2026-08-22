@@ -1,0 +1,55 @@
+input_requirement:
+  schema_version: agent_playbooks.input_requirement.v1
+  id: "{{stable_input_id}}"
+  status: "open|routed|waiting|accepted_limitation|deferred|blocked_external|resolved|superseded"
+  created_at: null
+  created_by_role: hrm_orchestrator
+  observation:
+    summary: "{{exact_observation}}"
+    evidence: []
+    evidence_freshness: unknown
+    source_repository_or_system: null
+    exact_revision: null
+  impact:
+    system_reference: "{{system_reference}}"
+    affected_hrms: []
+    affected_requirements: []
+    affected_scenarios: []
+    consequence_if_unresolved: null
+    downstream_hrms_paused: []
+  boundary:
+    frozen_surface: "{{smallest_affected_boundary}}"
+    safe_posture: "{{current_safe_posture}}"
+    activation_posture: "planning_only|local|read_only|shadow|canary|enabled"
+    external_mutations: 0
+    permitted_independent_work: []
+  ownership:
+    accountable_role: null
+    contract_owner: null
+    deployment_owner: null
+    decision_authority: null
+  disposition:
+    kind: "human_decision|ctrq|read_only_discovery|planning_amendment|accepted_limitation|deferred_to_hrm|blocked_external"
+    reference: null
+    reason: null
+    safe_default: remain_blocked
+    target_hrm_if_deferred: null
+    recovery_or_resolution_condition: null
+  manual_lane_constraint:
+    present: false
+    source: null
+    cannot_suppress_record: true
+    affected_lanes: []
+  routing:
+    route: null
+    routed_to_role: null
+    delivered: false
+    read_back: false
+    acknowledgement: null
+  resolution:
+    decision_or_evidence: []
+    canonical_records_updated: []
+    affected_hrm_map_version: null
+    implementation_rebaseline: []
+    resolved_at: null
+  provider_or_production_mutations: 0

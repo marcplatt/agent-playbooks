@@ -23,12 +23,13 @@ Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved
 
 | Playbook | Use |
 |---|---|
-| [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance one HRM from the complete project map, autonomously route missing promises as contract-update requests, derive subordinate lanes, and stop for explicit operator function/UI/UX acceptance without implying activation. |
-| [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute a published milestone bundle quietly with behavior-and-reach test planning, exact-head validation, deterministic integration, a conspicuous HRM review stop, and safe worktree cleanup. |
+| [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance one independently closable HRM from the complete project map, inventory brownfield capability and standalone nodes, route missing inputs explicitly, derive subordinate lanes, and stop for operator function/UI/UX acceptance without implying activation. |
+| [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute a published milestone bundle quietly while preserving brownfield parity, validating local/non-Git node boundaries, returning input requirements, performing exact-head review, and stopping conspicuously at the HRM. |
 
 ## Templates and examples
 
 - [Complete project HRM map](templates/project-hrm-map.yaml)
+- [Input-boundary record](templates/input-boundary-record.yaml)
 - [Contract-update request](templates/contract-update-request.yaml)
 - [HRM review package](templates/hrm-review-package.md)
 - [HRM session ledger](templates/hrm-session-ledger.yaml)
@@ -71,6 +72,12 @@ published milestone session contract or a bounded legacy/recovery constraint.
 For new projects, publish all intended HRMs at inception. Unknowns may remain visibly
 `unknown-blocked`; they may not be replaced with invented facts. A missing inter-system
 promise becomes a stable `CTRQ` whose creation does not adopt the answer.
+
+For brownfield projects, reject composite `production ready` milestones, inventory the
+established operator surface before simplifying it, and register every local, standalone,
+or non-Git bridge as its own system node. A supplied lane queue can constrain execution
+but cannot suppress a required input record, discovery, `CTRQ`, amendment, deferral, or
+blocker.
 
 The intended personal Codex skill entrypoint is `$alpine-workflows`; until that skill is installed, the Markdown playbooks are the canonical invocation source.
 

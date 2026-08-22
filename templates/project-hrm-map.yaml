@@ -1,5 +1,5 @@
 project_hrm_map:
-  schema_version: agent_playbooks.project_hrm_map.v1
+  schema_version: agent_playbooks.project_hrm_map.v2
   system_reference: "{{system_reference}}"
   version: "{{map_version}}"
   status: "proposed|published|accepted|superseded"
@@ -11,21 +11,37 @@ project_hrm_map:
   last_closed_hrm: null
   current_target_hrm: "{{target_hrm}}"
   activation_posture: "planning_only|local|read_only|shadow|canary|enabled"
+  planning_package:
+    system_plan: null
+    requirements_ledger: null
+    implementation_manifest: null
+    contract_catalog: null
+    contract_update_request_surface: null
+    brownfield_capability_inventory: null
+    system_node_registry: null
   publication_gate:
     all_intended_hrms_present: false
     unknowns_explicit: false
     closure_authority_present: false
+    closure_effects_present: false
     release_effects_present: false
     activation_separation_present: false
+    all_hrms_independently_closable: false
+    brownfield_parity_complete_or_not_applicable: false
+    standalone_system_nodes_registered_or_not_applicable: false
     operator_review_state: "pending|accepted|accepted_with_findings|rejected"
   milestones:
     - id: "{{hrm_id}}"
       title: "{{title}}"
       version: "{{hrm_version}}"
+      contract_path: "{{milestone_contract_path}}"
       status: planned
       depends_on: []
       purpose: "{{why_this_milestone_exists}}"
       operator_visible_outcome: "{{outcome}}"
+      closability:
+        independently_closable: false
+        composite_states: []
       capabilities: []
       review_questions: []
       review_scenarios:
@@ -42,7 +58,7 @@ project_hrm_map:
       contract_update_requests: []
       evidence_freshness: []
       expected_review_artifact:
-        kind: "planning_packet|local_preview|read_only_workflow|controlled_canary|activation_packet"
+        kind: "planning_packet|local_preview|read_only_workflow|activation_readiness_packet|controlled_canary|production_observation_packet|autonomy_readiness_packet"
         path_or_url: null
         configuration_profile: null
         data_window: null
@@ -60,11 +76,39 @@ project_hrm_map:
       closure_criteria: []
       closure_authority: human_operator
       operator_function_acceptance_required: true
+      closure_effect: null
       release_effect: null
       does_not_authorize: []
       findings_policy: append_only
       downstream_rebaseline_policy: required_when_affected
   open_contract_update_requests: []
+  input_requirements: []
+  brownfield_capability_inventory:
+    required_operator_workflow: []
+    advanced_operator_capability: []
+    developer_or_audit_capability: []
+    intentionally_superseded: []
+    unknown: []
+    approved_removals_or_relocations: []
+  system_nodes:
+    - id: "{{system_node_id}}"
+      kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
+      purpose: null
+      contract_owner: null
+      deployment_owner: null
+      canonical_location: null
+      workflow: "git|non_git|provider_managed|manual|unknown"
+      provided_interfaces: []
+      consumed_interfaces: []
+      readiness_evidence: []
+      deployment:
+        topology: null
+        configuration_owner: null
+        start_or_restart: null
+        health: null
+        monitoring: null
+        recovery: null
+        rollback: null
   contradictions: []
   operator_banner:
     current_hrm: null
@@ -74,6 +118,7 @@ project_hrm_map:
     blockers: []
     decisions_requested: []
     contract_update_requests: []
+    input_requirements: []
     exact_integrated_sha: null
     activation_posture: read_only
     external_mutations: 0

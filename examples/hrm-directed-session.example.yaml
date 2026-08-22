@@ -19,10 +19,44 @@ system_build_session:
         outcome: Perform, correct, and understand the complete local operator workflow.
       - id: HRM-3
         status: planned
-        outcome: Review one explicitly authorized side effect with read-back and reconciliation.
+        outcome: Review activation readiness, residual risk, monitoring, support, and recovery.
       - id: HRM-4
         status: planned
-        outcome: Review activation readiness, residual risk, monitoring, support, and recovery.
+        outcome: Review one explicitly authorized side effect with read-back and reconciliation.
+      - id: HRM-5
+        status: planned
+        outcome: Review a bounded production-observation window and current rollback evidence.
+      - id: HRM-6
+        status: planned
+        outcome: Review autonomy eligibility, monitoring, escalation, disablement, and human override after sufficient production evidence.
+  planning_package:
+    system_plan: docs/system-plan.md
+    requirements_ledger: docs/requirements.yaml
+    implementation_manifest: implementation-manifest.yaml
+    contract_update_request_surface: docs/contract-requests/
+    brownfield_capability_inventory: docs/brownfield/capability-inventory.yaml
+    system_node_registry: docs/systems/nodes.yaml
+  brownfield_parity:
+    required_operator_capabilities:
+      - complete_quote_journey
+      - correct_inputs_before_send
+      - inspect_failure_and_recovery
+    advanced_operator_capabilities: [multi_quote_review]
+    developer_or_audit_capabilities: [raw_parser_trace]
+    intentionally_superseded: []
+    unknown: []
+    approved_removals_or_relocations: []
+    candidate_reachability_evidence: []
+  system_nodes:
+    - id: SYS-EXAMPLE-BRIDGE
+      kind: local_bridge
+      contract_owner: integration_owner
+      deployment_owner: desktop_operations_owner
+      canonical_location: /example/local-bridge
+      workflow: non_git
+      interface_versions: [CTR-EXAMPLE-BRIDGE/2.0.0]
+      readiness_evidence: []
+      deployment_boundary: Separate local process; consumer repository merge does not deploy or start it.
   current_hrm:
     id: HRM-1
     status: closed
@@ -30,6 +64,9 @@ system_build_session:
     id: HRM-2
     title: Operator workflow review
     outcome: The operator can complete and correct the local workflow and understand failures without external writes.
+    closability:
+      independently_closable: true
+      composite_states: []
     review_questions:
       - Are all required controls present and understandable?
       - Can the operator recover safely from invalid and stale input?
@@ -37,7 +74,8 @@ system_build_session:
       - All blocking workflow findings are resolved or explicitly deferred.
       - The integrated review head passes the published bundle checks.
     closure_authority: human_operator
-    release_effect: Makes the controlled-canary planning bundle eligible; it does not authorize a canary.
+    closure_effect: Records operator acceptance or deferral of the local workflow HRM.
+    release_effect: Makes the activation-readiness planning bundle eligible; it does not authorize a canary or activation.
   status: executing
   authority_envelope:
     planning_changes: true
@@ -55,6 +93,18 @@ system_build_session:
         provider: SYS-EXAMPLE-PROVIDER
         accepted_contract_version: CTR-EXAMPLE-004/1.1.0
         consumer_read_back: verified
+  input_requirements:
+    - id: INP-EXAMPLE-001
+      observation: Local bridge readiness evidence is absent for the activation-readiness HRM.
+      affected_hrm: HRM-3
+      affected_requirement_or_scenario: [ACC-EXAMPLE-READINESS-001]
+      frozen_boundary: local_bridge_activation_readiness
+      safe_posture: Keep provider writes disabled; continue HRM-2 local workflow review.
+      owner: desktop_operations_owner
+      consequence_if_unresolved: HRM-3 remains blocked; HRM-2 remains independently closable.
+      permitted_continuation: [HRM-2]
+      disposition: blocked_external
+      disposition_reference: null
   acceptance_matrix:
     - acceptance_id: ACC-EXAMPLE-021
       requirement_ids: [REQ-EXAMPLE-014]
@@ -96,6 +146,7 @@ system_build_session:
     blockers: []
     decisions_requested: []
     contract_update_requests: []
+    input_requirements: [INP-EXAMPLE-001]
     integrated_head_sha: null
     next_action: Execute EX-02.1 through the HRM bundle coordinator.
   review_package:
