@@ -5,6 +5,7 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 ## Session
 
 - System: `{{system_reference}}`
+- Project HRM map/version: `{{hrm_map_path_and_version}}`
 - Session: `{{milestone_session_id}}`
 - Current HRM: `{{current_hrm_or_none}}`
 - Target HRM: `{{target_hrm}}`
@@ -19,6 +20,7 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 
 ## Decisions requested
 
+- Function/UI/UX acceptance: `accept | withhold with findings | defer`
 - {{specific_human_decision}}
 
 ## Capabilities completed
@@ -43,6 +45,12 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 
 - {{limitation_or_blocker}}
 
+## Contract-update requests
+
+| Request | Provider/owner | Missing promise | HRM impact | Safe posture | Status |
+|---|---|---|---|---|---|
+| `{{ctrq_id}}` | {{provider_or_role}} | {{gap}} | {{impact}} | {{safe_posture}} | {{status}} |
+
 ## Findings
 
 - Ledger: `{{findings_ledger}}`
@@ -60,7 +68,8 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 ## Closure
 
 - Closure criteria: `{{criteria}}`
-- What closure releases: `{{next_bundle_or_authority}}`
+- Operator function/UI/UX acceptance: `pending | accepted | withheld`
+- What closure releases: `{{next_hrm_or_bundle_eligibility}}`
 - What closure does not authorize: `{{canary_deployment_provider_write_migration_activation}}`
 - Decision: `pending | closed | deferred`
 - Decided by/date: `{{operator_and_time}}`

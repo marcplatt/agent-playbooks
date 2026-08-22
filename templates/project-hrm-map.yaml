@@ -1,0 +1,80 @@
+project_hrm_map:
+  schema_version: agent_playbooks.project_hrm_map.v1
+  system_reference: "{{system_reference}}"
+  version: "{{map_version}}"
+  status: "proposed|published|accepted|superseded"
+  published_at: null
+  source_sha: null
+  supersedes: null
+  operator_view: "{{operator_view_path_or_url}}"
+  planning_hrm: "{{planning_hrm_id}}"
+  last_closed_hrm: null
+  current_target_hrm: "{{target_hrm}}"
+  activation_posture: "planning_only|local|read_only|shadow|canary|enabled"
+  publication_gate:
+    all_intended_hrms_present: false
+    unknowns_explicit: false
+    closure_authority_present: false
+    release_effects_present: false
+    activation_separation_present: false
+    operator_review_state: "pending|accepted|accepted_with_findings|rejected"
+  milestones:
+    - id: "{{hrm_id}}"
+      title: "{{title}}"
+      version: "{{hrm_version}}"
+      status: planned
+      depends_on: []
+      purpose: "{{why_this_milestone_exists}}"
+      operator_visible_outcome: "{{outcome}}"
+      capabilities: []
+      review_questions: []
+      review_scenarios:
+        - id: "{{scenario_id}}"
+          starting_state: null
+          operator_action: null
+          expected_result: null
+          safe_failure: null
+      prerequisites: []
+      requirements: []
+      invariants: []
+      policies: []
+      contracts: []
+      contract_update_requests: []
+      evidence_freshness: []
+      expected_review_artifact:
+        kind: "planning_packet|local_preview|read_only_workflow|controlled_canary|activation_packet"
+        path_or_url: null
+        configuration_profile: null
+        data_window: null
+      authority_envelope:
+        planning_changes: false
+        routine_code_integration: false
+        provider_writes: false
+        canary: false
+        deployment: false
+        production_activation: false
+        destructive_migration: false
+        credential_or_permission_change: false
+      activation_posture: read_only
+      prohibited_effects: []
+      closure_criteria: []
+      closure_authority: human_operator
+      operator_function_acceptance_required: true
+      release_effect: null
+      does_not_authorize: []
+      findings_policy: append_only
+      downstream_rebaseline_policy: required_when_affected
+  open_contract_update_requests: []
+  contradictions: []
+  operator_banner:
+    current_hrm: null
+    target_hrm: "{{target_hrm}}"
+    capabilities_complete: []
+    capabilities_remaining: []
+    blockers: []
+    decisions_requested: []
+    contract_update_requests: []
+    exact_integrated_sha: null
+    activation_posture: read_only
+    external_mutations: 0
+    next_action: publish_and_review_hrm_map

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYNC-001
-title: Bidirectional Master-Plan Repository Polling and Lane Intake
-version: "0.4"
+title: Bidirectional Master-Plan Repository Polling and HRM Intake
+version: "0.5"
 status: draft
 owner: Alpine Structures
 mode: bidirectional-master-plan-repository-polling
@@ -17,6 +17,8 @@ optional_inputs:
   - mirror_surface
   - master_plan_intake_surface
   - lane_directory_and_index
+  - project_hrm_map
+  - contract_update_request_surface
   - operator_directory
   - implementation_update_route
   - lane_publication_authority
@@ -31,29 +33,35 @@ controls:
   - accepted-records-only
   - canonical-source-not-duplicated
   - implementation-status-honesty
+  - complete-hrm-map-awareness
+  - contract-update-request-routing
+  - hrm-obligation-routing
   - bounded-lane-drafting
   - implementation-receipts-not-policy-writes
   - no-echo-provenance
   - single-writer-master-plan-intake
   - role-based-notification
+  - quiet-routine-polls-noisy-hrm-stops
   - idempotent-processing
   - reconcile-before-retry
   - no-implementation-or-production-authority
 ---
 
-# Bidirectional Master-Plan Repository Polling and Lane Intake
+# Bidirectional Master-Plan Repository Polling and HRM Intake
 
 Use this playbook to set up one recurring Codex task in each application repository
-that participates in an RES-0001-style organizational master plan. The task watches
+that participates in an RES-0002-style HRM-first organizational master plan. The task watches
 both the master plan and its target repository's remote `main` branches from separate
 exact commit cursors. Master-plan changes produce approved repository mirror updates,
-bounded lane drafts, or operator decisions. Target-repository changes produce immutable
+project HRM-map obligations, contract-update requests, subordinate lane drafts, or
+operator decisions. Target-repository changes produce immutable
 implementation receipts, evidence pointers, drift findings, or amendment proposals in
 the master plan, followed by either a decision request or concise implementation update.
 
 The master plan remains the registry of stable IDs, business intent, authority,
 policies, work orders, and cross-system contracts. Each application repository owns
-its implementation manifest, lane documents, tests, and evidence pointers. The poller
+its implementation manifest, complete project HRM map, lane documents, tests, and
+evidence pointers. The poller
 does not copy either repository wholesale. Reverse synchronization is intentionally
 asymmetric: an application repo may report what it declares, tested, or observed, but
 it cannot redefine organization policy, authority, or a canonical contract. A single
@@ -63,9 +71,9 @@ master-plan intake coordinator serializes inbound receipts and prevents poller r
 
 ```mermaid
 flowchart LR
-  MP["Master-plan origin/main"] -->|"accepted obligation"| RP["Repository poller"]
-  RP -->|"mirror or lane"| TR["Target origin/main"]
-  TR -->|"adoption, implementation, evidence, or drift"| RP
+  MP["Master-plan origin/main"] -->|"accepted obligation or contract response"| RP["Repository poller"]
+  RP -->|"HRM update, CTRQ, mirror, or lane"| TR["Target origin/main"]
+  TR -->|"HRM, contract request, implementation, evidence, or drift"| RP
   RP -->|"source-bound intake record"| IQ["Master-plan intake queue"]
   IQ -->|"one serialized coordinator"| MP
 ```
@@ -88,6 +96,8 @@ in parallel across repositories; only the short master-plan merge/read-back is s
 - **Approved mirror surface:** `{{mirror_surface_or_none}}`
 - **Master-plan intake surface:** `{{master_plan_intake_surface_or_discover}}`
 - **Lane directory and index:** `{{lane_directory_and_index_or_discover}}`
+- **Project HRM map:** `{{project_hrm_map_or_discover}}`
+- **Contract-update request surface:** `{{contract_update_request_surface_or_discover}}`
 - **Operator directory:** `{{operator_directory_or_master_plan_registry}}`
 - **Implementation-update route:** `{{implementation_update_route_or_codex_task}}`
 - **Lane-publication authority:** `{{lane_publication_authority_or_draft_only}}`
@@ -109,6 +119,7 @@ Recommended master-plan mirror values are `draft_receipt_only`, `push_intake_bra
 | Either repository has no durable `origin/main` | Mark synchronization blocked; do not substitute another branch or promote a local observation to organization truth. |
 | Several repositories report at once | Prepare in parallel; let the master-plan task serialize intake merges and regenerate shared indexes. |
 | A repository change contradicts policy or a canonical contract | Create an amendment proposal; never overwrite master-plan authority from the application repo. |
+| An HRM discovers a missing inter-system promise | Create one stable `CTRQ`, route it to the owning system, and block only the dependent HRM; never invent the answer. |
 | A lane or mirror is published but no code changed | Record adoption/planning only, with `implementation: false`. |
 | Code merges but the manifest or lane reference is missing | Record drift or a blocker; do not infer stable IDs or implemented coverage from filenames. |
 | `main` checks are pending or failed | Hold the implementation receipt pending or blocked until exact-head checks pass. |
@@ -130,6 +141,8 @@ Implementation manifest: {{implementation_manifest_or_discover}}.
 Approved mirror surface: {{mirror_surface_or_none}}.
 Master-plan intake surface: {{master_plan_intake_surface_or_discover}}.
 Lane directory and index: {{lane_directory_and_index_or_discover}}.
+Project HRM map: {{project_hrm_map_or_discover}}.
+Contract-update request surface: {{contract_update_request_surface_or_discover}}.
 Operator directory: {{operator_directory_or_master_plan_registry}}.
 Implementation-update route: {{implementation_update_route_or_codex_task}}.
 Lane-publication authority: {{lane_publication_authority_or_draft_only}}.
@@ -147,8 +160,9 @@ PURPOSE AND AUTHORITY
    work and use a dedicated worktree when the target repository requires one.
 3. Default authority is: fetch and inspect both repositories; update an approved
    target-repository mirror or implementation declaration; draft target lane docs;
-   prepare an implementation receipt, evidence pointer, drift finding, or amendment
-   proposal for master-plan intake; and send a Codex task update. Do not edit canonical
+   prepare or route a documentation-only contract-update request; prepare an HRM status,
+   implementation receipt, evidence pointer, drift finding, or amendment proposal for
+   master-plan intake; and send a Codex task update. Do not edit canonical
    master-plan policy, authority, or contracts from the target repository. Do not edit
    application code, provider configuration, credentials, production, deployments,
    canaries, customer communication, financial records, or inventory.
@@ -165,7 +179,8 @@ SET UP ONCE
    implemented/consumed contract references, and cross-repository dependencies. Do
    not guess a person or notification destination from a display name.
 6. Locate the target's implementation manifest, approved mirror surface, lane template,
-   lane index, checker pattern, and branch/PR rules. In the master plan, locate its
+   lane index, complete project HRM map, contract-update request surface, checker pattern,
+   and branch/PR rules. In the master plan, locate its
    implementation-record/intake surface, generated indexes, checker, and single intake
    coordinator. If any required surface or routing contract is absent, prepare one setup
    proposal and pause; do not invent a permanent organization-wide convention inside
@@ -179,7 +194,8 @@ SET UP ONCE
    historical_backfill is explicitly true. Report already-accepted target work orders,
    stale implementation declarations, and unrecorded merged lanes before advancing.
 9. Present the setup read-back: exact master-plan and target heads, both cursors, registered
-   stable IDs, manifest/mirror/lane paths, poll cadence, publication authority,
+   stable IDs, manifest/mirror/HRM-map/contract-request/lane paths, poll cadence,
+   publication authority,
    master-plan intake path/authority, notification routing, and unresolved blockers.
    Schedule recurring wakes only after the configuration and authority match the
    operator's instruction.
@@ -196,7 +212,8 @@ POLL MASTER PLAN -> TARGET FROM AN EXACT CURSOR
     exact condition; never silently reset the cursor or treat a force-push as ordinary.
 12. Inspect the complete commit range once. Extract changed stable IDs, versions,
     statuses, effective dates, supersession links, work orders, policies, authority
-    claims, contracts, integration cards, generated-index changes, and target mappings.
+    claims, contracts, contract-update requests, project HRM maps, milestone status,
+    integration cards, generated-index changes, and target mappings.
     Separate authored changes from generated artifacts and commit-message claims.
 13. Resolve impact using the master-plan registry, accepted work-order targets,
     implementation manifests, contract provider/consumer links, material edges, and
@@ -206,6 +223,10 @@ POLL MASTER PLAN -> TARGET FROM AN EXACT CURSOR
     - RECEIPT_ACK: the master plan records an already-reported target SHA; no new lane;
     - INFORMATIONAL: relevant context changed but no accepted implementation obligation;
     - MIRROR_REFRESH: an approved pointer, generated copy, or manifest declaration is stale;
+    - HRM_UPDATE: an accepted change alters an HRM prerequisite, evidence need, review
+      scenario, blocker, or downstream eligibility in the complete project map;
+    - CONTRACT_UPDATE_REQUEST: a stable `CTRQ` is opened, resolved, superseded, or routed
+      to this repository as owning provider or consumer;
     - LANE_READY: an accepted target obligation has sufficient contract and acceptance detail;
     - OPERATOR_DECISION: business meaning, authority, scope, compatibility, or owner is unresolved;
     - BLOCKED: required source, target mapping, dependency, repository rule, or safe checker is absent.
@@ -232,9 +253,14 @@ REFRESH ONLY REPOSITORY-OWNED MIRRORS
     docs branch may be pushed, verify and push that branch. Allow the change to land on
     `main` only when the target's explicit rules authorize that exact lane-doc workflow.
 
-DRAFT A BOUNDED LANE WHEN READY
+ROUTE THE HRM OBLIGATION AND DRAFT BOUNDED LANES
 
-20. Draft a lane only for LANE_READY. Reconcile the lane number/ID first. The lane must
+20. For HRM_UPDATE, update or propose the versioned project HRM map and affected milestone
+    contracts without rewriting closed evidence. Record prior/new map versions, affected
+    HRMs, blockers, contract requests, downstream impact, and the exact operator-level
+    review consequence. For LANE_READY, first prove the obligation resolves to a published
+    HRM; then draft the smallest subordinate lane. Reconcile the lane number/ID first.
+    The lane must
     reference the exact master-plan source range, accepted work order or record IDs,
     contract versions, target base SHA, dependencies, owned files, implementation
     manifest changes, checker, acceptance scenarios, evidence, rollback/recovery,
@@ -249,9 +275,13 @@ DRAFT A BOUNDED LANE WHEN READY
     target's lane. Reference the common work order and provider/consumer upgrade order,
     mark unmet predecessor lanes as dependencies, and notify the master-plan coordinator.
     Do not edit another repository or independently choose cross-repository merge order.
-23. If a material contract, policy, authority, acceptance criterion, owner, or rollback
-    decision is missing, classify OPERATOR_DECISION or BLOCKED. Send one consolidated
-    decision packet rather than producing a speculative lane or asking technical trivia.
+23. If a material contract is missing or inadequate, classify CONTRACT_UPDATE_REQUEST
+    and create or reconcile one stable `CTRQ` containing evidence, affected HRMs, owner,
+    required decision, safe posture, compatibility questions, and resolution/read-back
+    criteria. The request is not the answer. Classify OPERATOR_DECISION only when resolving
+    it requires new business meaning, authority, risk acceptance, or HRM function/UI/UX
+    judgment. Otherwise use verified contracts and read-only discovery without asking
+    technical trivia. Use BLOCKED when the owner, source, route, or safe evidence path is absent.
 
 POLL TARGET -> MASTER PLAN FROM A SEPARATE EXACT CURSOR
 
@@ -276,6 +306,8 @@ POLL TARGET -> MASTER PLAN FROM A SEPARATE EXACT CURSOR
       on target `origin/main` without claiming application implementation;
     - IMPLEMENTATION_RECEIPT: a merged lane declares and checks an accepted obligation;
     - EVIDENCE_RECEIPT: a redacted evidence pointer or compatibility result changed;
+    - HRM_STATUS_RECEIPT: a versioned HRM-map or milestone status change was published;
+    - CONTRACT_UPDATE_REQUEST: a source-bound `CTRQ` was opened or changed;
     - DRIFT_FINDING: manifest, lane, contract, path, test, or declared coverage disagree;
     - AMENDMENT_PROPOSAL: the target implies a semantic policy, authority, or contract change;
     - REVERSE_BLOCKED: identity, provenance, checks, ownership, or intake authority is missing.
@@ -309,6 +341,8 @@ POLL TARGET -> MASTER PLAN FROM A SEPARATE EXACT CURSOR
     observation, proposed semantic difference, affected stable IDs/repos, compatibility
     consequences, safe default, and operator decision needed. A changed copied contract,
     lane assumption, or implemented behavior never overwrites canonical master-plan truth.
+    Route CONTRACT_UPDATE_REQUEST through AP-POLICY-001 when it requires canonical
+    contract meaning, preserving its request status until an approved answer is read back.
 35. Treat deletions, renames, removed manifest coverage, and contract-version downgrades
     as drift, deprecation, or amendment candidates. Never delete or supersede a canonical
     master-plan record merely because one repository stopped referencing it.
@@ -327,11 +361,13 @@ SERIALIZE MASTER-PLAN INTAKE
     - push_intake_branch: verify and push a source-specific branch;
     - open_draft_pr: push and open/reuse one draft intake PR;
     - auto_merge_receipt_only: the intake coordinator may merge only a metadata-only,
-      schema-valid ADOPTION_RECEIPT, IMPLEMENTATION_RECEIPT, or EVIDENCE_RECEIPT with no
+      schema-valid ADOPTION_RECEIPT, IMPLEMENTATION_RECEIPT, EVIDENCE_RECEIPT,
+      HRM_STATUS_RECEIPT, or documentation-only CONTRACT_UPDATE_REQUEST with no
       policy, authority, contract, lifecycle, deletion, conflict, secret, PII, or operator
       decision change.
-39. DRIFT_FINDING, AMENDMENT_PROPOSAL, REVERSE_BLOCKED, breaking compatibility, status
-    advancement beyond repository implementation, or any ambiguous write always remains
+39. DRIFT_FINDING, AMENDMENT_PROPOSAL, a contract answer that changes meaning or authority,
+    REVERSE_BLOCKED, breaking compatibility, status advancement beyond repository
+    implementation, or any ambiguous write always remains
     review-bound. Batch related findings; do not open competing PRs for the same target SHA.
 
 ROUTE THE SMALLEST USEFUL UPDATE
@@ -342,13 +378,18 @@ ROUTE THE SMALLEST USEFUL UPDATE
     - INFORMATIONAL: concise context update with no lane and no response requested;
     - MIRROR_REFRESH: implementation update with source SHA, refreshed surface, checks,
       branch/PR or draft location, and next authorized action;
+    - HRM_UPDATE: send the system-build orchestrator the affected HRMs, map version,
+      blocker/rebaseline state, exact sources, and next authorized action;
+    - CONTRACT_UPDATE_REQUEST: route the `CTRQ` to the registered contract owner and
+      affected HRM orchestrators; notify the operator only when the request contains a
+      prepared business/authority decision or blocks a prepared HRM;
     - LANE_READY: implementation update suitable for AP-LANE-001 coordination, with lane
       link/path, exact source and target SHAs, scheduling hint, dependencies, checker,
       human gates, publication state, and whether execution is ready;
     - OPERATOR_DECISION: one decision request containing current authority, exact question,
       recommendation, alternatives, consequences, affected repos, and safe default;
-    - ADOPTION_RECEIPT, IMPLEMENTATION_RECEIPT, or EVIDENCE_RECEIPT: after master-plan
-      intake read-back,
+    - ADOPTION_RECEIPT, IMPLEMENTATION_RECEIPT, EVIDENCE_RECEIPT, or HRM_STATUS_RECEIPT:
+      after master-plan intake read-back,
       send one implementation update with exact repo/master SHAs, receipt, checks, and
       status limits;
     - PENDING_INTAKE: send the intake coordinator a compact branch/PR/draft update; do not
@@ -363,7 +404,9 @@ ROUTE THE SMALLEST USEFUL UPDATE
     operator to approve file names, test mechanics, or ordinary implementation details.
 42. Keep notifications idempotent and compact. Never include credentials, PII, customer
     records, raw provider payloads, or full test logs. Link exact commits, lanes, PRs,
-    artifacts, and operator briefs instead.
+    artifacts, HRM maps, contract requests, and operator briefs instead. Keep routine
+    poll/lane progress quiet; make a prepared HRM stop, material decision, or persistent
+    blocker conspicuous.
 43. External email, chat, ticket, provider, or repository-comment notification is a
     write. Use it only when that route and message class are explicitly authorized, then
     read back delivery. Otherwise post the update in this Codex task for the operator.
@@ -374,7 +417,8 @@ CHECKPOINT AND RECOVER
     master-plan intake record. Bind checks to exact heads or diffs. Read back any branch
     push, PR, `main` update, merge, generated index, or external notification.
 45. Advance last_completed_master_sha only after every forward impact has a durable
-    disposition: no action, informational receipt, verified mirror update, lane draft,
+    disposition: no action, informational receipt, verified mirror update, HRM update,
+    contract-update request, lane draft,
     decision request, or explicit blocker. Record partial progress separately so a crash
     cannot skip work.
 46. Advance last_assessed_target_sha only after every reverse impact has a durable
@@ -385,7 +429,7 @@ CHECKPOINT AND RECOVER
     retrying. On repeated source failure, preserve the cursor, fail closed after the
     configured maximum staleness, and notify the configured operator/coordinator.
 48. Finish each active poll with one compact bidirectional receipt: both source ranges
-    and heads, impacts by direction/classification, files/lanes/intake records/PRs,
+    and heads, impacts by direction/classification, HRMs/contract requests/files/lanes/intake records/PRs,
     checks, notifications, external writes, both cursors, blockers, and next wake/action.
     Never claim that a lane draft, repository merge, receipt, or notification proves
     deployment, activation, canary, or production verification.
@@ -395,7 +439,7 @@ CHECKPOINT AND RECOVER
 
 ```yaml
 poller:
-  schema_version: agent_playbooks.master_plan_poller.v3
+  schema_version: agent_playbooks.master_plan_poller.v4
   id: "{{organization}}:{{target_repository}}"
   status: proposed
   organization: "{{organization}}"
@@ -412,6 +456,8 @@ poller:
     stable_ids: []
     implementation_manifest: "{{implementation_manifest_or_discover}}"
     mirror_surface: "{{mirror_surface_or_none}}"
+    project_hrm_map: "{{project_hrm_map_or_discover}}"
+    contract_update_request_surface: "{{contract_update_request_surface_or_discover}}"
     lane_directory: null
     lane_index: null
   schedule:
@@ -451,9 +497,9 @@ poller:
 
 ```yaml
 intake_record:
-  schema_version: agent_playbooks.repository_intake.v1
+  schema_version: agent_playbooks.repository_intake.v2
   id: "{{target_repository}}:{{target_sha}}:{{impact_key}}"
-  kind: "adoption_receipt|implementation_receipt|evidence_receipt|drift_finding|amendment_proposal"
+  kind: "adoption_receipt|implementation_receipt|evidence_receipt|hrm_status_receipt|contract_update_request|drift_finding|amendment_proposal"
   status: proposed
   source:
     repository: "{{target_repository}}"
@@ -476,6 +522,8 @@ intake_record:
     stable_ids: []
     versions: []
     repository_paths: []
+    affected_hrms: []
+    contract_request_ids: []
   claims:
     master_plan_adoption: unknown
     repository_implementation: unknown
@@ -522,9 +570,11 @@ poll:
       content_hash: null
       stable_ids: []
       versions: []
-      classification: "no_action|receipt_ack|informational|mirror_refresh|lane_ready|operator_decision|blocked|target_no_action|upstream_echo|adoption_receipt|implementation_receipt|evidence_receipt|drift_finding|amendment_proposal|reverse_blocked"
+      classification: "no_action|receipt_ack|informational|mirror_refresh|hrm_update|contract_update_request|lane_ready|operator_decision|blocked|target_no_action|upstream_echo|adoption_receipt|implementation_receipt|evidence_receipt|hrm_status_receipt|drift_finding|amendment_proposal|reverse_blocked"
       reason: null
       mirror_changes: []
+      affected_hrms: []
+      contract_request_ids: []
       lane: null
       master_plan_intake_record: null
       branch: null
@@ -548,6 +598,10 @@ poll:
 
 ## Change note
 
+- **0.5 — 2026-08-21:** Moves polling intake to the HRM abstraction, watches complete
+  project HRM maps, routes stable non-adopting `CTRQ` records, keeps lanes subordinate,
+  and suppresses routine noise until a prepared HRM, material decision, or persistent
+  blocker needs operator attention.
 - **0.4 — 2026-08-21:** Routes a drafted lane into the HRM-first workflow: the system-
   build playbook derives and releases milestone bundles, and the lane coordinator owns
   execution order. A draft now names its assigned target HRM rather than an informal

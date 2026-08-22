@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-POLICY-001
 title: Master-Plan Policy Amendment and Propagation
-version: "0.1"
+version: "0.2"
 status: draft
 owner: Alpine Structures
 mode: master-plan-policy-amendment
@@ -12,15 +12,20 @@ required_inputs:
   - policy_scope
   - amendment_objective
 optional_inputs:
+  - originating_hrms
+  - contract_request_ids
   - operator_decision_authority
   - propagation_scope
   - implementation_authority
   - human_review_requirements
 controls:
   - res-0001-evidence-separation
+  - res-0002-hrm-first-propagation
   - operator-led-elicitation
   - stable-id-traceability
   - contract-impact-analysis
+  - request-is-not-adoption
+  - downstream-hrm-rebaseline
   - canonical-authoring-location
   - cross-workspace-propagation
   - versioned-history
@@ -31,7 +36,7 @@ controls:
 
 # Master-Plan Policy Amendment and Propagation
 
-Use this prompt from inside an RES-0001-style master-plan repository. The master
+Use this prompt from inside an RES-0002-style HRM-first master-plan repository. The master
 plan is the registry of business intent and authority; linked application repositories
 retain their own implementation manifests, tests, and evidence. The prompt elicits
 operator decisions, discovers contract implications, amends canonical records, and
@@ -40,12 +45,17 @@ document, and generated view without rewriting history or inventing authority.
 
 RES-0001 is an informative research baseline unless the organization has separately
 adopted it. It does not itself authorize policy, implementation, or production changes.
+RES-0002 carries that evidence discipline into HRM-first delivery. A contract-update
+request may be opened autonomously as a documentation and routing act, but it is not an
+adopted contract, business decision, implementation claim, or activation authority.
 
 ## Inputs
 
 - **Organization or master plan:** `{{organization_or_master_plan}}`
 - **Policy IDs or topics:** `{{policy_scope}}`
 - **Amendment objective:** `{{amendment_objective}}`
+- **Originating HRMs:** `{{originating_hrms_or_none}}`
+- **Contract request IDs:** `{{contract_request_ids_or_none}}`
 - **Operator decision authority:** `{{operator_decision_authority_or_discover}}`
 - **Propagation scope:** `{{propagation_scope_or_all_registered_consumers}}`
 - **Implementation authority:** `{{implementation_authority_or_docs_and_contracts_only}}`
@@ -58,6 +68,8 @@ Work from this master-plan repository: {{organization_or_master_plan}}.
 
 Policy scope: {{policy_scope}}.
 Amendment objective: {{amendment_objective}}.
+Originating HRMs: {{originating_hrms_or_none}}.
+Contract request IDs: {{contract_request_ids_or_none}}.
 Operator decision authority: {{operator_decision_authority_or_discover}}.
 Propagation scope: {{propagation_scope_or_all_registered_consumers}}.
 Implementation authority: {{implementation_authority_or_docs_and_contracts_only}}.
@@ -65,7 +77,7 @@ Human review: {{human_review_requirements_or_default}}.
 
 WORKSPACE AND AUTHORITY
 
-1. Treat this RES-0001-style master-plan repository as the registry of intent and
+1. Treat this RES-0002-style HRM-first master-plan repository as the registry of intent and
    authority. Treat linked repositories as federated owners of implementation
    manifests, local contracts/tests, and evidence. A downstream repository is an
    affected repository when it authors, provides, consumes, implements, tests,
@@ -79,6 +91,7 @@ WORKSPACE AND AUTHORITY
 4. RES-0001 research, observed behavior, operator input, proposed policy, accepted
    policy, implementation, deployment, and runtime evidence are different claim types.
    Never promote one to another silently.
+   A `CTRQ` is a proposed question and impact record, not the missing promise or approval.
 
 DISCOVER THE CURRENT POLICY AND IMPACT GRAPH
 
@@ -90,7 +103,7 @@ DISCOVER THE CURRENT POLICY AND IMPACT GRAPH
 
    Outcome -> capability -> policy/rule/requirement -> state/authority -> flow/edge
    -> integration/contract -> provider and consumer manifests -> tests/evidence
-   -> operator and generated views.
+   -> affected project HRMs -> operator and generated views.
 
 7. Search the registry, backlinks, manifests, and repository contents for every known
    producer, consumer, copied declaration, and shared seam. Do not claim the search is
@@ -137,19 +150,25 @@ ELICIT CONTRACT AND SEAM CHANGES
     or breaking. Define supported versions, producer/consumer upgrade order, safe
     behavior during mixed versions, migration, rollback/compensation, test obligations,
     and deprecation window. Do not assume provider-first or consumer-first rollout.
-15. Before editing, present one consolidated amendment packet containing the policy
-    diff, contract/authority implications, affected stable IDs and repositories,
+15. A coordinator may create or enrich a stable `CTRQ` without a separate operator gate
+    when repository rules authorize documentation-only intake. It may record evidence,
+    affected HRMs, owning system, required decision, safe posture, and compatibility
+    questions. It may not choose new business meaning, authority, compatibility policy,
+    external effects, or acceptance criteria. Those answers remain proposed until the
+    authorized operator approves the consolidated amendment.
+16. Before editing adopted records, present one consolidated amendment packet containing
+    the policy diff, contract/authority implications, affected stable IDs and repositories,
     compatibility and migration plan, unresolved blockers, recommended decision, and
     exact approval requested. Do not drip-feed foreseeable scope amendments.
 
 AMEND CANONICAL RECORDS
 
-16. After operator approval, use the master plan's adopted decision mechanism. Create
+17. After operator approval, use the master plan's adopted decision mechanism. Create
     or update the required ADR/change record; version the policy and affected contracts;
     record effective/review dates, approval scope, rationale, alternatives, consequences,
     confirmation plan, and supersession links. Never rewrite an accepted historical
     decision to make the new decision appear original, and never reuse stable IDs.
-17. Edit each fact at its canonical authoring location once. Update linked policy,
+18. Edit each fact at its canonical authoring location once. Update linked policy,
     rule/decision table, requirement, state, authority, flow, integration card, machine
     contract, risk/question/exception, and operator-view sources as applicable. Regenerate
     deterministic indexes, backlinks, diagrams, and summaries; do not hand-edit generated
@@ -157,35 +176,38 @@ AMEND CANONICAL RECORDS
 
 PROPAGATE THROUGH AFFECTED REPOSITORIES
 
-18. Create a propagation ledger with one row per affected repository: relationship to
-    the change, stable IDs and versions, canonical or copied records, files/manifests/
+19. Create a propagation ledger with one row per affected repository and affected HRM:
+    relationship to the change, stable IDs and versions, canonical or copied records, files/manifests/
     tests/views affected, owner, repository rules, compatibility action, dependency,
     branch/PR, exact head, checks, approval, merge state, and blocker.
-19. Reconcile every registered affected repository before editing it. Apply its own
+20. Reconcile every registered affected repository before editing it. Apply its own
     branch, worktree, lane, checker, review, and PR rules. Update contract references,
     implementation manifests, local documentation, examples, fixtures, compatibility
     tests, evidence hooks, and generated views that are in the authorized scope.
-20. If the approved policy requires application behavior outside this run's authority,
+21. If the approved policy requires application behavior outside this run's authority,
     do not silently implement it. Create the repository's required bounded lane/change
     plan with acceptance criteria and traceability, or record an explicit blocked
     implementation obligation. Documentation must not claim the behavior exists.
-21. Order changes according to the compatibility plan. Independent repositories may be
+22. Rebaseline every affected project HRM map and milestone contract prospectively. Mark
+    blocked HRMs, changed prerequisites, review scenarios, evidence requirements, and
+    superseded map versions explicitly. Do not rewrite already closed HRM evidence.
+23. Order changes according to the compatibility plan. Independent repositories may be
     prepared in parallel; merges that establish or consume a shared contract are
     serialized. Bind checks and independent review to exact heads. After each merge,
     verify the remote default branch, required CI, references, and generated drift index.
 
 VERIFY AND HAND OFF
 
-22. Validate stable IDs, schemas, references, supersession, material-edge coverage,
+24. Validate stable IDs, schemas, references, supersession, material-edge coverage,
     manifest versions, compatibility tests, generated artifacts, secrets/PII checks,
     and policy-to-contract-to-repository traceability. A valid document is not proof
     that policy is correct, implemented, deployed, or production-verified.
-23. Prepare one operator acceptance brief showing the approved business meaning,
+25. Prepare one operator acceptance brief showing the approved business meaning,
     exact changed versions, customer/financial/operational effects, exceptions and
     human controls, affected repositories, compatibility/migration state, residual
     blockers, and evidence still required. Obtain any mandated review against exact
     versions and commits.
-24. Finish with four lists: amended canonical records; propagated and verified
+26. Finish with four lists: amended canonical records; propagated and verified
     repositories; blocked/unavailable repositories; and implementation, deployment,
     canary, or production actions still requiring separate authority. Report no external
     mutations unless each is explicitly authorized and independently read back.
@@ -203,7 +225,15 @@ amendment:
   policy_versions_after: []
   effective_from: null
   approval_record: null
+  originating_hrms: []
+  contract_request_ids: []
   affected_records: []
+  affected_hrms:
+    - project: "{{project}}"
+      hrm_id: "{{hrm_id}}"
+      prior_map_version: null
+      rebaselined_map_version: null
+      impact: "blocked|prerequisite_changed|review_changed|evidence_changed|none"
   unresolved_questions: []
   affected_repositories:
     - repository: "{{repository}}"
@@ -225,6 +255,9 @@ amendment:
 
 ## Draft note
 
+- **0.2 — 2026-08-21:** Adds RES-0002 HRM-first propagation, distinguishes autonomous
+  documentation-only `CTRQ` intake from adopted contract meaning, and requires affected
+  HRM maps and milestone contracts to be rebaselined without rewriting history.
 - **0.1 — 2026-08-19:** Initial draft. Applies RES-0001 evidence separation,
   operator-level elicitation, four-class contract impact analysis, scoped authority,
   stable-ID traceability, federated propagation, compatibility ordering, and exact-head

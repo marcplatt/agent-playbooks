@@ -2,6 +2,11 @@ milestone_session:
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
+  hrm_map:
+    path: "{{project_hrm_map_path}}"
+    version: "{{map_version}}"
+    source_sha: null
+    all_intended_hrms_published: false
   current_hrm: null
   target_hrm: "{{target_hrm}}"
   milestone_contract: "{{path}}"
@@ -19,12 +24,21 @@ milestone_session:
     destructive_migration: false
     credential_or_permission_change: false
   activation_posture: read_only
-  approved_lane_bundle: []
+  published_lane_bundle: []
+  contract_update_requests:
+    open: []
+    blocking: []
+    resolved: []
+  noise_posture:
+    routine_lane_execution: quiet
+    current: quiet
+    next_operator_interrupt: prepared_hrm_or_reserved_decision
   operator_banner:
     capabilities_complete: []
     capabilities_remaining: []
     blockers: []
     decisions_requested: []
+    contract_update_requests: []
     integrated_head_sha: null
     next_action: resolve_target_hrm
   review_package:
@@ -33,6 +47,7 @@ milestone_session:
     review_head_sha: null
     test_evidence: []
     known_limitations: []
+    operator_function_acceptance: pending
     external_mutations: 0
   findings:
     ledger: null
@@ -41,6 +56,7 @@ milestone_session:
     remediation_bundle: []
   closure:
     decision: pending
+    operator_function_acceptance: pending
     decided_by: null
     decided_at: null
     rationale: null

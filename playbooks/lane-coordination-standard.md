@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "3.0"
+version: "3.1"
 status: active
 owner: Alpine Structures
 mode: hrm-bundle-execution
@@ -9,7 +9,9 @@ human_readable: true
 machine_readable: true
 required_inputs: [system_reference, target_hrm, milestone_outcome]
 optional_inputs:
+  - project_hrm_map
   - milestone_session_contract
+  - published_lane_bundle
   - approved_lane_bundle
   - manual_lane_bundle
   - current_hrm
@@ -29,8 +31,9 @@ optional_inputs:
   - supervisor_rotation_limits
 controls:
   - project-rules-first
+  - complete-hrm-map-prerequisite
   - target-hrm-first
-  - approved-milestone-bundle
+  - published-milestone-bundle
   - no-operator-lane-enumeration
   - bounded-scope
   - prospective-adoption-baseline
@@ -49,6 +52,9 @@ controls:
   - deterministic-integration
   - single-writer-integration
   - exception-only-human-interruption
+  - autonomous-contract-update-request-routing
+  - quiet-lanes-noisy-hrm-stop
+  - operator-function-acceptance
   - milestone-review-and-remediation
   - explicit-human-closure
   - post-merge-verification
@@ -61,7 +67,7 @@ controls:
 
 # HRM Bundle Coordination Standard
 
-Use this playbook to execute an approved implementation bundle toward one Human Review
+Use this playbook to execute a published implementation bundle toward one Human Review
 Milestone (HRM). The target HRM is the work session's operator-visible outcome. Lanes
 are bounded, auditable implementation units derived by the System Build and Human Review
 Milestone Standard; they are not the normal operator-facing session target.
@@ -76,10 +82,12 @@ the operator explicitly closes or defers the target HRM.
 ## Inputs
 
 - **System or project:** `{{system_reference}}`
+- **Project HRM map:** `{{project_hrm_map_or_session_contract}}`
 - **Target HRM:** `{{target_hrm}}`
 - **Milestone outcome:** `{{milestone_outcome}}`
 - **Milestone session contract:** `{{milestone_session_contract_or_discover}}`
-- **Approved lane bundle:** `{{approved_lane_bundle_or_derive_from_session_contract}}`
+- **Published lane bundle:** `{{published_lane_bundle_or_derive_from_session_contract}}`
+- **Legacy approved-lane bundle:** `{{approved_lane_bundle_or_none}}`
 - **Manual lane bundle:** `{{manual_lane_bundle_or_none}}`
 - **Current HRM:** `{{current_hrm_or_discover}}`
 - **Review questions:** `{{review_questions_or_session_contract}}`
@@ -97,7 +105,7 @@ the operator explicitly closes or defers the target HRM.
 - **Standing merge authority:** `{{standing_merge_authority_or_project-policy}}`
 - **Supervisor rotation limits:** `{{supervisor_rotation_limits_or_default}}`
 
-The normal caller is the system-build playbook, which supplies the approved bundle. A
+The normal caller is the system-build playbook, which supplies the published bundle. A
 manual bundle is a legacy or emergency constraint, not an invitation to make the
 operator reconstruct the plan.
 
@@ -110,21 +118,23 @@ Target HRM: HRM-2.
 Milestone outcome: an operator can complete the bounded workflow and understand every
 failure without production side effects.
 Milestone session contract: milestones/HRM-2.md.
-Approved lane bundle: derive from that contract.
+Published lane bundle: derive from that contract.
 Activation posture: read-only.
 ```
 
 ## Prompt
 
 ```text
-Coordinate the approved implementation bundle for this milestone session.
+Coordinate the published implementation bundle for this milestone session.
 
 System: {{system_reference}}.
+Project HRM map: {{project_hrm_map_or_session_contract}}.
 Current HRM: {{current_hrm_or_discover}}.
 Target HRM: {{target_hrm}}.
 Milestone outcome: {{milestone_outcome}}.
 Milestone session contract: {{milestone_session_contract_or_discover}}.
-Approved lane bundle: {{approved_lane_bundle_or_derive_from_session_contract}}.
+Published lane bundle: {{published_lane_bundle_or_derive_from_session_contract}}.
+Legacy approved-lane bundle: {{approved_lane_bundle_or_none}}.
 Manual lane bundle: {{manual_lane_bundle_or_none}}.
 Review questions: {{review_questions_or_session_contract}}.
 Required order: {{required_order_or_dependency_graph}}.
@@ -141,12 +151,13 @@ Protected governance paths: {{protected_governance_paths_or_project-policy}}.
 Standing merge authority: {{standing_merge_authority_or_project-policy}}.
 Supervisor rotation limits: {{supervisor_rotation_limits_or_default}}.
 
-The target HRM, not a list of lanes, is the work session's controlling objective. Obey
+The target HRM, not a list of lanes, is the work session's controlling objective. It
+must resolve from the complete, versioned project HRM map published at inception. Obey
 every applicable AGENTS.md, approved system plan, milestone contract, and lane contract.
-Do not ask the operator to enumerate lanes. If the target HRM is undefined, the bundle
-is absent or unapproved, or the bundle cannot plausibly satisfy the milestone outcome,
-return control to the system-build playbook for amendment and approval. Do not discover,
-create, silently enlarge, or begin additional lanes in this execution playbook.
+Do not ask the operator to enumerate lanes. If the map or target is undefined, the
+bundle is absent, or the bundle cannot plausibly satisfy the milestone outcome, return
+control to the system-build playbook for rebaseline. Do not discover, create, silently
+enlarge, or begin additional lanes in this execution playbook.
 
 Use one change unit per branch, dedicated worktree, PR, and merge decision unless the
 owning project explicitly requires otherwise. Treat approved repository policy at the
@@ -160,9 +171,9 @@ AUTHORITY AND ROLES
    correction decisions, integration order, cleanup, continuity, and report. A
    deterministic merge controller, when configured, is the routine integration writer.
 2. The system-build playbook owns HRM definition, gap analysis, lane creation or
-   rebaselining, findings disposition, and the canonical milestone package. The lane
-   coordinator executes only the approved bundle and returns scope-changing discoveries
-   to that owner.
+   rebaselining, contract-update requests, findings disposition, and the canonical
+   milestone package. The lane coordinator executes only the published bundle and
+   returns scope-changing discoveries to that owner.
 3. Give builders only applicable rules, lane spec, worktree, branch, exact base/head,
    allowed files, checker, assigned HRM, and bounded assignment. Builders edit; contract
    auditors and reviewers are read-only. Agents never count as human approvers.
@@ -171,8 +182,9 @@ AUTHORITY AND ROLES
    HUMANS mode, protected or high-risk changes require the non-authoring human when
    project policy says so. In MANY COLLABORATORS mode, use ownership review, protected
    rules, and a hosted merge queue when available. Human review is required only by the
-   milestone contract, risk or protected-path policy, a classified exception, or
-   reserved business/production authority.
+   HRM contract, risk or protected-path policy, a classified exception, or reserved
+   business/production authority. Routine lane-level UI approval is not a substitute
+   for the prepared HRM function/UI/UX review.
 5. Keep full logs in the PR or an artifact. Require compact handoffs with target HRM,
    state, exact SHA, policy SHA, evidence, findings, unresolved decisions, exception
    class, cleanup disposition, and next authorized action.
@@ -180,14 +192,17 @@ AUTHORITY AND ROLES
 ESTABLISH THE MILESTONE SESSION
 
 6. Fetch and reconcile current main, then read applicable repository policy, system
-   plan, target milestone contract, requirements, contracts, decisions, findings,
-   approved lane specs, and predecessor handoffs. Prove the target HRM has a defined
-   outcome, review questions, closure criteria, authority envelope, activation posture,
-   and approved lane bundle.
+   plan, complete project HRM map and version, target milestone contract, requirements,
+   contracts, contract-update requests, decisions, findings, published lane specs, and
+   predecessor handoffs. Prove the target HRM exists in the map and has a defined outcome,
+   review questions, closure criteria, authority envelope, activation posture, and lane
+   bundle. If the full map is absent or silently incomplete, stop and return a rebaseline
+   request; do not manufacture missing milestones.
 7. Record the lifecycle `planned -> executing -> review_ready -> in_review ->
    remediation -> awaiting_closure -> closed|deferred|blocked`. `review_ready` is a
-   prepared human checkpoint, not completion or approval. Do not release or begin work
-   assigned to a later HRM while this milestone remains open.
+   conspicuous hard human checkpoint, not completion or approval. Do not solve around
+   failed operator behavior, begin remediation, or release work assigned to a later HRM
+   while this milestone remains open and undispositioned.
 8. When completion mode is enabled, record one adoption SHA on main and treat earlier
    history as the legacy baseline. Reconcile contradictory rules once in a register,
    including lane versus change-unit granularity, documentation publication, business
@@ -198,13 +213,15 @@ ESTABLISH THE MILESTONE SESSION
    contract prospectively to open and future changes.
 9. Maintain an operator-facing milestone banner throughout the session: system, current
    HRM, target HRM, milestone outcome, capabilities complete, capabilities remaining,
-   blockers, decisions requested, activation posture, integrated head, and next action.
-   Lane progress is supporting detail beneath this view.
+   blockers, contract-update requests, decisions requested, function review state,
+   activation posture, integrated head, and next action. Lane progress is quiet supporting
+   detail beneath this view unless it creates a classified HRM blocker.
 
-PLAN THE APPROVED BUNDLE ONCE
+PLAN THE PUBLISHED BUNDLE ONCE
 
 10. Reconcile origin/main, worktrees, branches, PRs, CI, lane states, dependencies, and
-    file ownership for the approved bundle. A manual bundle may narrow execution but may
+    file ownership for the published bundle. A legacy approved bundle or manual bundle
+    may narrow execution but may
     not silently replace the canonical milestone contract.
 11. Record each lane's requirement and milestone coverage, contract, state, dependencies,
     base, worktree, branch, owned files, checker, validation class, risk, reviewer policy,
@@ -227,9 +244,12 @@ PROVE READINESS BEFORE CODING
     unspecified lane does not enter implementation.
 15. Batch foreseeable gaps into one amendment packet: observed reality, effect on the
     target HRM, proposed correction, files/owners, alternatives, safe default, and
-    recommendation. Return the packet to the system-build playbook. An existing mandatory
-    checker remains binding; if disproportionate, amend the lane contract explicitly
-    instead of silently bypassing or repeatedly running it.
+    recommendation. A missing or inadequate inter-system promise becomes a stable `CTRQ`
+    routed to the system-build or contract owner; the request records the unknown and
+    blocks dependent work but never supplies the missing answer. Return material HRM-
+    meaning changes to the system-build playbook. An existing mandatory checker remains
+    binding; if disproportionate, amend the lane contract explicitly instead of silently
+    bypassing or repeatedly running it.
 
 SELECT THE EXACT TEST PLAN
 
@@ -405,7 +425,8 @@ RUN THE FASTEST SAFE FLOW
 21. Run applicable CI and risk-scaled exact-head review concurrently. Blocking findings
     require a violated invariant plus a reproduction, failing test, or concrete contract
     mismatch. A presentation-only lane needs lightweight automated visual/accessibility
-    evidence and operator approval, not an independent code reviewer.
+    evidence; operator acceptance occurs against the integrated HRM function/UI/UX
+    journey, not as a separate lane-management gate.
 22. A repository-wide suite is required only when at least one of these is true:
 
     - shared domain, contract, persistence, authentication, or provider code changed;
@@ -454,35 +475,44 @@ INTEGRATE AND VERIFY
 
 PREPARE AND REVIEW THE TARGET HRM
 
-29. Once the approved bundle is integrated, validate the integrated exact head. For a
+29. Once the published bundle is integrated, validate the integrated exact head. For a
     bundle of lighter-weight lanes, run scoped lane checks and one combined regression
     suite at this boundary when the milestone contract or full-suite triggers require
     it. Run the full suite again before any production canary or release.
-30. Publish one milestone review package containing the system and target HRM; milestone
-    outcome and decisions requested; capabilities completed in operator language; exact
+30. Publish one milestone review package containing the project HRM map version, system
+    and target HRM; milestone outcome and decisions requested; capabilities completed in
+    operator language; exact
     integrated revision and configuration; live preview or deterministic scenarios;
     tests aggregated by validation class; limitations and blockers; external-mutation
-    and activation posture; cleanup/integration receipt; provisional downstream impact;
-    and the exact effect of closure. Move the session to REVIEW READY and pause for the
-    operator. A visible UI, completed lane list, or ended meeting is not HRM closure.
+    and activation posture; open/resolved/blocking contract-update requests;
+    cleanup/integration receipt; provisional downstream impact; explicit operator
+    function/UI/UX acceptance fields; and the exact effect of closure. Move the session
+    to REVIEW READY, make the stop noisy, and pause for the operator. A visible UI,
+    completed lane list, or ended meeting is not function acceptance or HRM closure.
 31. Interrupt the human only for a prepared milestone/UI/UX/functional review; one
     batched scope, policy, or contract decision; persistent CI or content conflict;
     missing or contradictory evidence; protected governance change; unresolved
     authority; or action-time approval for a canary, external/production mutation,
     deployment, credential/permission change, or irreversible migration. Routine merge
-    and cleanup operations within standing authority are not human gates.
+    and cleanup operations within standing authority are not human gates. A `CTRQ` whose
+    answer can be established by verified approved contracts or read-only discovery need
+    not interrupt the operator; a request requiring new business meaning or authority is
+    batched into the HRM-level decision packet.
 32. Record review findings append-only with stable identifiers and return them to the
     system-build playbook for classification. Verified defects against already-approved
     requirements may become published remediation lanes and execute without another
-    scope decision. Missing functions, policy or authority changes, new persistence or
-    external effects, or changed milestone outcomes require one batched operator approval.
+    scope decision only after operator review or explicit finding disposition. Missing
+    functions, policy or authority changes, new persistence or external effects, or
+    changed milestone outcomes require one batched operator approval.
 33. Keep the same milestone session and target HRM through approved remediation. Pause
     downstream work, execute only the published remediation bundle, revalidate affected
     evidence, rebaseline downstream specifications, and republish the review package.
     Do not silently enlarge the original lane or start a new milestone session.
 34. Close or defer the HRM only on the operator's explicit decision after every finding
-    has a classification, owner, blocking status, disposition, and required evidence.
-    Closure makes the next approved bundle eligible but does not start it. HRM closure
+    has a classification, owner, blocking status, disposition, and required evidence,
+    and after function/UI/UX acceptance is recorded as accepted, accepted with findings,
+    or rejected.
+    Closure makes the next published bundle eligible but does not start it. HRM closure
     never by itself authorizes a canary, provider write, deployment, migration, or
     production activation.
 
@@ -574,6 +604,10 @@ MEASURE AND REPORT
 milestone_session:
   id: "{{session_id}}"
   system_reference: "{{system_reference}}"
+  hrm_map:
+    path: "{{path}}"
+    version: "{{version}}"
+    complete_at_inception: true
   current_hrm: null
   target_hrm: "{{target_hrm}}"
   milestone_contract: "{{path}}"
@@ -596,9 +630,12 @@ milestone_session:
     capabilities_remaining: []
     blockers: []
     decisions_requested: []
+    contract_update_requests: []
+    function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
     integrated_head_sha: null
     next_action: null
-  approved_lane_bundle: []
+  published_lane_bundle: []
+  legacy_approved_lane_bundle: []
   manual_lane_constraint: []
   completion_mode: false
   adoption_sha: null
@@ -632,12 +669,25 @@ milestone_session:
     open: []
     blocking: []
     remediation_bundle: []
+  contract_update_requests:
+    open: []
+    resolved: []
+    blocking: []
+  noise_posture:
+    routine_lane_updates: quiet
+    hrm_stop: noisy
+    last_operator_interrupt_reason: null
   closure:
     decision: "pending|closed|deferred"
     decided_by: null
     decided_at: null
     rationale: null
     released_next_bundle: []
+    operator_function_acceptance:
+      decision: "pending|accepted|accepted_with_findings|rejected"
+      decided_by: null
+      decided_at: null
+      evidence: []
   supervisor:
     generation: 1
     task_id: null
@@ -745,6 +795,10 @@ milestone_cleanup:
 
 ## Change note
 
+- **3.1 — 2026-08-21:** Requires the complete inception-time HRM map and map version,
+  routes missing inter-system promises through non-adopting `CTRQ` records, keeps routine
+  lane execution quiet, makes `review_ready` a noisy hard stop, and moves explicit
+  function/UI/UX acceptance and remediation disposition to the integrated HRM level.
 - **3.0 — 2026-08-21:** Makes the target HRM the work-session objective and lanes derived execution units; adds milestone readiness/review/remediation/closure states, operator-facing milestone reporting, prospective completion baselines, contradiction handling, operating profiles, deterministic single-writer integration, exception-only interruption, durable supervision, and safe project-scoped worktree cleanup. HRM closure remains separate from canary, deployment, provider-write, migration, and production authority.
 - **2.2 — 2026-08-21:** Adds behavior-and-reach test selection with exact command/scenario planning, required checks for CSS/markup, JavaScript, backend logic, data transformations and datasets, persistence/migrations, private refactors, shared core/dependencies, APIs/providers, configuration, and documentation, plus cross-cutting risk modifiers, base-vs-head failure handling, and planned-versus-executed evidence reconciliation.
 - **2.1 — 2026-08-21:** Separates live HOTL UI iteration from a frozen acceptance candidate; adds validation classes, explicit full-suite triggers, risk-scaled review, proportional SHA evidence invalidation, and integrated-head regression backstops while preserving mandatory lane checkers and critical integration gates.

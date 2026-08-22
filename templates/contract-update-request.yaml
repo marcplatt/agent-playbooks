@@ -1,0 +1,72 @@
+contract_update_request:
+  schema_version: agent_playbooks.contract_update_request.v1
+  id: "{{stable_ctrq_id}}"
+  status: "open|acknowledged|evidence_needed|decision_needed|amended|propagated|resolved|rejected"
+  created_at: null
+  created_by_role: hrm_orchestrator
+  originating_context:
+    system_reference: "{{consumer_system}}"
+    target_hrm: "{{hrm_id}}"
+    milestone_session: null
+    requirement_ids: []
+    acceptance_ids: []
+    repository: null
+    exact_sha: null
+  provider:
+    system_reference: "{{provider_system}}"
+    accountable_role: null
+    canonical_contract_surface: null
+    request_route: null
+  consumers:
+    - system_reference: "{{consumer_system}}"
+      repository: null
+      contract_reference: null
+  existing_contracts:
+    - id: null
+      version: null
+      status: "accepted|proposed|missing|unknown"
+      evidence: []
+  gap:
+    class: "missing|ambiguous|stale_evidence|contradiction|compatibility_break|implementation_mismatch"
+    promise_class: "semantic|syntactic|behavioral|operational"
+    summary: "{{exact_missing_promise}}"
+    observation: null
+    evidence: []
+    evidence_freshness: unknown
+  impact:
+    operator_function: null
+    affected_hrms: []
+    affected_requirements: []
+    compatibility: "compatible|conditional|breaking|unknown"
+    consequence_if_unresolved: null
+  safe_posture:
+    frozen_boundary: null
+    permitted_continuation: []
+    activation_posture: read_only
+    external_mutations: 0
+  request:
+    evidence_needed: []
+    decision_needed: []
+    proposed_contract_change: null
+    recommendation: null
+    safe_default: remain_blocked
+  causality:
+    deterministic_key: null
+    caused_by: null
+    source_repository: null
+    source_sha: null
+  routing:
+    routed_to_role: null
+    route: null
+    delivered: false
+    read_back: false
+    acknowledgement: null
+  resolution:
+    decision_record: null
+    accepted_contract_id: null
+    accepted_contract_version: null
+    provider_sha: null
+    propagated_repositories: []
+    consumer_read_back: []
+    resolved_at: null
+  provider_or_production_mutations: 0

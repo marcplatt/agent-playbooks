@@ -2,6 +2,27 @@ system_build_session:
   id: MS-EXAMPLE-2026-08-21-HRM-2
   system_reference: SYS-EXAMPLE-001
   project_root: /example/project
+  hrm_map:
+    path: milestones/index.yaml
+    version: 1.0.0
+    source_sha: 1111111111111111111111111111111111111111
+    all_intended_hrms_published: true
+    milestones:
+      - id: HRM-0
+        status: closed
+        outcome: Approve the system model, full milestone journey, contracts, and first implementation release effect.
+      - id: HRM-1
+        status: closed
+        outcome: Review the read-only vertical slice with real inputs and safe failure.
+      - id: HRM-2
+        status: executing
+        outcome: Perform, correct, and understand the complete local operator workflow.
+      - id: HRM-3
+        status: planned
+        outcome: Review one explicitly authorized side effect with read-back and reconciliation.
+      - id: HRM-4
+        status: planned
+        outcome: Review activation readiness, residual risk, monitoring, support, and recovery.
   current_hrm:
     id: HRM-1
     status: closed
@@ -14,7 +35,7 @@ system_build_session:
       - Can the operator recover safely from invalid and stale input?
     closure_criteria:
       - All blocking workflow findings are resolved or explicitly deferred.
-      - The integrated review head passes the approved bundle checks.
+      - The integrated review head passes the published bundle checks.
     closure_authority: human_operator
     release_effect: Makes the controlled-canary planning bundle eligible; it does not authorize a canary.
   status: executing
@@ -26,6 +47,14 @@ system_build_session:
     deployment: false
     production_activation: false
   activation_posture: read_only
+  contract_update_requests:
+    open: []
+    blocking: []
+    resolved:
+      - id: CTRQ-EXAMPLE-001
+        provider: SYS-EXAMPLE-PROVIDER
+        accepted_contract_version: CTR-EXAMPLE-004/1.1.0
+        consumer_read_back: verified
   acceptance_matrix:
     - acceptance_id: ACC-EXAMPLE-021
       requirement_ids: [REQ-EXAMPLE-014]
@@ -39,7 +68,7 @@ system_build_session:
       full_suite_triggers: []
   lane_bundle:
     source: derived
-    approval_status: approved
+    planning_authority: standing_hrm_contract
     lanes:
       - id: EX-02.1
         milestone_contribution: [complete_the_local_workflow]
@@ -58,7 +87,7 @@ system_build_session:
         validation_class: application_behavior
         contract: docs/lanes/EX-02.2.md
         publication_sha: 1111111111111111111111111111111111111111
-        state: approved
+        state: published
   operator_banner:
     capabilities_complete: []
     capabilities_remaining:
@@ -66,10 +95,12 @@ system_build_session:
       - Recover safely from stale input.
     blockers: []
     decisions_requested: []
+    contract_update_requests: []
     integrated_head_sha: null
     next_action: Execute EX-02.1 through the HRM bundle coordinator.
   review_package:
     status: not_started
+    operator_function_acceptance: pending
     external_mutations: 0
   findings:
     ledger: findings/HRM-2.jsonl
@@ -78,4 +109,5 @@ system_build_session:
     remediation_bundle: []
   closure:
     decision: pending
+    operator_function_acceptance: pending
     released_next_bundle: []
