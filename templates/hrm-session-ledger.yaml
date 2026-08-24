@@ -1,5 +1,5 @@
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2
+  schema_version: agent_playbooks.hrm_session_ledger.v2.1
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -140,11 +140,21 @@ lanes:
     change_unit_id: null
     worktree: null
     branch: null
+    pull_request: null
     base_sha: null
     candidate_head_sha: null
     main_sha: null
+    integration_receipt: null
     validation_class: application_behavior
     exact_checks: []
     full_suite_triggers: []
     external_mutations: 0
     cleanup_disposition: pending
+discovery_spikes:
+  - id: "{{discovery_id}}"
+    assigned_hrm: "{{target_hrm}}"
+    question: null
+    safe_method: "fixture|read_only|writes_disabled|other"
+    disposition: "active|discarded|retained_evidence_change_unit|rebaseline_required"
+    retained_change_unit_id: null
+    pull_request: null

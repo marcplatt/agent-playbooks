@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.0"
+version: "4.1"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -54,6 +54,9 @@ controls:
   - worker-to-orchestrator-routing
   - semantic-read-back
   - task-is-not-change-unit
+  - one-hrm-many-change-units
+  - one-change-unit-one-branch-normal-one-pr
+  - disposable-discovery-no-pr-by-default
   - conditional-worktree
   - stable-operator-checkout
   - bounded-agent-context
@@ -86,6 +89,12 @@ Use this playbook to execute a published implementation bundle toward one Human 
 Milestone (HRM). The target HRM is the work session's operator-visible outcome. Lanes
 are bounded, auditable implementation units derived by the System Build and Human Review
 Milestone Standard; they are not the normal operator-facing session target.
+
+One HRM session may own multiple serial or parallel published change units. Each published
+change unit gets one branch, normally one PR, and one integration receipt. A lane normally
+maps to one change unit. When independently reviewable ownership, risk, validation, rollback,
+or integration boundaries emerge, return for a bounded split instead of turning the lane or
+HRM into one large long-lived PR.
 
 The coordinator owns session state, authority, dependencies, evidence, validation,
 integration, milestone readiness, and cleanup. Builders implement; risk-scaled checks
@@ -182,11 +191,14 @@ system-build playbook for rebaseline. Do not discover, create, silently enlarge,
 additional lanes in this execution playbook. A manual bundle cannot suppress that return.
 
 A task or conversation is not a Git change unit. Attach it to this HRM session and a
-published change unit before creating Git state. Use one branch per published change unit.
-Create a worktree only when concurrency, an active review runtime, or preservation of unique
-unmerged work requires it. Treat approved repository policy at the current main SHA as the
-durable automation authority. Record a contradiction instead of silently selecting between
-conflicting instructions.
+published change unit before creating Git state. Use one branch per published change unit,
+normally one PR, and one integration receipt. One HRM may contain multiple change units and
+PRs. A lane normally maps to one change unit; if it needs independently reviewable ownership,
+risk, validation, rollback, or integration boundaries, return a split proposal to system
+build rather than silently enlarging it. Create a worktree only when concurrency, an active
+review runtime, or preservation of unique unmerged work requires it. Treat approved repository
+policy at the current main SHA as the durable automation authority. Record a contradiction
+instead of silently selecting between conflicting instructions.
 
 AUTHORITY AND ROLES
 
@@ -313,6 +325,14 @@ PROVE READINESS BEFORE CODING
      effect, or authority/evidence state, return an `HRM_DISCOVERY` proposal to system build.
      Freeze the affected boundary and do not create a branch, worktree, or lane for the
      proposed HRM until a superseding map version is accepted and published.
+15d. Unknown API or implementation behavior inside accepted semantics may use a bounded,
+     deliberately disposable discovery spike with fixtures, read-only calls, or writes
+     structurally disabled. The spike stays attached to the current HRM and creates no PR by
+     default. Discard exploratory code after the semantic read-back unless durable evidence
+     is worth retaining. Retained contracts, fixtures, tests, or documentation become a
+     published evidence change unit with one branch, normally one PR, and an explicit
+     disposition. If the learning changes outcome, authority, contract meaning, persistence,
+     external effects, or HRM closure/release semantics, stop and return to system build.
 
 SELECT THE EXACT TEST PLAN
 
@@ -487,7 +507,10 @@ RUN THE FASTEST SAFE FLOW
 
 20. Freeze one acceptance commit, verify its ownership boundary, run the applicable
     checks plus every still-mandatory lane checker, push, and bind the PR body, human
-    acceptance, automated evidence, and required review to the candidate head SHA.
+    acceptance, automated evidence, and required review to the candidate head SHA. The
+    PR represents one published change unit and may contain multiple intention-revealing
+    commits; it does not need to contain the entire HRM. A disposable discovery spike has
+    no PR unless its retained evidence was published as a change unit.
 21. Run applicable CI and risk-scaled exact-head review concurrently. Blocking findings
     require a violated invariant plus a reproduction, failing test, or concrete contract
     mismatch. A presentation-only lane needs lightweight automated visual/accessibility
@@ -826,7 +849,7 @@ milestone_session:
 
 lanes:
   - id: "{{lane_id}}"
-    change_id: "{{change_id_or_lane_id}}"
+    change_unit_id: "{{change_unit_id_or_lane_id}}"
     assigned_hrm: "{{target_hrm}}"
     milestone_contribution: []
     state: "queued|readiness_audit|blocked_contract|awaiting_amendment_approval|ready_to_build|building|design_iteration|candidate_frozen|checking|reviewing|correcting|eligible|merging|verifying_main|cleanup_pending|complete|deferred|cancelled|blocked_external|blocked"
@@ -883,6 +906,7 @@ lanes:
     correction_round: 0
     merge_sha: null
     main_sha: null
+    integration_receipt: null
     external_mutations: 0
     worktree_cleanup:
       candidate_path: null
@@ -924,6 +948,11 @@ milestone_cleanup:
 
 ## Change note
 
+- **4.1 — 2026-08-24:** Makes the Git hierarchy explicit: one HRM may own multiple
+  published change units; each change unit gets one branch, normally one PR, and one
+  integration receipt; a lane normally maps to one change unit and splits at independent
+  ownership, risk, validation, rollback, or integration boundaries. Adds disposable API
+  discovery that creates no PR unless durable evidence is retained.
 - **4.0 — 2026-08-24:** Generalizes ownership; makes tasks distinct from published Git
   change units; makes worktrees conditional; establishes one stable operator checkout and
   current-review index; adds worker-to-orchestrator S0-S3 escalation, semantic read-back,

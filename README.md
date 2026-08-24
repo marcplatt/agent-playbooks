@@ -96,11 +96,16 @@ uncertainty to the orchestrator; they do not independently bombard the operator.
 ## Workspace model
 
 A Codex task or conversation is not a Git change unit. A task first attaches to a published
-HRM session. Create a branch only for an independently reviewable, published change unit.
+HRM session. One HRM session may own multiple serial or parallel published change units. Each
+published change unit gets one branch, normally one PR, and one integration receipt. A lane
+normally maps to one change unit; split it when independently reviewable ownership, risk,
+validation, rollback, or integration boundaries emerge instead of silently enlarging it.
 Create a worktree only when concurrent execution, an active review runtime, or preservation
-of unique unmerged work requires it. Each project designates one stable operator checkout and
-one stable current-review index; worker agents never implement in that checkout. Reconcile and
-remove eligible worktrees after verified integration rather than waiting for HRM closure.
+of unique unmerged work requires it. Disposable API or behavior discovery may end without a
+PR; retain it only as a bounded evidence, contract, fixture, test, or documentation change
+unit. Each project designates one stable operator checkout and one stable current-review index;
+worker agents never implement in that checkout. Reconcile and remove eligible worktrees after
+verified integration rather than waiting for HRM closure.
 
 ## Using a playbook
 

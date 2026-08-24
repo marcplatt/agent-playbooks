@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.0"
+version: "2.1"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -59,6 +59,9 @@ controls:
   - activation-separation
   - stable-operator-checkout
   - conditional-worktree-and-branch
+  - one-hrm-many-change-units
+  - one-change-unit-one-branch-normal-one-pr
+  - disposable-discovery-no-pr-by-default
   - project-scoped-cleanup
 ---
 
@@ -78,6 +81,12 @@ derived from the system plan, project-wide HRM map, and milestone gap analysis. 
 new project publishes all HRMs that are presently knowable before implementation.
 Unknown milestone facts remain explicit blockers or requests; they are never filled by
 inference. A later discovery is governed through map amendment and supersession.
+
+The Git hierarchy is explicit: one HRM session may own multiple serial or parallel
+published change units. Each published change unit gets one branch, normally one PR, and
+one integration receipt. A lane normally maps to one change unit. Split it when independent
+ownership, risk, validation, rollback, or integration boundaries emerge; do not force the
+whole HRM into one long-lived PR or create Git state merely because a task was opened.
 
 ## Operator model
 
@@ -313,6 +322,14 @@ ANALYZE THE SYSTEM BEFORE LANES
     independent permitted work. Assign one primary disposition: human decision, `CTRQ`,
     read-only discovery, planning amendment/rebaseline, accepted limitation, named-HRM
     deferral, or `blocked_external`.
+14a. Resolve unknown API or implementation behavior first through the smallest deliberately
+     disposable discovery spike that can answer the question with fixtures, read-only calls,
+     or writes structurally disabled. The spike remains attached to the current HRM and has
+     no PR by default. Discard exploratory code unless a contract, fixture, test, or
+     documentation artifact is valuable enough to publish as its own evidence change unit.
+     Route any changed business meaning, authority, persistence, public contract, external
+     effect, or distinct operator outcome back through the decision frontier or
+     `HRM_DISCOVERY` before non-disposable implementation.
 15. Freeze only affected boundaries when evidence changes. A new product outcome, policy,
     schema meaning, persistence model, provider mutation, public contract, or activation
     step requires a planning amendment; it is not an implementation inference. The
@@ -637,6 +654,7 @@ system_build_session:
     approval_evidence: null
     lanes:
       - id: "{{lane_id}}"
+        change_unit_id: "{{change_unit_id}}"
         milestone_contribution: []
         requirement_ids: []
         dependencies: []
@@ -644,7 +662,18 @@ system_build_session:
         validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
         contract: "{{path}}"
         publication_sha: null
+        branch: null
+        pull_request: null
+        integration_receipt: null
         state: "proposed|approved|executing|integrated|blocked|complete"
+  discovery_spikes:
+    - id: "{{discovery_id}}"
+      assigned_hrm: "{{target_hrm}}"
+      question: null
+      safe_method: "fixture|read_only|writes_disabled|other"
+      disposition: "active|discarded|retained_evidence_change_unit|rebaseline_required"
+      retained_change_unit_id: null
+      pull_request: null
   operator_banner:
     capabilities_complete: []
     capabilities_remaining: []
@@ -711,6 +740,10 @@ system_build_session:
 
 ## Change note
 
+- **2.1 — 2026-08-24:** Defines one HRM as the orchestration/review boundary and published
+  change units as the Git boundary. Allows multiple change units per HRM; assigns each one
+  branch, normally one PR, and one integration receipt; makes lanes normally one-to-one
+  with change units; and adds disposable API discovery with no PR unless evidence is retained.
 - **2.0 — 2026-08-24:** Generalizes ownership; defines complete-as-presently-knowable
   HRM maps and governed discoveries; adds S0-S3 decision-frontier escalation, worker-to-
   orchestrator routing, semantic read-back/readiness, a disposable end-to-end proof, and

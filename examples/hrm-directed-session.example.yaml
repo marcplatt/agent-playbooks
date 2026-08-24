@@ -121,6 +121,7 @@ system_build_session:
     planning_authority: standing_hrm_contract
     lanes:
       - id: EX-02.1
+        change_unit_id: CU-EX-02.1
         milestone_contribution: [complete_the_local_workflow]
         requirement_ids: [REQ-EXAMPLE-014]
         dependencies: []
@@ -128,8 +129,12 @@ system_build_session:
         validation_class: ui_interaction
         contract: docs/lanes/EX-02.1.md
         publication_sha: 1111111111111111111111111111111111111111
+        branch: change/CU-EX-02.1
+        pull_request: https://example.invalid/pulls/21
+        integration_receipt: null
         state: executing
       - id: EX-02.2
+        change_unit_id: CU-EX-02.2
         milestone_contribution: [recover_from_stale_input]
         requirement_ids: [REQ-EXAMPLE-015]
         dependencies: [EX-02.1]
@@ -137,7 +142,18 @@ system_build_session:
         validation_class: application_behavior
         contract: docs/lanes/EX-02.2.md
         publication_sha: 1111111111111111111111111111111111111111
+        branch: change/CU-EX-02.2
+        pull_request: null
+        integration_receipt: null
         state: published
+  discovery_spikes:
+    - id: DISC-EXAMPLE-API-001
+      assigned_hrm: HRM-2
+      question: How does the fixture-backed API represent stale input?
+      safe_method: fixture
+      disposition: discarded
+      retained_change_unit_id: null
+      pull_request: null
   operator_banner:
     capabilities_complete: []
     capabilities_remaining:

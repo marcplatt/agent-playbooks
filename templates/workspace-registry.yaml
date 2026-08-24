@@ -1,5 +1,5 @@
 workspace_registry:
-  schema_version: agent_playbooks.workspace_registry.v1
+  schema_version: agent_playbooks.workspace_registry.v1.1
   project_repository: "{{project_repository}}"
   source_revision: null
   operator_desk:
@@ -16,6 +16,10 @@ workspace_registry:
   branch_policy:
     task_is_git_change_unit: false
     branch_requires_published_change_unit: true
+    one_hrm_may_have_multiple_change_units: true
+    one_branch_per_change_unit: true
+    normal_pr_count_per_change_unit: 1
+    one_integration_receipt_per_change_unit: true
     worktree_is_conditional: true
   worktrees:
     - path: "{{absolute_worktree_path}}"

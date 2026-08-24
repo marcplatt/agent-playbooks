@@ -22,8 +22,9 @@ notification; do not require the operator to locate a worker branch or worktree.
 ## Review candidate
 
 - Review package: `{{path_or_url}}`
-- Branch: `{{branch}}`
-- Exact SHA/artifact digest: `{{revision}}`
+- Integrated HRM head/artifact digest: `{{revision}}`
+- Active change units/branches/PRs: `{{ids_branches_prs_or_none}}`
+- Integration receipts: `{{ids_or_none}}`
 - Preview command or URL: `{{preview}}`
 - Configuration and data window: `{{configuration_and_data_window}}`
 

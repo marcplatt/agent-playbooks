@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-HRM-MAP-001
 title: HRM Map Discovery and Rebaseline
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: hrm-map-governance
@@ -23,6 +23,9 @@ A new or split HRM is justified when the discovery creates a distinct operator-v
 outcome, separate human acceptance or closure effect, different authority/evidence state,
 or independent downstream release effect. A defect, implementation lane, alternate design,
 test gap, contract request, or remediation item normally remains inside the existing HRM.
+Unknown API or implementation behavior also normally remains inside the existing HRM as a
+disposable discovery spike. It creates no PR unless retained evidence is published as a
+bounded change unit.
 
 ## Prompt
 
@@ -60,4 +63,7 @@ was amended. Discovery itself is expected; late controlled response is the failu
 
 ## Change note
 
+- **1.1 — 2026-08-24:** Keeps unforeseen API and implementation discovery inside the
+  current HRM by default, allows disposable spikes with no PR, and publishes only retained
+  evidence as a bounded change unit.
 - **1.0 — 2026-08-24:** Initial emergent-HRM discovery and supersession workflow.

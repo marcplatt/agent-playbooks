@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-WORKSPACE-001
 title: Workspace Topology and Review Handoff
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: operator-readable-workspace-control
@@ -19,7 +19,9 @@ Use this playbook to keep fast-moving Git work subordinate to one stable operato
 ## Policy
 
 - A task or conversation is not a Git change unit.
-- A branch represents one published, independently reviewable change unit.
+- One HRM may own multiple published change units.
+- A branch represents one published, independently reviewable change unit, normally one PR,
+  and one integration receipt.
 - A worktree is optional and exists only for concurrency, active review runtime, or preservation.
 - One designated project checkout is the operator desk; workers never implement there.
 - One current-review index locates the HRM package, exact SHA, preview, decisions, and blockers.
@@ -28,7 +30,8 @@ Use this playbook to keep fast-moving Git work subordinate to one stable operato
 
 ```text
 A task or conversation is not a Git change unit. Attach it to the current HRM session and
-a published change unit before creating Git state. Create one branch for that change unit.
+a published change unit before creating Git state. One HRM may own multiple change units.
+Create one branch for each change unit, normally one PR, and one integration receipt.
 Create a worktree only for concurrent execution, an active review runtime, or preservation
 of unique unmerged work. Worker agents must not implement in the designated operator
 checkout. Maintain one stable current-review index and reconcile eligible worktrees after
@@ -48,7 +51,7 @@ Current HRM: {{current_hrm_or_none}}
    registered worktrees, PRs, processes, dirty state, untracked/ignored unique artifacts, and
    the published HRM/change-unit registry. Never scan or mutate sibling repositories.
 2. Attach each task to an HRM session and published change unit before creating Git state.
-   Reuse the unit's branch. Create a worktree only when its necessity is recorded.
+   Reuse the unit's branch and PR. Create a worktree only when its necessity is recorded.
 3. Register every worktree with exact path, branch, HRM, change unit, owner, purpose, created
    time, last activity, state, review dependency, unique-work check, and cleanup condition.
 4. Keep the operator checkout free of worker implementation. Before `review_ready`, place or
@@ -68,4 +71,6 @@ Current HRM: {{current_hrm_or_none}}
 
 ## Change note
 
+- **1.1 — 2026-08-24:** Clarifies that one HRM may own multiple change units and that each
+  change unit uses one branch, normally one PR, and one integration receipt.
 - **1.0 — 2026-08-24:** Initial operator-desk, workspace-registry, and conditional-worktree workflow.
