@@ -6,7 +6,7 @@ system_build_session:
     path: milestones/index.yaml
     version: 1.0.0
     source_sha: 1111111111111111111111111111111111111111
-    all_intended_hrms_published: true
+    complete_as_presently_knowable: true
     milestones:
       - id: HRM-0
         status: closed

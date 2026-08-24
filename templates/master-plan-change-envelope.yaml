@@ -1,0 +1,58 @@
+master_plan_change_envelope:
+  schema_version: agent_playbooks.master_plan_change_envelope.v1
+  id: "{{change_envelope_id}}"
+  status: "proposed|accepted|published|intake_pending|propagated|superseded"
+  organization_id: "{{organization_id}}"
+  source:
+    repository: null
+    record_ids: []
+    versions_before: []
+    versions_after: []
+    base_sha: null
+    accepted_sha: null
+    accepted_by: null
+    accepted_at: null
+  differences:
+    semantic: []
+    syntactic: []
+    behavioral: []
+    operational: []
+  provenance:
+    evidence: []
+    evidence_expires_at: null
+    decision_packet_ids: []
+    semantic_read_back: null
+  impact:
+    systems: []
+    contracts: []
+    requirements: []
+    project_repositories: []
+    hrms: []
+    implementation_manifests: []
+  compatibility:
+    classification: "compatible|additive|breaking|unknown"
+    supported_versions: []
+    mixed_version_posture: null
+    migration: null
+    rollback_or_compensation: null
+    expiry_or_sunset_at: null
+  downstream:
+    rebaseline_required: false
+    required_records: []
+    project_intake_routes: []
+    safe_posture_until_adopted: null
+    permitted_work: []
+  unresolved_meaning:
+    present: false
+    input_requirement_ids: []
+    decision_packet_ids: []
+    no_inferred_default: true
+  authority:
+    documentation_propagation: false
+    implementation: false
+    merge: false
+    deployment: false
+    activation: false
+    canary: false
+    production: false
+  receipts: []

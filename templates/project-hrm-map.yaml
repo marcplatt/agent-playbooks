@@ -1,11 +1,25 @@
 project_hrm_map:
-  schema_version: agent_playbooks.project_hrm_map.v2
+  schema_version: agent_playbooks.project_hrm_map.v3
   system_reference: "{{system_reference}}"
   version: "{{map_version}}"
   status: "proposed|published|accepted|superseded"
   published_at: null
   source_sha: null
   supersedes: null
+  completeness_basis:
+    complete_as_presently_knowable: false
+    evidence_cutoff_at: null
+    acknowledged_unknowns: []
+    next_discovery_review_at: null
+  change_history:
+    - version: "{{map_version}}"
+      supersedes: null
+      changed_at: null
+      change_kind: "initial|hrm_addition|hrm_split|dependency_change|supersession|other"
+      discovery_ids: []
+      decision_packet_ids: []
+      affected_hrms: []
+      semantic_read_back: null
   operator_view: "{{operator_view_path_or_url}}"
   planning_hrm: "{{planning_hrm_id}}"
   last_closed_hrm: null
@@ -20,7 +34,7 @@ project_hrm_map:
     brownfield_capability_inventory: null
     system_node_registry: null
   publication_gate:
-    all_intended_hrms_present: false
+    all_presently_knowable_hrms_present: false
     unknowns_explicit: false
     closure_authority_present: false
     closure_effects_present: false
@@ -30,6 +44,8 @@ project_hrm_map:
     brownfield_parity_complete_or_not_applicable: false
     standalone_system_nodes_registered_or_not_applicable: false
     operator_review_state: "pending|accepted|accepted_with_findings|rejected"
+    decision_frontier_resolved_or_explicitly_blocked: false
+    semantic_readiness_reviewed: false
   milestones:
     - id: "{{hrm_id}}"
       title: "{{title}}"
@@ -82,6 +98,11 @@ project_hrm_map:
       findings_policy: append_only
       downstream_rebaseline_policy: required_when_affected
   open_contract_update_requests: []
+  hrm_discoveries:
+    observed: []
+    decision_needed: []
+    accepted_pending_publication: []
+    rejected_or_absorbed: []
   input_requirements: []
   brownfield_capability_inventory:
     required_operator_workflow: []
@@ -119,6 +140,8 @@ project_hrm_map:
     decisions_requested: []
     contract_update_requests: []
     input_requirements: []
+    decision_packet_ids: []
+    hrm_discovery_ids: []
     exact_integrated_sha: null
     activation_posture: read_only
     external_mutations: 0

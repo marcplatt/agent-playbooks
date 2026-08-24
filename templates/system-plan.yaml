@@ -1,0 +1,80 @@
+system_plan:
+  schema_version: agent_playbooks.system_plan.v1
+  system_reference: "{{system_reference}}"
+  version: "{{version}}"
+  status: "draft|in_review|accepted|superseded"
+  organization_sources:
+    operating_model_version: null
+    portfolio_version: null
+    system_record_revision: null
+  outcome: null
+  boundaries:
+    in_scope: []
+    out_of_scope: []
+    authoritative_subjects: []
+    prohibited_authority: []
+  actors_and_journeys: []
+  lifecycle_states: []
+  policies_and_invariants: []
+  privacy_and_security: []
+  dependencies: []
+  requirements:
+    ledger: null
+    stable_ids: []
+    provenance_complete: false
+  scenarios:
+    matrix: null
+    required_classes:
+      - normal
+      - boundary
+      - malformed
+      - denied
+      - unavailable
+      - duplicate
+      - stale
+      - partial
+      - retry
+      - recovery
+      - reconciliation
+      - rollback
+  contracts:
+    catalog: null
+    open_update_requests: []
+  system_nodes:
+    registry: null
+    standalone_or_non_git_nodes: []
+  brownfield_capability_inventory:
+    applicability: "required|not_applicable"
+    location: null
+    required_operator: []
+    advanced_operator: []
+    developer_or_audit: []
+    intentionally_superseded: []
+    unknown: []
+  implementation_manifest:
+    location: null
+    requirement_coverage_complete: false
+    current_support_and_gaps_verified: false
+  decision_frontier:
+    packet_ids: []
+    s0_open: []
+    s1_open: []
+    semantic_read_back_complete: false
+  semantic_readiness:
+    material_terms_explicit: false
+    authority_explicit: false
+    identity_and_lifecycle_explicit: false
+    contracts_implementable: false
+    evidence_current: false
+    operator_questions_explicit: false
+    state: "blocked|ready"
+  preliminary_hrm_map:
+    location: null
+    version: null
+    complete_as_presently_knowable: false
+  acceptance:
+    decided_by: null
+    decided_at: null
+    semantic_read_back: null
+    next_authorized_stage: "hrm_session_planning|none"
+  does_not_authorize: [code, merge, deployment, activation, canary, production]

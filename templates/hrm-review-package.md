@@ -26,6 +26,12 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 - Function/UI/UX acceptance: `accept | withhold with findings | defer`
 - {{specific_human_decision}}
 
+| Decision | S-class | First foreseeable/notified | Latest safe time | Recommendation | Safe posture |
+|---|---|---|---|---|---|
+| `{{decision_id}}` | {{s_class}} | {{times}} | {{latest_safe}} | {{recommendation}} | {{safe_posture}} |
+
+Semantic read-back: `{{accepted_meaning_scope_exclusions_and_expiry}}`
+
 ## Capabilities completed
 
 | Capability | Requirement/acceptance IDs | Implementing lanes | Evidence |
@@ -73,18 +79,28 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 |---|---|---|---|---|---|
 | `{{ctrq_id}}` | {{provider_or_role}} | {{gap}} | {{impact}} | {{safe_posture}} | {{status}} |
 
+## HRM discoveries and map changes
+
+| Discovery | Classification | Affected boundary | Recommendation | Map effect/status |
+|---|---|---|---|---|
+| `{{discovery_id}}` | {{classification}} | {{boundary}} | {{recommendation}} | {{map_effect_and_status}} |
+
 ## Findings
 
 - Ledger: `{{findings_ledger}}`
 - Blocking: `{{blocking_finding_ids_or_none}}`
 - Open non-blocking: `{{open_nonblocking_finding_ids_or_none}}`
 
-## Integration and cleanup receipt
+## Operator desk, integration, and cleanup receipt
 
+- Stable current-review index: `{{path}}`
+- Review branch and exact SHA: `{{branch_and_sha}}`
+- Preview command or URL: `{{preview}}`
 - Integrated main SHA: `{{main_sha}}`
 - Worktrees removed: `{{paths_or_none}}`
 - Worktrees retained: `{{path_and_reason_or_none}}`
-- Primary checkout: `{{path_branch_sha_clean_pull_result}}`
+- Operator checkout: `{{path_branch_sha_clean_review_posture}}`
+- Unexplained workspace entries: `{{none_or_blockers}}`
 - Other projects touched: `0`
 
 ## Closure

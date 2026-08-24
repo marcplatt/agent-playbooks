@@ -1,0 +1,59 @@
+system_portfolio:
+  schema_version: agent_playbooks.system_portfolio.v1
+  organization_id: "{{organization_id}}"
+  version: "{{version}}"
+  status: "draft|in_review|accepted|superseded"
+  operating_model:
+    version: "{{operating_model_version}}"
+    source_revision: null
+  systems:
+    - id: "{{system_id}}"
+      name: "{{system_name}}"
+      lifecycle: "proposed|planned|building|operational|retiring|retired"
+      purpose: null
+      outcome_ids: []
+      capability_ids: []
+      owner: null
+      operator: null
+      contract_owner: null
+      deployment_owner: null
+      node_kind: "repository|application|local_bridge|daemon|spreadsheet|provider|manual_service|other"
+      canonical_location: null
+      project_repository: null
+      authoritative_subjects: []
+      prohibited_authority: []
+      consumed_subjects: []
+      provided_interfaces: []
+      consumed_interfaces: []
+      dependencies: []
+      privacy_and_security_boundary: null
+      operational_boundary: null
+      current_hrm_reference: null
+      transition_or_coexistence: null
+  contracts:
+    - id: "{{contract_id}}"
+      version: null
+      producer: null
+      consumers: []
+      owner: null
+      canonical_location: null
+      freshness: null
+      compatibility: null
+      safe_failure: null
+      identity_and_reconciliation: null
+      request_route: null
+  authority_conflicts: []
+  orphan_subjects: []
+  unsupported_nodes: []
+  rollout_waves:
+    - id: "{{wave_id}}"
+      outcome: null
+      system_ids: []
+      prerequisites: []
+      project_plan_requirements: []
+      cross_system_hrm_dependencies: []
+      safe_transition: null
+  acceptance:
+    decided_by: null
+    decided_at: null
+    semantic_read_back: null
