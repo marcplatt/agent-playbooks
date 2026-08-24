@@ -1,89 +1,137 @@
-# Alpine Agent Playbooks
+# Organization-to-System Agent Playbooks
 
-Version-controlled, human-readable and machine-readable Codex workflows for Alpine Structures.
+Version-controlled, human-readable, and machine-readable workflows for turning an
+organization's business intent into governed system delivery. The repository is
+organization-neutral: adopting organizations keep their own names, authority assignments,
+policies, system inventory, and project state in their master-plan and project repositories.
 
 ## Purpose
 
-This repository keeps proven coordination and elicitation patterns outside chat history so they can be invoked consistently, reviewed like code, and improved without expanding every project's instructions.
+These playbooks keep elicitation, planning, orchestration, review, change propagation,
+and rollout patterns outside chat history so they can be invoked consistently and
+reviewed like code. Human Review Milestones (HRMs) are the operator-facing control plane;
+branches, worktrees, lanes, tests, and agents are subordinate implementation mechanisms.
 
 ## Repository contract
 
-- `playbooks/` contains reusable workflows with YAML metadata and a paste-ready prompt.
-- `templates/` contains reusable output forms such as complete project HRM maps,
-  contract-update requests, execution ledgers, and human-review packets.
-- `examples/` contains representative completed uses without secrets or customer data.
-- Project `AGENTS.md` files remain authoritative for project-specific rules.
-- Approved project intent and operator progress remain in the owning project's complete,
-  versioned HRM map and milestone contracts. Lane records remain subordinate implementation history.
-- Business evidence and elicitation results remain in their owning system-of-record repository.
+- `playbooks/` contains reusable workflows with YAML metadata and paste-ready prompts.
+- `templates/` contains neutral records that an organization copies into its owning
+  master-plan or project repository and adapts without changing the control semantics.
+- `examples/` contains fictional, non-normative uses without secrets or customer data.
+- The adopting organization's governance and each project's `AGENTS.md` remain authoritative.
+- The organization master plan owns business outcomes, system portfolio, authority,
+  cross-system policy, and accepted change envelopes.
+- Project repositories own system plans, requirements, scenarios, implementation manifests,
+  versioned HRM maps, review state, and implementation evidence.
+- This repository owns transferable process, prompts, schemas, and templates only.
 
-Playbooks must defer to the applicable `AGENTS.md`. They may coordinate approved work, but may not invent authority, weaken checkers, bypass human gates, or treat a draft, local result, or proposal as merged or activated truth.
+Playbooks may coordinate approved work, but may not invent business meaning, assign
+authority, weaken checkers, bypass human gates, or treat proposed, local, tested, merged,
+deployed, activated, canary, or production-verified states as interchangeable.
 
-## Available playbooks
+## Lifecycle playbooks
+
+| Stage | Playbook | Use |
+|---|---|---|
+| Intent | [Business Plan Elicitation](playbooks/business-plan-elicitation.md) | Convert evidence and operator interviews into outcomes, actors, capabilities, policies, authority, constraints, unknowns, and success measures. |
+| Portfolio | [Organization System Portfolio Planning](playbooks/organization-system-portfolio.md) | Define system boundaries, authoritative subjects, owners, dependencies, contracts, and rollout order. |
+| Project plan | [Project System-Plan Generation](playbooks/project-system-plan-generation.md) | Generate the project-owned system plan, requirements, scenarios, implementation manifest, and preliminary HRM journey. |
+| HRM governance | [HRM Map Discovery and Rebaseline](playbooks/hrm-map-discovery-rebaseline.md) | Publish the complete-as-presently-knowable HRM map and govern discoveries, splits, additions, removals, and supersession. |
+| Decisions | [Operator Decision Frontier](playbooks/operator-decision-frontier.md) | Surface semantic and authority decisions before non-disposable implementation and route S0-S3 interrupts. |
+| Build | [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance one independently closable HRM through semantic readiness, a disposable vertical proof, derived implementation, and operator review. |
+| Execute | [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute a published HRM bundle quietly with exact-head evidence and worker-to-orchestrator escalation. |
+| Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
+| Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
+
+## Change-propagation playbooks
 
 | Playbook | Use |
 |---|---|
-| [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance one independently closable HRM from the complete project map, inventory brownfield capability and standalone nodes, route missing inputs explicitly, derive subordinate lanes, and stop for operator function/UI/UX acceptance without implying activation. |
-| [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute a published milestone bundle quietly while preserving brownfield parity, validating local/non-Git node boundaries, returning input requirements, performing exact-head review, and stopping conspicuously at the HRM. |
+| [Master-Plan Policy Amendment and Propagation](playbooks/master-plan-policy-amendment.md) | Elicit and version policy or contract meaning, emit a typed change envelope, and rebaseline affected systems and HRMs. |
+| [Bidirectional Master-Plan Repository Polling and HRM Intake](playbooks/master-plan-repository-polling.md) | Route accepted master-plan changes and project receipts without inventing semantics or implying implementation authority. |
 
-## Templates and examples
+## Templates
 
-- [Complete project HRM map](templates/project-hrm-map.yaml)
+Organization and portfolio:
+
+- [Organization operating model](templates/organization-operating-model.yaml)
+- [System portfolio](templates/system-portfolio.yaml)
+- [Master-plan change envelope](templates/master-plan-change-envelope.yaml)
+
+Project planning and review:
+
+- [System plan](templates/system-plan.yaml)
+- [Complete-as-presently-knowable project HRM map](templates/project-hrm-map.yaml)
+- [HRM-discovery proposal](templates/hrm-discovery-proposal.yaml)
+- [Operator decision packet](templates/operator-decision-packet.yaml)
 - [Input-boundary record](templates/input-boundary-record.yaml)
 - [Contract-update request](templates/contract-update-request.yaml)
 - [HRM review package](templates/hrm-review-package.md)
+- [Stable current-review index](templates/current-review.md)
 - [HRM session ledger](templates/hrm-session-ledger.yaml)
-- [Example HRM-directed session](examples/hrm-directed-session.example.yaml)
+- [Workspace registry](templates/workspace-registry.yaml)
+- [Activation and production record](templates/activation-production-record.yaml)
+- [Fictional HRM-directed session](examples/hrm-directed-session.example.yaml)
 
-## Draft playbooks
+## Operating model
 
-| Playbook | Use |
-|---|---|
-| [Master-Plan Policy Amendment and Propagation](playbooks/master-plan-policy-amendment.md) | Elicit and version policy/contract answers, distinguish requests from adopted meaning, and rebaseline every affected repository and HRM. |
-| [Bidirectional Master-Plan Repository Polling and HRM Intake](playbooks/master-plan-repository-polling.md) | Route accepted master-plan changes, HRM obligations, and contract-update requests bidirectionally while keeping implementation lanes subordinate and status honest. |
+1. Elicit the business plan without converting uncertainty into requirements.
+2. Publish the organization operating model and system portfolio in the master plan.
+3. Generate each project system plan with provenance back to accepted organization records.
+4. Publish all HRMs that are presently knowable. Unknowns remain explicit; later discoveries
+   use a versioned amendment rather than being forced into an existing milestone.
+5. Resolve the decision frontier and semantic-readiness gate before substantive code.
+6. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
+7. Derive implementation change units and execute them under one HRM orchestrator.
+8. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
+9. Treat deployment, activation, canary, production observation, and autonomy as separate
+   action-time gates with current evidence.
+
+The operator decides business outcome and meaning, material scope or capability retirement,
+authority, risk acceptance, HRM closure, and production-affecting action. The orchestrator
+elicits those decisions early, consolidates worker discoveries, recommends a response, records
+a semantic read-back, and delegates evidence gathering and implementation. Workers route
+uncertainty to the orchestrator; they do not independently bombard the operator.
+
+## Workspace model
+
+A Codex task or conversation is not a Git change unit. A task first attaches to a published
+HRM session. One HRM session may own multiple serial or parallel published change units. Each
+published change unit gets one branch, normally one PR, and one integration receipt. A lane
+normally maps to one change unit; split it when independently reviewable ownership, risk,
+validation, rollback, or integration boundaries emerge instead of silently enlarging it.
+Create a worktree only when concurrent execution, an active review runtime, or preservation
+of unique unmerged work requires it. Disposable API or behavior discovery may end without a
+PR; retain it only as a bounded evidence, contract, fixture, test, or documentation change
+unit. Each project designates one stable operator checkout and one stable current-review index;
+worker agents never implement in that checkout. Reconcile and remove eligible worktrees after
+verified integration rather than waiting for HRM closure.
 
 ## Using a playbook
 
-1. Open the selected playbook and supply its required inputs.
-2. Paste the text under **Prompt** into a Codex task.
-3. Supply or discover the complete versioned project HRM map, then name the system,
-   target HRM, outcome, and authority envelope; do not reconstruct a lane queue unless
-   constraining legacy work.
-4. Review only prepared UI, UX, function, scope, activation, or irreversible-action gates.
+1. Select the earliest applicable lifecycle stage; do not begin with implementation when
+   organization meaning or project semantics are unresolved.
+2. Open the playbook and supply its required inputs.
+3. Paste the text under **Prompt** into an agent task.
+4. Store outputs in the owning master-plan or project repository using stable IDs and versions.
+5. Review only prepared decision packets, HRM review packages, and reserved action-time gates.
 
 Example:
 
 ```text
 Use the System Build and Human Review Milestone Standard.
 System: SYS-EXAMPLE-001 in the current project.
-Project HRM map: milestones/index.yaml.
-Target HRM: HRM-2.
+Project HRM map: docs/planning/project-hrm-map.yaml.
+Target HRM: HRM-WORKFLOW-001.
 Milestone outcome: the operator can complete and correct the local workflow and
 understand failures without external writes.
 Activation posture: read-only.
 ```
 
-The system-build playbook derives and publishes the lane bundle under the project HRM
-contract and invokes the lane coordinator. The operator lives at the HRM layer: routine
-lane details stay quiet, while prepared function/UI/UX review, material decisions, and
-persistent blockers are explicit. Direct lane-coordinator use is reserved for a
-published milestone session contract or a bounded legacy/recovery constraint.
-
-For new projects, publish all intended HRMs at inception. Unknowns may remain visibly
-`unknown-blocked`; they may not be replaced with invented facts. A missing inter-system
-promise becomes a stable `CTRQ` whose creation does not adopt the answer.
-
-For brownfield projects, reject composite `production ready` milestones, inventory the
-established operator surface before simplifying it, and register every local, standalone,
-or non-Git bridge as its own system node. A supplied lane queue can constrain execution
-but cannot suppress a required input record, discovery, `CTRQ`, amendment, deferral, or
-blocker.
-
-The intended personal Codex skill entrypoint is `$alpine-workflows`; until that skill is installed, the Markdown playbooks are the canonical invocation source.
-
 ## Change standard
 
-Every material playbook change updates its version and change note. RES-0002 supplies the
-HRM-first operating model while preserving RES-0001 evidence separation. Retired
-playbooks remain in Git history and are not silently repurposed. Never commit credentials,
-private provider evidence, customer data, generated estimate files, or conversation transcripts.
+Every material playbook change updates its version and change note. An adopting
+organization may map its own standards to these controls, but organization-specific
+identifiers are not normative here. Retired playbooks remain in Git history and are not
+silently repurposed. Never commit credentials, private provider evidence, customer data,
+generated business artifacts, or conversation transcripts.

@@ -1,9 +1,9 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "1.2"
+version: "2.1"
 status: active
-owner: Alpine Structures
+owner: Adopting organization
 mode: hrm-directed-system-build
 human_readable: true
 machine_readable: true
@@ -20,14 +20,22 @@ optional_inputs:
   - target_time_or_priority
   - authority_envelope
   - activation_posture
+  - operator_checkout
   - primary_checkout
   - completion_mode
   - operating_profile
   - manual_lane_constraint
 controls:
   - project-rules-first
-  - complete-hrm-map-published-at-inception
+  - complete-as-presently-knowable-hrm-map
+  - governed-hrm-discovery-and-rebaseline
   - evidence-before-lanes
+  - operator-decision-frontier
+  - semantic-readiness-before-code
+  - s0-s3-early-escalation
+  - worker-to-orchestrator-routing
+  - semantic-read-back
+  - disposable-end-to-end-proof
   - target-hrm-first
   - project-defined-milestones
   - milestone-contract-before-implementation
@@ -49,6 +57,11 @@ controls:
   - operator-function-acceptance
   - quiet-execution-noisy-hrm-stop
   - activation-separation
+  - stable-operator-checkout
+  - conditional-worktree-and-branch
+  - one-hrm-many-change-units
+  - one-change-unit-one-branch-normal-one-pr
+  - disposable-discovery-no-pr-by-default
   - project-scoped-cleanup
 ---
 
@@ -65,8 +78,15 @@ operator function review, findings, remediation, and explicit closure or deferra
 The target of the work session is the HRM, not a lane list. Lanes remain necessary as
 bounded implementation, review, merge, and audit units, but they are execution detail
 derived from the system plan, project-wide HRM map, and milestone gap analysis. Every
-new project publishes all intended HRMs before implementation. Unknown milestone facts
-remain explicit blockers or requests; they are never filled by inference.
+new project publishes all HRMs that are presently knowable before implementation.
+Unknown milestone facts remain explicit blockers or requests; they are never filled by
+inference. A later discovery is governed through map amendment and supersession.
+
+The Git hierarchy is explicit: one HRM session may own multiple serial or parallel
+published change units. Each published change unit gets one branch, normally one PR, and
+one integration receipt. A lane normally maps to one change unit. Split it when independent
+ownership, risk, validation, rollback, or integration boundaries emerge; do not force the
+whole HRM into one long-lived PR or create Git state merely because a task was opened.
 
 ## Operator model
 
@@ -101,7 +121,7 @@ an input record, contract request, discovery, planning amendment, deferral, or b
 - **Target time or priority:** `{{target_time_or_priority_or_none}}`
 - **Authority envelope:** `{{authority_envelope_or_project_policy}}`
 - **Activation posture:** `{{activation_posture_or_safe_current_state}}`
-- **Primary checkout:** `{{primary_checkout_or_discover}}`
+- **Operator checkout:** `{{operator_checkout_or_primary_checkout_or_discover}}`
 - **Completion mode:** `{{completion_mode_or_false}}`
 - **Operating profile:** `{{operating_profile_or_one-human}}`
 - **Manual lane constraint:** `{{manual_lane_constraint_or_none}}`
@@ -126,11 +146,14 @@ workflow milestone, or use a qualified ID when its system plan records the outco
 activation posture, closure authority, prerequisites, closure effect, and downstream
 release effect unambiguously.
 
-All intended project HRMs must appear in one versioned map at inception, before
-implementation lanes begin. Publication means the control structure is complete; it
-does not mean every prerequisite is known or implemented. Record incomplete evidence as
-`unknown-blocked` with an owner, safe posture, and resolution path. A later map change is
-a versioned rebaseline with supersession and downstream impact, not a rewritten history.
+All project HRMs presently knowable must appear in one versioned map at inception, before
+implementation lanes begin. Publication means the control structure is complete given
+current evidence; it does not claim clairvoyance or mean every prerequisite is known or
+implemented. Record incomplete evidence as `unknown-blocked` with an owner, safe posture,
+and resolution path. When evidence reveals a distinct operator-visible outcome, human
+acceptance, closure/release effect, or authority/evidence state, raise an `HRM_DISCOVERY`
+proposal. A later map change is a versioned rebaseline with supersession and downstream
+impact, not rewritten history.
 
 | Archetype | Typical review outcome |
 |---|---|
@@ -161,7 +184,7 @@ Constraints: {{constraints_or_none}}.
 Target time or priority: {{target_time_or_priority_or_none}}.
 Authority envelope: {{authority_envelope_or_project_policy}}.
 Activation posture: {{activation_posture_or_safe_current_state}}.
-Primary checkout: {{primary_checkout_or_discover}}.
+Operator checkout: {{operator_checkout_or_primary_checkout_or_discover}}.
 Completion mode: {{completion_mode_or_false}}.
 Operating profile: {{operating_profile_or_one-human}}.
 Manual lane constraint: {{manual_lane_constraint_or_none}}.
@@ -190,6 +213,11 @@ AUTHORITY AND ROLES
    function/UI/UX review and acceptance, closure or deferral, and action-time authority for provider/customer/money,
    canary, deployment, credentials, irreversible migration, or production effects.
    Agents never count as human approvers.
+4a. The HRM orchestrator is the single operator route. Workers raise semantic, authority,
+    contract, scope, identity, lifecycle, UX-intent, and HRM discoveries to it. The
+    orchestrator deduplicates them, assigns S0-S3 urgency, prepares a recommendation, and
+    notifies the operator at the earliest safe point. Workers do not independently send
+    competing questions to the operator.
 
 RESOLVE THE TARGET HRM
 
@@ -201,7 +229,8 @@ RESOLVE THE TARGET HRM
    material claims as verified-current, historical-needs-revalidation, proposed, or
    unknown-blocked.
 6. Treat milestone IDs as project-defined opaque identifiers. Verify that one canonical,
-   versioned map publishes all intended HRMs from planning through activation, with each
+   versioned map publishes all HRMs presently knowable from planning through activation,
+   with each
    milestone's outcome, prerequisites, review questions/scenarios, evidence freshness,
    in-scope requirements/contracts, activation posture, closure criteria and authority,
    closure effect, downstream release effect, and finding/rebaseline policy. Resolve the
@@ -221,6 +250,12 @@ RESOLVE THE TARGET HRM
 8. Determine the last explicitly closed or deferred milestone from durable records. A
    review meeting, merged lane, local preview, green suite, or completed implementation
    is not evidence that an HRM closed.
+8a. If evidence reveals a possible HRM addition, split, dependency change, or supersession,
+    freeze only the affected boundary and run the HRM Map Discovery and Rebaseline
+    playbook. Do not create a branch, worktree, or lane for an unaccepted discovery.
+    Continue only work proven compatible with every plausible disposition. Publish a new
+    map version before deriving work for an accepted new milestone, and preserve prior
+    versions and closed evidence.
 
 CREATE THE MILESTONE SESSION CONTRACT
 
@@ -241,7 +276,7 @@ CREATE THE MILESTONE SESSION CONTRACT
    - open input requirements and primary dispositions;
    - brownfield parity obligations and affected system nodes;
    - provisional downstream effects; and
-   - primary checkout and cleanup policy.
+   - operator checkout, current-review index, and workspace cleanup policy.
 
 10. Maintain an operator-facing session banner: current HRM, target HRM, why it matters,
     capabilities complete, capabilities remaining, blockers, decisions requested,
@@ -287,6 +322,14 @@ ANALYZE THE SYSTEM BEFORE LANES
     independent permitted work. Assign one primary disposition: human decision, `CTRQ`,
     read-only discovery, planning amendment/rebaseline, accepted limitation, named-HRM
     deferral, or `blocked_external`.
+14a. Resolve unknown API or implementation behavior first through the smallest deliberately
+     disposable discovery spike that can answer the question with fixtures, read-only calls,
+     or writes structurally disabled. The spike remains attached to the current HRM and has
+     no PR by default. Discard exploratory code unless a contract, fixture, test, or
+     documentation artifact is valuable enough to publish as its own evidence change unit.
+     Route any changed business meaning, authority, persistence, public contract, external
+     effect, or distinct operator outcome back through the decision frontier or
+     `HRM_DISCOVERY` before non-disposable implementation.
 15. Freeze only affected boundaries when evidence changes. A new product outcome, policy,
     schema meaning, persistence model, provider mutation, public contract, or activation
     step requires a planning amendment; it is not an implementation inference. The
@@ -297,6 +340,30 @@ ANALYZE THE SYSTEM BEFORE LANES
     lane to remain active before its prerequisites exist. An exact-head review that
     reproduces a real defect and fails closed is healthy implementation review; preserve
     that stop while separately assessing any contributing planning or decomposition gap.
+
+DECISION FRONTIER AND SEMANTIC READINESS
+
+15a. Before substantive implementation, enumerate unresolved business meaning, authority,
+     capability retirement, user journey, identity, lifecycle, correctness-gap acceptance,
+     contract semantics, external effect, and operator acceptance tradeoffs. Record first
+     observed and foreseeable times, invalidation reach, evidence provenance/expiry, latest
+     safe decision time, safe posture, and permitted independent work.
+15b. Classify each operator input: S0 for protected, irreversible, security/privacy,
+     customer/money, or action-time production authority; S1 where agents would otherwise
+     choose meaning, authority, UX intent, or capability retirement; S2 for a material but
+     schedulable decision; and S3 for a reversible technical choice inside accepted
+     semantics. Notify S0 immediately, S1 before assumption or non-disposable work, batch
+     S2 within a bounded window, and decide/record S3 without interrupting the operator.
+15c. Every S0-S2 packet contains one decision sentence, affected HRMs, evidence, why now,
+     latest-safe time, recommendation, no more than three meaningful alternatives,
+     consequences, safe posture, permitted continuation, authority, and reply syntax. A
+     timeout is never semantic acceptance. Read the response back as exact meaning, scope,
+     exclusions, affected records, and expiry before resuming.
+15d. Pass the semantic-readiness gate only when material terms, authority, identities,
+     lifecycle and state transitions, contracts, scenarios, capability parity, evidence
+     freshness, and operator review questions are explicit enough that implementation
+     cannot silently decide business meaning. Open gaps remain frozen or explicitly
+     independent; passing tests cannot compensate for a failed semantic-readiness gate.
 
 DESIGN TEST COVERAGE BEFORE DECOMPOSITION
 
@@ -353,6 +420,20 @@ DESIGN TEST COVERAGE BEFORE DECOMPOSITION
     combined regression run at the integrated milestone head. Run the full suite again
     before production canary or release. Isolated CSS, wording, spacing, layout, and
     bounded control simplification do not independently trigger a full suite.
+
+PROVE THE END-TO-END INTENT CHEAPLY
+
+19a. Before authorizing a large bundle, build the smallest deliberately disposable
+     end-to-end proof that exercises the riskiest semantic seam using safe fixtures,
+     read-only adapters, or structurally disabled writes. Its purpose is to expose wrong
+     meanings, missing states, unusable operator journeys, identity ambiguity, and contract
+     gaps before architecture hardens around them.
+19b. Review this proof against the accepted outcome and semantic read-back. Treat its code
+     as disposable unless retention criteria, tests, ownership, and production quality are
+     explicitly approved. A skeleton is learning evidence, not implementation, HRM closure,
+     deployment, activation, or canary authority.
+19c. If the proof reveals new meaning, return to the decision frontier or HRM-discovery
+     process and rebaseline before deriving the full lane bundle.
 
 DERIVE AND PUBLISH THE LANE BUNDLE
 
@@ -446,11 +527,13 @@ CLOSE WITHOUT ACTIVATING
     deployment, provider/customer/money effects, irreversible migration, and production
     activation as distinct states. Require explicit action-time authority and exact
     read-back/reconciliation for every external effect.
-34. Delegate project-scoped worktree cleanup to the lane coordinator. Remove safely
-    merged lane worktrees as they become eligible, retain any active milestone preview
-    until its evidence is durable and review is complete, preserve every dirty/ambiguous
-    worktree, and return the designated primary checkout to clean current main at closure
-    or deferral. Report the target HRM first and lane/cleanup detail second.
+34. Delegate project-scoped workspace control to the lane coordinator and Workspace
+    Topology and Review Handoff playbook. A task is not a Git change unit; create a branch
+    only for a published change unit and a worktree only for concurrency, active review,
+    or unique-work preservation. Keep one stable operator checkout and current-review
+    index; workers never implement there. Remove safely merged worktrees after verified
+    integration rather than waiting for closure, and preserve every dirty, ambiguous, or
+    unique worktree. Report the target HRM first and workspace detail second.
 ```
 
 ## Machine-readable session contract
@@ -474,7 +557,8 @@ system_build_session:
   hrm_map:
     path: "{{path}}"
     version: "{{version}}"
-    complete_at_inception: true
+    complete_as_presently_knowable: true
+    evidence_cutoff_at: null
     target_entry_verified: false
   current_hrm:
     id: null
@@ -505,6 +589,17 @@ system_build_session:
     destructive_migration: false
     credential_or_permission_change: false
   activation_posture: "local|read_only|shadow|canary|enabled"
+  decision_frontier:
+    open_s0: []
+    open_s1: []
+    open_s2: []
+    recorded_s3: []
+    semantic_read_backs: []
+    gate: "blocked|ready"
+  disposable_end_to_end_proof:
+    path_or_url: null
+    disposition: "not_started|discard|retain_with_approval|rebaseline_required"
+  hrm_discoveries: []
   completion_mode:
     enabled: false
     adoption_sha: null
@@ -559,6 +654,7 @@ system_build_session:
     approval_evidence: null
     lanes:
       - id: "{{lane_id}}"
+        change_unit_id: "{{change_unit_id}}"
         milestone_contribution: []
         requirement_ids: []
         dependencies: []
@@ -566,7 +662,18 @@ system_build_session:
         validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
         contract: "{{path}}"
         publication_sha: null
+        branch: null
+        pull_request: null
+        integration_receipt: null
         state: "proposed|approved|executing|integrated|blocked|complete"
+  discovery_spikes:
+    - id: "{{discovery_id}}"
+      assigned_hrm: "{{target_hrm}}"
+      question: null
+      safe_method: "fixture|read_only|writes_disabled|other"
+      disposition: "active|discarded|retained_evidence_change_unit|rebaseline_required"
+      retained_change_unit_id: null
+      pull_request: null
   operator_banner:
     capabilities_complete: []
     capabilities_remaining: []
@@ -633,6 +740,15 @@ system_build_session:
 
 ## Change note
 
+- **2.1 — 2026-08-24:** Defines one HRM as the orchestration/review boundary and published
+  change units as the Git boundary. Allows multiple change units per HRM; assigns each one
+  branch, normally one PR, and one integration receipt; makes lanes normally one-to-one
+  with change units; and adds disposable API discovery with no PR unless evidence is retained.
+- **2.0 — 2026-08-24:** Generalizes ownership; defines complete-as-presently-knowable
+  HRM maps and governed discoveries; adds S0-S3 decision-frontier escalation, worker-to-
+  orchestrator routing, semantic read-back/readiness, a disposable end-to-end proof, and
+  a stable operator checkout with conditional branches/worktrees. Preserves explicit
+  operator closure and separate deployment, activation, canary, and production proof.
 - **1.2 — 2026-08-22:** Adds an independently-closable HRM gate that rejects composite
   `production ready` objectives; requires brownfield capability/parity inventory and
   first-class standalone/local system-node records; defines stable input-boundary

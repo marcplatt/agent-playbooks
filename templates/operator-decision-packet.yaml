@@ -1,0 +1,46 @@
+operator_decision_packet:
+  schema_version: agent_playbooks.operator_decision_packet.v1
+  id: "{{decision_id}}"
+  status: "prepared|delivered|acknowledged|clarification_needed|accepted|rejected|superseded"
+  interrupt_class: "S0|S1|S2|S3"
+  first_observed_at: null
+  first_foreseeable_at: null
+  first_notified_at: null
+  latest_safe_decision_at: null
+  decision_authority: null
+  system_reference: null
+  affected_hrms: []
+  one_sentence_decision: "{{decision_needed}}"
+  why_now: null
+  provenance:
+    evidence: []
+    source_revisions: []
+    evidence_expires_at: null
+  invalidation_reach:
+    requirements: []
+    contracts: []
+    hrms: []
+    change_units: []
+    downstream_projects: []
+  recommendation:
+    choice: null
+    rationale: null
+    consequences: []
+  alternatives:
+    - choice: null
+      consequences: []
+  safe_posture_while_waiting: null
+  permitted_continuation: []
+  prohibited_continuation: []
+  response_syntax: null
+  operator_response:
+    received_at: null
+    response: null
+    accepted_scope: []
+    exclusions: []
+  semantic_read_back:
+    statement: null
+    confirmed_by: null
+    confirmed_at: null
+    expires_at: null
+  canonical_records_updated: []

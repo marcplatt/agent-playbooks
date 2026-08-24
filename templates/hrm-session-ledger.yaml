@@ -1,4 +1,5 @@
 milestone_session:
+  schema_version: agent_playbooks.hrm_session_ledger.v2.1
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -6,7 +7,7 @@ milestone_session:
     path: "{{project_hrm_map_path}}"
     version: "{{map_version}}"
     source_sha: null
-    all_intended_hrms_published: false
+    complete_as_presently_knowable: false
   planning_package:
     system_plan: null
     requirements_ledger: null
@@ -36,6 +37,23 @@ milestone_session:
     destructive_migration: false
     credential_or_permission_change: false
   activation_posture: read_only
+  decision_frontier:
+    open_s0: []
+    open_s1: []
+    open_s2: []
+    recorded_s3: []
+    semantic_read_backs: []
+    gate: "blocked|ready"
+  disposable_end_to_end_proof:
+    required: true
+    path_or_url: null
+    semantic_seams_exercised: []
+    operator_outcome_review: null
+    disposition: "not_started|discard|retain_with_approval|rebaseline_required"
+  hrm_discoveries:
+    observed: []
+    accepted: []
+    rejected_or_absorbed: []
   published_lane_bundle: []
   contract_update_requests:
     open: []
@@ -105,9 +123,11 @@ milestone_session:
     rationale: null
     released_next_bundle: []
   cleanup:
-    primary_checkout: null
+    operator_checkout: null
+    current_review_index: null
     removed_worktrees: []
     retained_worktrees: []
+    unexplained_worktrees: []
     no_other_project_touched: false
 
 lanes:
@@ -117,13 +137,24 @@ lanes:
     contract: "{{path}}"
     state: queued
     dependencies: []
+    change_unit_id: null
     worktree: null
     branch: null
+    pull_request: null
     base_sha: null
     candidate_head_sha: null
     main_sha: null
+    integration_receipt: null
     validation_class: application_behavior
     exact_checks: []
     full_suite_triggers: []
     external_mutations: 0
     cleanup_disposition: pending
+discovery_spikes:
+  - id: "{{discovery_id}}"
+    assigned_hrm: "{{target_hrm}}"
+    question: null
+    safe_method: "fixture|read_only|writes_disabled|other"
+    disposition: "active|discarded|retained_evidence_change_unit|rebaseline_required"
+    retained_change_unit_id: null
+    pull_request: null

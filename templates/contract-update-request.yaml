@@ -1,8 +1,11 @@
 contract_update_request:
-  schema_version: agent_playbooks.contract_update_request.v2
+  schema_version: agent_playbooks.contract_update_request.v3
   id: "{{stable_ctrq_id}}"
   status: "open|acknowledged|evidence_needed|decision_needed|amended|propagated|resolved|rejected"
   created_at: null
+  first_foreseeable_at: null
+  first_notified_at: null
+  latest_safe_decision_at: null
   created_by_role: hrm_orchestrator
   originating_context:
     input_requirement_id: "{{input_requirement_id}}"
@@ -37,12 +40,17 @@ contract_update_request:
     observation: null
     evidence: []
     evidence_freshness: unknown
+    evidence_expires_at: null
   impact:
     operator_function: null
     affected_hrms: []
     affected_requirements: []
     compatibility: "compatible|conditional|breaking|unknown"
     consequence_if_unresolved: null
+    invalidation_reach:
+      requirements: []
+      change_units: []
+      downstream_projects: []
   safe_posture:
     frozen_boundary: null
     permitted_continuation: []
@@ -60,11 +68,14 @@ contract_update_request:
     source_repository: null
     source_sha: null
   routing:
+    interrupt_class: "S0|S1|S2|S3"
     routed_to_role: null
     route: null
     delivered: false
     read_back: false
     acknowledgement: null
+    operator_decision_packet: null
+    semantic_read_back_required: false
   resolution:
     decision_record: null
     accepted_contract_id: null

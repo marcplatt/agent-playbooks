@@ -1,9 +1,9 @@
 ---
 playbook_id: AP-POLICY-001
 title: Master-Plan Policy Amendment and Propagation
-version: "0.2"
-status: draft
-owner: Alpine Structures
+version: "1.0"
+status: active
+owner: Adopting organization
 mode: master-plan-policy-amendment
 human_readable: true
 machine_readable: true
@@ -19,8 +19,12 @@ optional_inputs:
   - implementation_authority
   - human_review_requirements
 controls:
-  - res-0001-evidence-separation
-  - res-0002-hrm-first-propagation
+  - evidence-claim-separation
+  - hrm-first-propagation
+  - operator-decision-frontier
+  - semantic-read-back
+  - typed-change-envelope
+  - evidence-expiry
   - operator-led-elicitation
   - stable-id-traceability
   - contract-impact-analysis
@@ -36,18 +40,19 @@ controls:
 
 # Master-Plan Policy Amendment and Propagation
 
-Use this prompt from inside an RES-0002-style HRM-first master-plan repository. The master
+Use this prompt from inside an HRM-first organization master-plan repository. The master
 plan is the registry of business intent and authority; linked application repositories
 retain their own implementation manifests, tests, and evidence. The prompt elicits
 operator decisions, discovers contract implications, amends canonical records, and
 propagates the approved change through every known provider, consumer, manifest,
 document, and generated view without rewriting history or inventing authority.
 
-RES-0001 is an informative research baseline unless the organization has separately
-adopted it. It does not itself authorize policy, implementation, or production changes.
-RES-0002 carries that evidence discipline into HRM-first delivery. A contract-update
-request may be opened autonomously as a documentation and routing act, but it is not an
-adopted contract, business decision, implementation claim, or activation authority.
+Research evidence is informative unless the organization has adopted it through its own
+decision mechanism. It does not itself authorize policy, implementation, or production
+changes. An adopting organization may map local standards to this playbook's evidence-
+separation and HRM-first controls. A contract-update request may be opened autonomously
+as a documentation and routing act, but it is not adopted meaning, implementation, or
+activation authority.
 
 ## Inputs
 
@@ -77,7 +82,7 @@ Human review: {{human_review_requirements_or_default}}.
 
 WORKSPACE AND AUTHORITY
 
-1. Treat this RES-0002-style HRM-first master-plan repository as the registry of intent and
+1. Treat this HRM-first master-plan repository as the registry of intent and
    authority. Treat linked repositories as federated owners of implementation
    manifests, local contracts/tests, and evidence. A downstream repository is an
    affected repository when it authors, provides, consumes, implements, tests,
@@ -88,7 +93,7 @@ WORKSPACE AND AUTHORITY
    application behavior, merge, deploy, migrate, send customer communication, change
    credentials, move money or inventory, or mutate an external/production system
    unless this run has explicit authority for that exact action and required approval.
-4. RES-0001 research, observed behavior, operator input, proposed policy, accepted
+4. Research, observed behavior, operator input, proposed policy, accepted
    policy, implementation, deployment, and runtime evidence are different claim types.
    Never promote one to another silently.
    A `CTRQ` is a proposed question and impact record, not the missing promise or approval.
@@ -119,9 +124,15 @@ ELICIT THE AMENDMENT
 
 9. Interview the authorized operator at the business-decision level. Batch related
    questions into small decision packets instead of asking for routine technical
-   choices. For each packet, show the current claim, why a decision is needed, the
-   recommended answer, viable alternatives, and consequences for customers, people,
-   money, inventory, privacy, operations, and automation.
+    choices. For each packet, show the current claim, why a decision is needed, the
+    recommended answer, viable alternatives, and consequences for customers, people,
+    money, inventory, privacy, operations, and automation.
+9a. Establish the decision frontier before editing: S0 for protected, irreversible, or
+    action-time effects; S1 where agents would otherwise choose meaning or authority;
+    S2 for material schedulable decisions; and S3 for reversible technical choices inside
+    accepted meaning. Notify S0 immediately, S1 before non-disposable propagation, batch
+    S2, and record S3 autonomously. Record first foreseeable/notified times, invalidation
+    reach, latest-safe time, safe posture, permitted continuation, and evidence expiry.
 10. Elicit at least: desired outcome and non-goals; actors and authority; applicability
     and effective time; inputs and provenance; decision/default/no-match behavior;
     lifecycle and transitions; ordinary, edge, exception, cancellation and reversal
@@ -160,6 +171,9 @@ ELICIT CONTRACT AND SEAM CHANGES
     the policy diff, contract/authority implications, affected stable IDs and repositories,
     compatibility and migration plan, unresolved blockers, recommended decision, and
     exact approval requested. Do not drip-feed foreseeable scope amendments.
+16a. Read the operator's answer back as exact accepted meaning, authority, scope,
+     exclusions, effective time, affected records, and expiry. Resolve ambiguity before
+     canonical amendment; a timeout or partial answer is not acceptance.
 
 AMEND CANONICAL RECORDS
 
@@ -173,6 +187,13 @@ AMEND CANONICAL RECORDS
     contract, risk/question/exception, and operator-view sources as applicable. Regenerate
     deterministic indexes, backlinks, diagrams, and summaries; do not hand-edit generated
     artifacts.
+18a. Emit one typed master-plan change envelope with source record IDs, before/after
+     versions, accepted SHA, semantic/syntactic/behavioral/operational differences,
+     provenance and evidence expiry, affected systems/contracts/requirements/projects/HRMs,
+     compatibility, mixed-version posture, migration, rollback, sunset, rebaseline needs,
+     safe posture, permitted work, downstream routes, and separate documentation,
+     implementation, merge, deployment, activation, canary, and production authority.
+     Unresolved meaning remains explicit and has no inferred default.
 
 PROPAGATE THROUGH AFFECTED REPOSITORIES
 
@@ -188,7 +209,8 @@ PROPAGATE THROUGH AFFECTED REPOSITORIES
     do not silently implement it. Create the repository's required bounded lane/change
     plan with acceptance criteria and traceability, or record an explicit blocked
     implementation obligation. Documentation must not claim the behavior exists.
-22. Rebaseline every affected project HRM map and milestone contract prospectively. Mark
+22. Rebaseline every affected project HRM map and milestone contract prospectively from
+    the typed change envelope. Mark
     blocked HRMs, changed prerequisites, review scenarios, evidence requirements, and
     superseded map versions explicitly. Do not rewrite already closed HRM evidence.
 23. Order changes according to the compatibility plan. Independent repositories may be
@@ -225,6 +247,18 @@ amendment:
   policy_versions_after: []
   effective_from: null
   approval_record: null
+  semantic_read_back: null
+  change_envelope:
+    schema_version: agent_playbooks.master_plan_change_envelope.v1
+    id: null
+    accepted_sha: null
+    differences:
+      semantic: []
+      syntactic: []
+      behavioral: []
+      operational: []
+    evidence_expires_at: null
+    safe_posture_until_adopted: null
   originating_hrms: []
   contract_request_ids: []
   affected_records: []
@@ -253,12 +287,17 @@ amendment:
   next_authorized_action: operator_review
 ```
 
-## Draft note
+## Change note
 
-- **0.2 — 2026-08-21:** Adds RES-0002 HRM-first propagation, distinguishes autonomous
+- **1.0 — 2026-08-24:** Generalizes the workflow for any adopting organization and adds
+  an S0-S3 decision frontier, semantic read-back, evidence expiry, and a typed change
+  envelope that separates semantic, syntactic, behavioral, and operational impact from
+  implementation, deployment, activation, canary, and production authority.
+- **0.2 — 2026-08-21:** Earlier organization-local release added HRM-first propagation,
+  distinguished autonomous
   documentation-only `CTRQ` intake from adopted contract meaning, and requires affected
   HRM maps and milestone contracts to be rebaselined without rewriting history.
-- **0.1 — 2026-08-19:** Initial draft. Applies RES-0001 evidence separation,
+- **0.1 — 2026-08-19:** Initial organization-local draft. Applied evidence separation,
   operator-level elicitation, four-class contract impact analysis, scoped authority,
   stable-ID traceability, federated propagation, compatibility ordering, and exact-head
   verification to single- or multi-policy amendments.

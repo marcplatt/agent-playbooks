@@ -1,9 +1,9 @@
 ---
 playbook_id: AP-SYNC-001
 title: Bidirectional Master-Plan Repository Polling and HRM Intake
-version: "0.5"
-status: draft
-owner: Alpine Structures
+version: "1.0"
+status: active
+owner: Adopting organization
 mode: bidirectional-master-plan-repository-polling
 human_readable: true
 machine_readable: true
@@ -33,7 +33,12 @@ controls:
   - accepted-records-only
   - canonical-source-not-duplicated
   - implementation-status-honesty
-  - complete-hrm-map-awareness
+  - complete-as-presently-knowable-hrm-map-awareness
+  - typed-change-envelope-intake
+  - evidence-expiry
+  - rebaseline-before-lanes
+  - no-inferred-semantics
+  - s0-s3-early-routing
   - contract-update-request-routing
   - hrm-obligation-routing
   - bounded-lane-drafting
@@ -49,8 +54,8 @@ controls:
 
 # Bidirectional Master-Plan Repository Polling and HRM Intake
 
-Use this playbook to set up one recurring Codex task in each application repository
-that participates in an RES-0002-style HRM-first organizational master plan. The task watches
+Use this playbook to set up one recurring agent task in each application repository
+that participates in an HRM-first organizational master plan. The task watches
 both the master plan and its target repository's remote `main` branches from separate
 exact commit cursors. Master-plan changes produce approved repository mirror updates,
 project HRM-map obligations, contract-update requests, subordinate lane drafts, or
@@ -120,6 +125,7 @@ Recommended master-plan mirror values are `draft_receipt_only`, `push_intake_bra
 | Several repositories report at once | Prepare in parallel; let the master-plan task serialize intake merges and regenerate shared indexes. |
 | A repository change contradicts policy or a canonical contract | Create an amendment proposal; never overwrite master-plan authority from the application repo. |
 | An HRM discovers a missing inter-system promise | Create one stable `CTRQ`, route it to the owning system, and block only the dependent HRM; never invent the answer. |
+| An accepted change has no typed change envelope or leaves semantic meaning unresolved | Mark `REBASELINE_PENDING`, freeze the affected boundary, and request the missing envelope/decision; do not infer meaning from the diff. |
 | A lane or mirror is published but no code changed | Record adoption/planning only, with `implementation: false`. |
 | Code merges but the manifest or lane reference is missing | Record drift or a blocker; do not infer stable IDs or implemented coverage from filenames. |
 | `main` checks are pending or failed | Hold the implementation receipt pending or blocked until exact-head checks pass. |
@@ -157,7 +163,9 @@ PURPOSE AND AUTHORITY
 2. Read every applicable AGENTS.md and repository rule in both repositories. Reconcile
    remotes, `main` branches, worktrees, branches, pull requests, uncommitted work,
    lane conventions, checkers, and notification rules before writing. Preserve user
-   work and use a dedicated worktree when the target repository requires one.
+   work. A polling task is not a Git change unit; create a branch only for a published
+   intake/change unit and a worktree only when concurrency, review, or unique-work
+   preservation requires it.
 3. Default authority is: fetch and inspect both repositories; update an approved
    target-repository mirror or implementation declaration; draft target lane docs;
    prepare or route a documentation-only contract-update request; prepare an HRM status,
@@ -214,7 +222,10 @@ POLL MASTER PLAN -> TARGET FROM AN EXACT CURSOR
     statuses, effective dates, supersession links, work orders, policies, authority
     claims, contracts, contract-update requests, project HRM maps, milestone status,
     integration cards, generated-index changes, and target mappings.
-    Separate authored changes from generated artifacts and commit-message claims.
+    Separate authored changes from generated artifacts and commit-message claims. Locate
+    the accepted typed change envelope for each normative amendment and validate its source
+    SHA, before/after versions, provenance, evidence expiry, and acceptance. A diff is not
+    a substitute for an envelope and cannot supply missing semantic meaning.
 13. Resolve impact using the master-plan registry, accepted work-order targets,
     implementation manifests, contract provider/consumer links, material edges, and
     repository-owned copies. A filename or keyword match alone is not sufficient.
@@ -223,6 +234,8 @@ POLL MASTER PLAN -> TARGET FROM AN EXACT CURSOR
     - RECEIPT_ACK: the master plan records an already-reported target SHA; no new lane;
     - INFORMATIONAL: relevant context changed but no accepted implementation obligation;
     - MIRROR_REFRESH: an approved pointer, generated copy, or manifest declaration is stale;
+    - REBASELINE_PENDING: the accepted change requires project-plan, manifest, contract, or
+      HRM rebaseline before any implementation change unit is safe;
     - HRM_UPDATE: an accepted change alters an HRM prerequisite, evidence need, review
       scenario, blocker, or downstream eligibility in the complete project map;
     - CONTRACT_UPDATE_REQUEST: a stable `CTRQ` is opened, resolved, superseded, or routed
@@ -249,16 +262,22 @@ REFRESH ONLY REPOSITORY-OWNED MIRRORS
     honest current coverage: declared, partial, implemented, not_implemented, unknown,
     or deprecated. Code, checks, deployment, and runtime evidence advance separate states.
 19. Apply target-repository rules and the configured publication authority. If only
-    draft authority exists, leave a reviewable diff in the dedicated worktree. If a
-    docs branch may be pushed, verify and push that branch. Allow the change to land on
+    draft authority exists, leave a reviewable diff in the registered change-unit branch;
+    use a worktree only when the conditional workspace policy requires it. If a docs
+    branch may be pushed, verify and push that branch. Allow the change to land on
     `main` only when the target's explicit rules authorize that exact lane-doc workflow.
 
 ROUTE THE HRM OBLIGATION AND DRAFT BOUNDED LANES
 
-20. For HRM_UPDATE, update or propose the versioned project HRM map and affected milestone
-    contracts without rewriting closed evidence. Record prior/new map versions, affected
-    HRMs, blockers, contract requests, downstream impact, and the exact operator-level
-    review consequence. For LANE_READY, first prove the obligation resolves to a published
+20. For REBASELINE_PENDING or HRM_UPDATE, consume the typed change envelope and update or
+    propose the system plan, requirements, scenarios, implementation manifest, versioned
+    project HRM map, and affected milestone contracts without rewriting closed evidence.
+    Record semantic/syntactic/behavioral/operational differences, prior/new map versions,
+    evidence expiry, affected HRMs, blockers, contract requests, downstream impact, safe
+    posture, permitted work, and exact operator-level review consequence. If the envelope
+    is missing, stale, or semantically incomplete, freeze the affected boundary and route
+    an input/decision request; never reconstruct meaning from code or filenames. For
+    LANE_READY, first prove the obligation resolves to a published
     HRM; then draft the smallest subordinate lane. Reconcile the lane number/ID first.
     The lane must
     reference the exact master-plan source range, accepted work order or record IDs,
@@ -378,16 +397,20 @@ ROUTE THE SMALLEST USEFUL UPDATE
     - INFORMATIONAL: concise context update with no lane and no response requested;
     - MIRROR_REFRESH: implementation update with source SHA, refreshed surface, checks,
       branch/PR or draft location, and next authorized action;
-    - HRM_UPDATE: send the system-build orchestrator the affected HRMs, map version,
-      blocker/rebaseline state, exact sources, and next authorized action;
+    - REBASELINE_PENDING or HRM_UPDATE: send the system-build orchestrator the affected
+      HRMs, map version, change-envelope ID/SHA, evidence expiry, blocker/rebaseline state,
+      safe posture, permitted work, exact sources, and next authorized action;
     - CONTRACT_UPDATE_REQUEST: route the `CTRQ` to the registered contract owner and
-      affected HRM orchestrators; notify the operator only when the request contains a
-      prepared business/authority decision or blocks a prepared HRM;
+      affected HRM orchestrators; use S0 immediately, S1 before semantic assumption or
+      non-disposable work, S2 in a bounded batch, and S3 without operator interruption.
+      Do not wait for a prepared HRM when the latest safe decision time is earlier;
     - LANE_READY: implementation update suitable for AP-LANE-001 coordination, with lane
       link/path, exact source and target SHAs, scheduling hint, dependencies, checker,
       human gates, publication state, and whether execution is ready;
-    - OPERATOR_DECISION: one decision request containing current authority, exact question,
-      recommendation, alternatives, consequences, affected repos, and safe default;
+    - OPERATOR_DECISION: one decision request containing S0-S2 class, first foreseeable/
+      notified and latest-safe times, current authority, exact question, evidence/expiry,
+      invalidation reach, recommendation, at most three alternatives, consequences,
+      affected repos/HRMs, safe posture, permitted continuation, and reply syntax;
     - ADOPTION_RECEIPT, IMPLEMENTATION_RECEIPT, EVIDENCE_RECEIPT, or HRM_STATUS_RECEIPT:
       after master-plan intake read-back,
       send one implementation update with exact repo/master SHAs, receipt, checks, and
@@ -402,7 +425,9 @@ ROUTE THE SMALLEST USEFUL UPDATE
     operator only for business meaning, authority, material scope, risk acceptance,
     UI/UX/function acceptance, or an action-time production decision. Do not require the
     operator to approve file names, test mechanics, or ordinary implementation details.
-42. Keep notifications idempotent and compact. Never include credentials, PII, customer
+42. Read every accepted operator response back as exact meaning, scope, exclusions,
+    affected records, and expiry before unfreezing or marking rebaseline complete. Keep
+    notifications idempotent and compact. Never include credentials, PII, customer
     records, raw provider payloads, or full test logs. Link exact commits, lanes, PRs,
     artifacts, HRM maps, contract requests, and operator briefs instead. Keep routine
     poll/lane progress quiet; make a prepared HRM stop, material decision, or persistent
@@ -439,7 +464,7 @@ CHECKPOINT AND RECOVER
 
 ```yaml
 poller:
-  schema_version: agent_playbooks.master_plan_poller.v4
+  schema_version: agent_playbooks.master_plan_poller.v5
   id: "{{organization}}:{{target_repository}}"
   status: proposed
   organization: "{{organization}}"
@@ -449,6 +474,7 @@ poller:
     registry_paths: []
     work_order_paths: []
     intake_surface: "{{master_plan_intake_surface_or_discover}}"
+    change_envelope_surface: null
     intake_coordinator: null
   target:
     repository: "{{target_repository}}"
@@ -478,6 +504,12 @@ poller:
     implementation_update: "{{implementation_update_route_or_codex_task}}"
     decision_request: codex_task
     external_routes_authorized: []
+  decision_frontier:
+    s0_route: immediate
+    s1_route: before_non_disposable_work
+    s2_route: bounded_batch
+    s3_route: autonomous_record
+    semantic_read_back_required: true
   cursors:
     master_plan:
       baseline_sha: null
@@ -497,7 +529,7 @@ poller:
 
 ```yaml
 intake_record:
-  schema_version: agent_playbooks.repository_intake.v2
+  schema_version: agent_playbooks.repository_intake.v3
   id: "{{target_repository}}:{{target_sha}}:{{impact_key}}"
   kind: "adoption_receipt|implementation_receipt|evidence_receipt|hrm_status_receipt|contract_update_request|drift_finding|amendment_proposal"
   status: proposed
@@ -524,6 +556,12 @@ intake_record:
     repository_paths: []
     affected_hrms: []
     contract_request_ids: []
+    change_envelope_ids: []
+  rebaseline:
+    state: "not_required|pending|complete|blocked"
+    safe_posture: null
+    permitted_work: []
+    evidence_expires_at: null
   claims:
     master_plan_adoption: unknown
     repository_implementation: unknown
@@ -598,6 +636,10 @@ poll:
 
 ## Change note
 
+- **1.0 — 2026-08-24:** Generalizes ownership and intake; consumes typed master-plan
+  change envelopes; adds evidence expiry, fail-closed `REBASELINE_PENDING`, S0-S3 early
+  routing, semantic read-back, and conditional Git workspace creation. A diff cannot
+  supply missing meaning, and propagation never implies rollout authority.
 - **0.5 — 2026-08-21:** Moves polling intake to the HRM abstraction, watches complete
   project HRM maps, routes stable non-adopting `CTRQ` records, keeps lanes subordinate,
   and suppresses routine noise until a prepared HRM, material decision, or persistent

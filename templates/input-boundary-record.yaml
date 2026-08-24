@@ -1,13 +1,18 @@
 input_requirement:
-  schema_version: agent_playbooks.input_requirement.v1
+  schema_version: agent_playbooks.input_requirement.v2
   id: "{{stable_input_id}}"
   status: "open|routed|waiting|accepted_limitation|deferred|blocked_external|resolved|superseded"
   created_at: null
+  first_foreseeable_at: null
+  first_notified_at: null
+  latest_safe_decision_at: null
+  response_target_at: null
   created_by_role: hrm_orchestrator
   observation:
     summary: "{{exact_observation}}"
     evidence: []
     evidence_freshness: unknown
+    evidence_expires_at: null
     source_repository_or_system: null
     exact_revision: null
   impact:
@@ -17,6 +22,11 @@ input_requirement:
     affected_scenarios: []
     consequence_if_unresolved: null
     downstream_hrms_paused: []
+    invalidation_reach:
+      contracts: []
+      change_units: []
+      artifacts: []
+      downstream_projects: []
   boundary:
     frozen_surface: "{{smallest_affected_boundary}}"
     safe_posture: "{{current_safe_posture}}"
@@ -41,11 +51,14 @@ input_requirement:
     cannot_suppress_record: true
     affected_lanes: []
   routing:
+    interrupt_class: "S0|S1|S2|S3"
     route: null
     routed_to_role: null
     delivered: false
     read_back: false
     acknowledgement: null
+    operator_decision_packet: null
+    semantic_read_back_required: false
   resolution:
     decision_or_evidence: []
     canonical_records_updated: []

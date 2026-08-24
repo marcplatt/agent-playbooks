@@ -1,0 +1,51 @@
+hrm_discovery:
+  schema_version: agent_playbooks.hrm_discovery.v1
+  id: "{{discovery_id}}"
+  status: "observed|assessing|decision_needed|accepted|rejected|published|superseded"
+  system_reference: "{{system_reference}}"
+  current_map:
+    version: "{{map_version}}"
+    source_revision: null
+  observed_at: null
+  distinct_hrm_foreseeable_at: null
+  first_notified_at: null
+  evidence: []
+  discovery_summary: null
+  classification: "defect|remediation|requirement_amendment|contract_amendment|hrm_addition|hrm_split|dependency_change|supersession|no_change"
+  distinct_hrm_test:
+    operator_visible_outcome_differs: false
+    separate_human_acceptance: false
+    closure_effect_differs: false
+    authority_or_evidence_state_differs: false
+    downstream_release_effect_differs: false
+    existing_hrm_cannot_absorb_because: null
+  proposal:
+    milestone_id: null
+    outcome: null
+    dependencies: []
+    review_questions: []
+    closure_authority: null
+    closure_effect: null
+    release_effect: null
+    authority_envelope: []
+    evidence_requirements: []
+    unknowns: []
+  impact:
+    affected_hrms: []
+    affected_requirements: []
+    affected_contracts: []
+    affected_change_units: []
+    downstream_projects: []
+  frozen_boundary: null
+  safe_posture: null
+  permitted_compatible_work: []
+  recommendation: null
+  alternatives: []
+  decision_packet_id: null
+  disposition:
+    decided_by: null
+    decided_at: null
+    semantic_read_back: null
+    published_map_version: null
+    supersedes_map_version: null
+  non_disposable_work_after_foreseeable_at: []

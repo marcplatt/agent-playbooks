@@ -1,0 +1,69 @@
+organization_operating_model:
+  schema_version: agent_playbooks.organization_operating_model.v1
+  organization_id: "{{organization_id}}"
+  version: "{{version}}"
+  status: "draft|in_review|accepted|superseded"
+  effective_at: null
+  supersedes: null
+  accepted_by: null
+  sources:
+    - id: "{{source_id}}"
+      kind: "business_plan|interview|policy|research|operational_evidence|other"
+      location: null
+      owner: null
+      revision: null
+      observed_at: null
+      authority_status: "informative|proposed|accepted"
+      expires_at: null
+  outcomes:
+    - id: "{{outcome_id}}"
+      statement: "{{desired_business_outcome}}"
+      beneficiaries: []
+      present_condition: null
+      desired_condition: null
+      exclusions: []
+      horizon: null
+      measures:
+        leading: []
+        lagging: []
+      provenance: []
+      acceptance_state: "proposed|accepted|unknown"
+      decision_authority: null
+  actors:
+    - id: "{{actor_id}}"
+      purpose: null
+      responsibilities: []
+      decision_rights: []
+      handoffs: []
+  value_and_information_flows:
+    - id: "{{flow_id}}"
+      trigger: null
+      participants: []
+      value_delivered: null
+      information_subjects: []
+      policies: []
+      failure_posture: null
+  capabilities:
+    - id: "{{capability_id}}"
+      outcome_ids: []
+      statement: null
+      current_state: "present|partial|absent|unknown"
+      automation_assumption: "none|proposed|accepted"
+  authority:
+    reserved_operator_decisions: []
+    delegated_decisions: []
+    authoritative_subject_assignments: []
+  policies: []
+  constraints: []
+  material_risks: []
+  contradictions: []
+  unknowns:
+    - id: "{{unknown_id}}"
+      question: null
+      owner: null
+      consequence: null
+      safe_posture: null
+      latest_safe_decision_at: null
+      permitted_work: []
+  decision_frontier: []
+  next_authorized_stage: "portfolio_planning|none"

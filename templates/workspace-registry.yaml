@@ -1,0 +1,45 @@
+workspace_registry:
+  schema_version: agent_playbooks.workspace_registry.v1.1
+  project_repository: "{{project_repository}}"
+  source_revision: null
+  operator_desk:
+    path: "{{operator_checkout_absolute_path}}"
+    branch: null
+    exact_sha: null
+    clean: null
+    worker_implementation_prohibited: true
+  current_review_index:
+    path: "docs/planning/current-review.md"
+    target_hrm: null
+    map_version: null
+    review_sha: null
+  branch_policy:
+    task_is_git_change_unit: false
+    branch_requires_published_change_unit: true
+    one_hrm_may_have_multiple_change_units: true
+    one_branch_per_change_unit: true
+    normal_pr_count_per_change_unit: 1
+    one_integration_receipt_per_change_unit: true
+    worktree_is_conditional: true
+  worktrees:
+    - path: "{{absolute_worktree_path}}"
+      branch: null
+      exact_sha: null
+      hrm: null
+      change_unit: null
+      owner: null
+      purpose: null
+      necessity: "concurrent_execution|active_review_runtime|unique_work_preservation"
+      created_at: null
+      last_activity_at: null
+      state: "active_current_hrm|retained_for_review|unique_unmerged_recovery|cleanup_eligible|unexplained_blocker"
+      dirty: null
+      unique_work_evidence: []
+      process_dependency: null
+      review_dependency: null
+      cleanup_condition: null
+      cleanup_action: null
+  branches_without_worktrees: []
+  unexplained_entries: []
+  cleanup_receipts: []
+  no_sibling_repository_touched: false
