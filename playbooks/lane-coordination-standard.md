@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.1"
+version: "4.2"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -62,6 +62,10 @@ controls:
   - bounded-agent-context
   - exact-head-evidence
   - validation-classification
+  - validation-profile-routing
+  - operator-access-before-integration
+  - no-duplicate-equivalent-ci
+  - non-recursive-integration-receipts
   - change-surface-test-matrix
   - hotl-design-batching
   - risk-based-review
@@ -360,6 +364,18 @@ authoritative production input. Before building:
   lacks one: add the smallest deterministic test if it is in scope, or block on a test-
   contract amendment.
 
+Before selecting surface checks, classify the final diff under the Operator Access and
+Validation Routing playbook as `review_packet`, `executable_contract`, or `runtime_change`.
+This profile is independent of the runtime validation classes below. A completed audit,
+decision packet, HRM discovery, or prepared review surface becomes `operator_access_ready`
+after its minimum structural, privacy, and consistency checks; application CI, code review,
+mergeability, integration, receipt publication, and cleanup continue independently and do
+not delay operator interaction. Early access is limited to semantic decisions, discovery
+disposition, and provisional feedback. Formal HRM function/UI/UX acceptance and closure
+remain bound to the integrated exact head. A privacy/secret failure quarantines the payload;
+unknown validation reach fails integration closed. Validation profiles add routing and never
+weaken repository policy, mandatory checkers, full-suite triggers, or release gates.
+
 Required checks by changed surface:
 
 Within a selected surface, run each check that can detect a plausible regression from
@@ -428,6 +444,9 @@ fine` and `the change is small` are not reasons to omit a relevant check.
   configured documentation lint/link checks, executable example or command smoke, and a
   repository search proving canonical and mirrored references agree. Documentation-only
   work does not trigger application tests unless it changes generated/runtime inputs.
+  Apply only targeted consumer checks to an executable contract unless demonstrated reach
+  or repository policy requires more. Configure CI to avoid duplicate equivalent suites for
+  one candidate head from both branch-push and pull-request events.
 - Configuration, flags, and environment handling: parse/schema checks; defaults; missing,
   malformed, unknown, and conflicting values; safe-off behavior; secret/PII non-disclosure;
   and startup smoke for each supported mode affected by the change.
@@ -510,7 +529,8 @@ RUN THE FASTEST SAFE FLOW
     acceptance, automated evidence, and required review to the candidate head SHA. The
     PR represents one published change unit and may contain multiple intention-revealing
     commits; it does not need to contain the entire HRM. A disposable discovery spike has
-    no PR unless its retained evidence was published as a change unit.
+    no PR unless its retained evidence was published as a change unit. Publishing an
+    operator packet and starting interaction do not wait for this integration gate.
 21. Run applicable CI and risk-scaled exact-head review concurrently. Blocking findings
     require a violated invariant plus a reproduction, failing test, or concrete contract
     mismatch. A presentation-only lane needs lightweight automated visual/accessibility
@@ -564,6 +584,15 @@ INTEGRATE AND VERIFY
     head and gates. Merge one dependency-ordered candidate, read back the remote merge
     and main SHA, wait for required post-merge CI, and record a compact handoff before
     releasing the next. Reconcile any ambiguous mutation result before retrying.
+28a. Remote Git and hosting read-back are authoritative for integration identity. Do not
+    open a new change unit or PR solely to record the merge of the immediately preceding
+    documentation/governance unit. Reconcile its receipt through an append-only external
+    hosting read-back with PR identity, accepted head, merge/main SHA, and timestamp as the
+    terminal receipt. A later planned unit may carry a non-self-receipting informational
+    reference. Cross-system carriers include `impact_key`, `caused_by`, `content_hash`,
+    `hop_count`, and `max_hops` and never answer their own receipts. An immediate receipt-only
+    unit requires an explicit regulatory rule and uses the `review_packet` fast path. Receipt reconciliation never delays an already
+    prepared operator packet or creates a recursive chain of receipt PRs.
 
 PREPARE AND REVIEW THE TARGET HRM
 
@@ -694,6 +723,7 @@ MEASURE AND REPORT
 
 ```yaml
 milestone_session:
+  schema_version: agent_playbooks.hrm_session_ledger.v2.2
   id: "{{session_id}}"
   system_reference: "{{system_reference}}"
   hrm_map:
@@ -747,7 +777,10 @@ milestone_session:
     decisions_requested: []
     contract_update_requests: []
     input_requirements: []
+    operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
+    access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
     function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
+    candidate_head_sha: null
     integrated_head_sha: null
     next_action: null
   published_lane_bundle: []
@@ -790,8 +823,26 @@ milestone_session:
     protected_governance_paths: []
   review_package:
     status: "not_started|draft|published|superseded|accepted|deferred"
+    operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
+    access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
+    validation_profile: "review_packet|executable_contract|runtime_change"
+    integration_validation_state: "not_started|running|passed|failed|not_applicable"
+    operator_packet_published_at: null
+    operator_access_ready_at: null
+    validation_started_at: null
+    integration_eligible_at: null
+    avoidable_wait_seconds: 0
+    avoidable_wait_reason: null
+    validation_subject_identity:
+      kind: "repository_commit|non_git_packet"
+      id: null
+      version: null
+      content_hash: null
+      provenance: []
+      repository_sha: null
     path_or_url: null
-    review_head_sha: null
+    candidate_head_sha: null
+    integrated_head_sha: null
     configuration_profile: null
     scenarios: []
     known_limitations: []
@@ -854,6 +905,7 @@ lanes:
     milestone_contribution: []
     state: "queued|readiness_audit|blocked_contract|awaiting_amendment_approval|ready_to_build|building|design_iteration|candidate_frozen|checking|reviewing|correcting|eligible|merging|verifying_main|cleanup_pending|complete|deferred|cancelled|blocked_external|blocked"
     classification: "quick|serial|parallel|critical"
+    validation_profile: "review_packet|executable_contract|runtime_change"
     validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
     design_phase: "not_applicable|iterating|frozen"
     contract: "{{path}}"
@@ -948,6 +1000,9 @@ milestone_cleanup:
 
 ## Change note
 
+- **4.2 — 2026-08-24:** Adds operator-access, executable-contract, and runtime validation
+  routing; prevents application suites from blocking inert review packets; avoids duplicate
+  equivalent CI on one head; and prohibits recursive receipt-only PRs by default.
 - **4.1 — 2026-08-24:** Makes the Git hierarchy explicit: one HRM may own multiple
   published change units; each change unit gets one branch, normally one PR, and one
   integration receipt; a lane normally maps to one change unit and splits at independent

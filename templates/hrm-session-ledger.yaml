@@ -1,5 +1,5 @@
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.1
+  schema_version: agent_playbooks.hrm_session_ledger.v2.2
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -100,12 +100,33 @@ milestone_session:
     decisions_requested: []
     contract_update_requests: []
     input_requirements: []
+    operator_access_state: not_ready
+    access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
+    candidate_head_sha: null
     integrated_head_sha: null
     next_action: resolve_target_hrm
   review_package:
     status: not_started
+    operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
+    access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
+    operator_packet_published_at: null
+    operator_access_ready_at: null
+    validation_profile: "review_packet|executable_contract|runtime_change"
+    integration_validation_state: "not_started|running|passed|failed|not_applicable"
+    validation_started_at: null
+    integration_eligible_at: null
+    avoidable_wait_seconds: 0
+    avoidable_wait_reason: null
+    validation_subject_identity:
+      kind: "repository_commit|non_git_packet"
+      id: null
+      version: null
+      content_hash: null
+      provenance: []
+      repository_sha: null
     path_or_url: null
-    review_head_sha: null
+    candidate_head_sha: null
+    integrated_head_sha: null
     test_evidence: []
     known_limitations: []
     operator_function_acceptance: pending
@@ -145,6 +166,7 @@ lanes:
     candidate_head_sha: null
     main_sha: null
     integration_receipt: null
+    validation_profile: runtime_change
     validation_class: application_behavior
     exact_checks: []
     full_suite_triggers: []
