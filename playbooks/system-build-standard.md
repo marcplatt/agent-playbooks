@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.1"
+version: "2.2"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -31,6 +31,8 @@ controls:
   - governed-hrm-discovery-and-rebaseline
   - evidence-before-lanes
   - operator-decision-frontier
+  - operator-access-before-integration
+  - validation-profile-routing
   - semantic-readiness-before-code
   - s0-s3-early-escalation
   - worker-to-orchestrator-routing
@@ -281,7 +283,13 @@ CREATE THE MILESTONE SESSION CONTRACT
 10. Maintain an operator-facing session banner: current HRM, target HRM, why it matters,
     capabilities complete, capabilities remaining, blockers, decisions requested,
     contract requests, function/UI/UX review state, activation posture, integrated
-    revision, and next action. Lane counts and IDs are secondary execution details.
+    revision, operator-access state, integration-validation state, and next action. Lane
+    counts and IDs are secondary execution details. Apply the Operator Access and
+    Validation Routing playbook: a completed discovery, S0-S2 decision packet, or prepared
+    review surface becomes operator-accessible after minimum packet validation and never
+    waits for application CI, merge, receipt publication, or cleanup. This early surface
+    supports semantic decisions or provisional feedback only; formal function/UI/UX
+    acceptance and HRM closure remain bound to the integrated exact head.
 11. Use the lifecycle `resolving -> defining -> bundle_derivation -> executing ->
     review_ready -> in_review -> remediation -> awaiting_closure -> closed|deferred|
     blocked`. `review_ready` is a hard human stop: no autonomous remediation or attempt
@@ -540,6 +548,7 @@ CLOSE WITHOUT ACTIVATING
 
 ```yaml
 system_build_session:
+  schema_version: agent_playbooks.system_build_session.v2.2
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -659,6 +668,7 @@ system_build_session:
         requirement_ids: []
         dependencies: []
         classification: "quick|serial|parallel|critical"
+        validation_profile: "review_packet|executable_contract|runtime_change"
         validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
         contract: "{{path}}"
         publication_sha: null
@@ -681,13 +691,34 @@ system_build_session:
     decisions_requested: []
     contract_requests: []
     input_requirements: []
+    operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
+    access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
     function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
+    candidate_head_sha: null
     integrated_head_sha: null
     next_action: null
   review_package:
     status: "not_started|draft|published|superseded|accepted|deferred"
+    operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
+    access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
+    validation_profile: "review_packet|executable_contract|runtime_change"
+    integration_validation_state: "not_started|running|passed|failed|not_applicable"
+    operator_packet_published_at: null
+    operator_access_ready_at: null
+    validation_started_at: null
+    integration_eligible_at: null
+    avoidable_wait_seconds: 0
+    avoidable_wait_reason: null
+    validation_subject_identity:
+      kind: "repository_commit|non_git_packet"
+      id: null
+      version: null
+      content_hash: null
+      provenance: []
+      repository_sha: null
     path_or_url: null
-    review_head_sha: null
+    candidate_head_sha: null
+    integrated_head_sha: null
     configuration_profile: null
     scenarios: []
     test_evidence: []
@@ -740,6 +771,9 @@ system_build_session:
 
 ## Change note
 
+- **2.2 — 2026-08-24:** Separates operator access from integration validation and requires
+  completed discoveries, S0-S2 decisions, and prepared review surfaces to reach the operator
+  after minimum packet checks rather than waiting for application CI or merge bookkeeping.
 - **2.1 — 2026-08-24:** Defines one HRM as the orchestration/review boundary and published
   change units as the Git boundary. Allows multiple change units per HRM; assigns each one
   branch, normally one PR, and one integration receipt; makes lanes normally one-to-one

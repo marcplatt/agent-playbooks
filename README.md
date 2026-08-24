@@ -38,6 +38,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Project plan | [Project System-Plan Generation](playbooks/project-system-plan-generation.md) | Generate the project-owned system plan, requirements, scenarios, implementation manifest, and preliminary HRM journey. |
 | HRM governance | [HRM Map Discovery and Rebaseline](playbooks/hrm-map-discovery-rebaseline.md) | Publish the complete-as-presently-knowable HRM map and govern discoveries, splits, additions, removals, and supersession. |
 | Decisions | [Operator Decision Frontier](playbooks/operator-decision-frontier.md) | Surface semantic and authority decisions before non-disposable implementation and route S0-S3 interrupts. |
+| Validation | [Operator Access and Validation Routing](playbooks/operator-access-validation.md) | Make completed discovery and decision packets available before integration CI while routing risk-scaled checks and non-recursive receipts. |
 | Build | [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance one independently closable HRM through semantic readiness, a disposable vertical proof, derived implementation, and operator review. |
 | Execute | [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute a published HRM bundle quietly with exact-head evidence and worker-to-orchestrator escalation. |
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
@@ -81,10 +82,12 @@ Project planning and review:
 4. Publish all HRMs that are presently knowable. Unknowns remain explicit; later discoveries
    use a versioned amendment rather than being forced into an existing milestone.
 5. Resolve the decision frontier and semantic-readiness gate before substantive code.
-6. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
-7. Derive implementation change units and execute them under one HRM orchestrator.
-8. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
-9. Treat deployment, activation, canary, production observation, and autonomy as separate
+6. Publish completed discovery and decision packets after minimum packet validation; do not
+   make operator interaction wait for application CI, merge, receipts, or cleanup.
+7. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
+8. Derive implementation change units and execute them under one HRM orchestrator.
+9. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
+10. Treat deployment, activation, canary, production observation, and autonomy as separate
    action-time gates with current evidence.
 
 The operator decides business outcome and meaning, material scope or capability retirement,

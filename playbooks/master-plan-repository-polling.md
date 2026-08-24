@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYNC-001
 title: Bidirectional Master-Plan Repository Polling and HRM Intake
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: bidirectional-master-plan-repository-polling
@@ -333,7 +333,10 @@ POLL TARGET -> MASTER PLAN FROM A SEPARATE EXACT CURSOR
 28. Prevent echoes using explicit causal provenance, not message text. Each generated
     mirror, lane, receipt, and notice carries source repository/SHA, target repository/SHA,
     stable IDs/versions, direction, deterministic impact key, caused_by key, content hash,
-    and hop_count. UPSTREAM_ECHO advances the target cursor without creating a new receipt.
+    hop_count, max_hops, and a carrier classification. Receipt carriers are explicitly
+    non-self-receipting: never emit a receipt in response to a receipt. Missing causal
+    bounds, `hop_count >= max_hops`, or a carrier whose ancestry cannot be reconstructed
+    fails closed as BLOCKED rather than propagating. UPSTREAM_ECHO advances the target cursor without creating a new receipt.
     A mirrored adoption/implementation receipt later observed in the master plan is
     RECEIPT_ACK and reconciles last_mirrored_target_sha.
 29. For ADOPTION_RECEIPT, record the exact target mainline SHA, source master-plan SHA,
@@ -549,6 +552,9 @@ intake_record:
     impact_key: "{{impact_key}}"
     caused_by: null
     hop_count: 1
+    max_hops: 4
+    carrier_kind: "source_change|mirror|receipt|notice"
+    non_self_receipting: true
     content_hash: null
   scope:
     stable_ids: []
@@ -605,6 +611,9 @@ poll:
       direction: "master_to_target|target_to_master"
       caused_by: null
       hop_count: 0
+      max_hops: 4
+      carrier_kind: "source_change|mirror|receipt|notice"
+      non_self_receipting: true
       content_hash: null
       stable_ids: []
       versions: []
@@ -636,6 +645,8 @@ poll:
 
 ## Change note
 
+- **1.1 — 2026-08-24:** Adds bounded causal propagation with `max_hops`, explicit carrier
+  classification, non-self-receipting receipt carriers, and fail-closed loop termination.
 - **1.0 — 2026-08-24:** Generalizes ownership and intake; consumes typed master-plan
   change envelopes; adds evidence expiry, fail-closed `REBASELINE_PENDING`, S0-S3 early
   routing, semantic read-back, and conditional Git workspace creation. A diff cannot

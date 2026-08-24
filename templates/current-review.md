@@ -14,6 +14,9 @@ notification; do not require the operator to locate a worker branch or worktree.
 
 ## Operator action
 
+- Operator access: `not_ready | operator_access_ready | operator_access_blocked | in_review | withdrawn | superseded`
+- Access purpose: `semantic_decision | discovery_disposition | provisional_feedback | formal_integrated_review`
+- Operator packet published at: `{{time_or_not_applicable}}`
 - Decision packet IDs: `{{ids_or_none}}`
 - Function/UI/UX review: `{{not_ready_or_exact_action}}`
 - Latest safe response time: `{{time_or_not_applicable}}`
@@ -21,8 +24,12 @@ notification; do not require the operator to locate a worker branch or worktree.
 
 ## Review candidate
 
+- Validation profile: `review_packet | executable_contract | runtime_change`
+- Integration validation: `not_started | running | passed | failed | not_applicable`
+- Validation subject: `{{kind_id_version_content_hash_provenance_and_optional_repository_sha}}`
 - Review package: `{{path_or_url}}`
-- Integrated HRM head/artifact digest: `{{revision}}`
+- Operator-access candidate head/artifact digest: `{{candidate_revision}}`
+- Integrated HRM head/artifact digest: `{{integrated_revision_or_not_integrated}}`
 - Active change units/branches/PRs: `{{ids_branches_prs_or_none}}`
 - Integration receipts: `{{ids_or_none}}`
 - Preview command or URL: `{{preview}}`

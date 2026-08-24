@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-DECIDE-001
 title: Operator Decision Frontier
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: early-human-input-routing
@@ -9,7 +9,7 @@ human_readable: true
 machine_readable: true
 required_inputs: [target_outcome, planning_evidence]
 optional_inputs: [current_hrm, worker_discoveries, operator_response_window]
-controls: [earliest-foreseeable-escalation, consolidated-routing, semantic-read-back, no-silent-default]
+controls: [earliest-foreseeable-escalation, operator-access-before-integration, consolidated-routing, semantic-read-back, no-silent-default]
 ---
 
 # Operator Decision Frontier
@@ -48,6 +48,14 @@ Current HRM: {{current_hrm_or_none}}
    permitted continuation, evidence expiry, response syntax, and decision authority.
 5. Deliver S0 immediately, S1 before assumption or non-disposable work, and S2 in a short
    bounded batch. Do not suppress an early question merely because an HRM review is not ready.
+   Once the readable packet passes minimum structural, privacy, and consistency checks,
+   mark it `operator_access_ready` and deliver it. Application CI, independent code review,
+   PR mergeability, integration, receipt publication, and cleanup are not prerequisites to
+   operator interaction. A structural or consistency failure becomes
+   `operator_access_blocked` with a safe failure notice. A privacy, secret, or PII failure
+   quarantines the payload and delivers only a redacted notice; never expose failed material.
+   Early access supports semantic decisions and provisional feedback only, not formal HRM
+   acceptance, closure, integration proof, or activation.
 6. A timeout never becomes semantic acceptance. Continue only explicitly permitted reversible
    work; otherwise remain fail-closed and send compact status without repeating the full packet.
 7. Read the response back as the exact accepted meaning, scope, exclusions, affected records,
@@ -57,4 +65,7 @@ Current HRM: {{current_hrm_or_none}}
 
 ## Change note
 
+- **1.1 — 2026-08-24:** Separates operator access from integration eligibility so completed
+  discovery and S0-S2 decision packets reach the operator after minimum packet validation,
+  without waiting for application CI, merge, receipts, or cleanup.
 - **1.0 — 2026-08-24:** Initial S0-S3 early operator-input protocol.
