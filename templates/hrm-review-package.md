@@ -75,6 +75,13 @@ Semantic read-back: `{{accepted_meaning_scope_exclusions_and_expiry}}`
 - Required operator journeys reachable: `{{evidence}}`
 - Approved removals or relocations: `{{ids_or_none}}`
 - Unknown parity obligations: `{{ids_or_none}}`
+- Reused stronger compatible implementation: `{{component_requirement_and_evidence_map}}`
+- New implementation limited to missing delta: `{{yes_or_finding}}`
+- Replacements: `{{none_or_approved_basis_parity_migration_rollback_and_consumer_evidence}}`
+
+| Requirement/capability | Existing component and tests | Disposition | Missing delta | Replacement authority/evidence |
+|---|---|---|---|---|
+| {{ids}} | {{component_and_evidence}} | {{reuse_adapter_evidence_extension_gap_or_replacement}} | {{delta_or_none}} | {{authority_and_evidence_or_not_applicable}} |
 
 ## Standalone and local system nodes
 
@@ -130,6 +137,8 @@ Semantic read-back: `{{accepted_meaning_scope_exclusions_and_expiry}}`
 - Operator function/UI/UX acceptance: `pending | accepted | withheld`
 - Closure effect: `{{current_hrm_state_change}}`
 - Downstream release effect: `{{next_hrm_or_bundle_eligibility}}`
+- Decision-transition receipt: `{{receipt_id_effect_newly_eligible_work_and_authorized_hrms}}`
+- Builder start or blocker within target: `{{assignment_or_blocker_receipt_and_latency}}`
 - What closure does not authorize: `{{canary_deployment_provider_write_migration_activation}}`
 - Decision: `pending | closed | deferred`
 - Decided by/date: `{{operator_and_time}}`

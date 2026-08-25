@@ -47,6 +47,14 @@ system_build_session:
     unknown: []
     approved_removals_or_relocations: []
     candidate_reachability_evidence: []
+    implementation_reuse_map:
+      - requirement_or_capability_ids: [REQ-EXAMPLE-014, complete_quote_journey]
+        existing_components: [ExistingQuoteWorkspace, ExistingQuoteValidation]
+        existing_tests_and_evidence: [tests/quote-workspace.spec.ts]
+        disposition: reuse_with_adapter_or_wiring
+        smallest_missing_delta: Wire stale-input guidance into the existing workspace.
+        replacement_basis: null
+        retirement_authority: null
   system_nodes:
     - id: SYS-EXAMPLE-BRIDGE
       kind: local_bridge
@@ -76,6 +84,25 @@ system_build_session:
     closure_authority: human_operator
     closure_effect: Records operator acceptance or deferral of the local workflow HRM.
     release_effect: Makes the activation-readiness planning bundle eligible; it does not authorize a canary or activation.
+  decision_frontier:
+    latest_transition_receipt:
+      decision_id: DEC-EXAMPLE-014
+      effect: releases_change_units
+      id: DTR-EXAMPLE-014
+      decision_accepted_at: "2026-08-21T16:58:45Z"
+      transition_reported_at: "2026-08-21T16:58:45Z"
+      newly_eligible_change_units: [EX-02.1, EX-02.2]
+      newly_authorized_hrms: []
+      still_frozen_boundaries: [provider_writes, canary, production_activation]
+      assigned_work:
+        - change_unit_id: EX-02.1
+          owner_or_task: worker-example-02-1
+          builder_started_at: "2026-08-21T17:00:00Z"
+          blocker_receipt_id: null
+      next_action: Execute EX-02.1 while EX-02.2 remains dependency-blocked.
+      decision_to_builder_or_blocker_target_seconds: 600
+      actual_decision_to_builder_or_blocker_seconds: 75
+      target_met: true
   status: executing
   authority_envelope:
     planning_changes: true
@@ -163,7 +190,12 @@ system_build_session:
         milestone_contribution: [complete_the_local_workflow]
         requirement_ids: [REQ-EXAMPLE-014]
         dependencies: []
-        classification: serial
+        classification: parallel
+        serialization_basis: null
+        implementation_reuse_map:
+          - component: ExistingQuoteWorkspace
+            disposition: reuse_with_adapter_or_wiring
+            missing_delta: Wire the accepted workflow contract into the existing workspace.
         validation_class: ui_interaction
         contract: docs/lanes/EX-02.1.md
         publication_sha: 1111111111111111111111111111111111111111
@@ -177,6 +209,14 @@ system_build_session:
         requirement_ids: [REQ-EXAMPLE-015]
         dependencies: [EX-02.1]
         classification: serial
+        serialization_basis:
+          dependency_edge: EX-02.1
+          shared_path_or_resource: ExistingQuoteWorkspace
+          state_or_authority_boundary: stale-input recovery is tested against the integrated workflow contract
+        implementation_reuse_map:
+          - component: ExistingQuoteValidation
+            disposition: extend
+            missing_delta: Add stale-input recovery guidance without replacing existing validation.
         validation_class: application_behavior
         contract: docs/lanes/EX-02.2.md
         publication_sha: 1111111111111111111111111111111111111111
@@ -202,6 +242,10 @@ system_build_session:
     contract_update_requests: []
     input_requirements: [INP-EXAMPLE-001]
     integrated_head_sha: null
+    last_decision_transition_receipt: DTR-EXAMPLE-014
+    newly_released_work: [EX-02.1, EX-02.2]
+    frozen_boundaries: [provider_writes, canary, production_activation]
+    decision_to_builder_or_blocker_latency_seconds: 75
     next_action: Execute EX-02.1 through the HRM bundle coordinator.
   review_package:
     status: not_started
@@ -216,3 +260,4 @@ system_build_session:
     decision: pending
     operator_function_acceptance: pending
     released_next_bundle: []
+    transition_receipt_id: null

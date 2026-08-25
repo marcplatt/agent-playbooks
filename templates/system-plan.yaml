@@ -1,5 +1,5 @@
 system_plan:
-  schema_version: agent_playbooks.system_plan.v1.1
+  schema_version: agent_playbooks.system_plan.v1.2
   system_reference: "{{system_reference}}"
   version: "{{version}}"
   status: "draft|in_review|accepted|superseded"
@@ -60,10 +60,23 @@ system_plan:
     developer_or_audit: []
     intentionally_superseded: []
     unknown: []
+    implementation_reuse_map:
+      - requirement_or_capability_ids: []
+        existing_components: []
+        existing_tests_and_evidence: []
+        current_behavior_strength: null
+        compatibility_constraints: []
+        disposition: "reuse_as_is|reuse_with_adapter_or_wiring|add_missing_evidence|extend|genuine_gap|replacement_pending_approval|approved_replacement"
+        smallest_missing_delta: null
+        replacement_basis: null
+        parity_migration_rollback_and_consumer_evidence: []
+        retirement_authority: null
   implementation_manifest:
     location: null
     requirement_coverage_complete: false
     current_support_and_gaps_verified: false
+    implementation_reuse_map_complete: false
+    unapproved_replacements: []
   decision_frontier:
     packet_ids: []
     s0_open: []
