@@ -1,5 +1,5 @@
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.2
+  schema_version: agent_playbooks.hrm_session_ledger.v2.3
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -19,6 +19,30 @@ milestone_session:
   target_hrm: "{{target_hrm}}"
   milestone_contract: "{{path}}"
   milestone_outcome: "{{operator_visible_outcome}}"
+  milestone_claim:
+    path: "{{path}}"
+    id: "{{milestone_claim_id}}"
+    version: "{{version}}"
+    status: "proposed|accepted|superseded"
+    proof_spine:
+      input_event: null
+      required_real_systems: []
+      required_operator_actions: []
+      ordered_effects: []
+    safety_shell:
+      invariants: []
+      partial_failure_cases: []
+      retry_resume_reconciliation: []
+    horizontal_breadth:
+      supported_input_contracts: []
+      supported_variants: []
+      cardinality: []
+      explicit_exclusions: []
+      reachable_implementation_matches_claim: false
+    seam_equivalence: []
+    required_scenario_matrix: []
+    human_observations_required: []
+    scale_perimeter: []
   closability:
     independently_closable: false
     composite_states: []
@@ -105,6 +129,9 @@ milestone_session:
     candidate_head_sha: null
     integrated_head_sha: null
     next_action: resolve_target_hrm
+    next_meaningful_operator_interaction: null
+    time_to_next_meaningful_operator_interaction_seconds: null
+    time_to_formal_hrm_review_seconds: null
   review_package:
     status: not_started
     operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
@@ -136,6 +163,16 @@ milestone_session:
     open: []
     blocking: []
     remediation_bundle: []
+  sequenced_obligations:
+    - id: "{{obligation_id}}"
+      source_finding_or_discovery: null
+      required_outcome: null
+      why_not_a_current_claim_blocker: null
+      target_hrm_or_release: null
+      owner: null
+      latest_safe_point: null
+      promotion_trigger: null
+      safe_posture_until_promoted: null
   closure:
     decision: pending
     operator_function_acceptance: pending

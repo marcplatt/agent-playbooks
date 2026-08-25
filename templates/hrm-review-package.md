@@ -17,6 +17,16 @@ Status: `planned | review_ready | in_review | remediation | awaiting_closure | c
 - Activation posture: `{{local_read_only_shadow_canary_enabled}}`
 - External mutations: `{{count}}`
 
+## Accepted milestone claim
+
+- Claim/version: `{{milestone_claim_id_and_version}}`
+- Proof spine: `{{accepted_input_through_ordered_real_system_effects}}`
+- Supported breadth and cardinality: `{{input_contracts_variants_and_counts}}`
+- Distinct seams and equivalence: `{{owned_seams_equivalence_and_limits}}`
+- Explicit exclusions: `{{exclusions}}`
+- Human-observable destination proof: `{{required_observations_or_not_applicable}}`
+- Reachable implementation matches claim: `{{yes_or_blocker}}`
+
 ## Outcome under review
 
 {{operator_visible_outcome}}
@@ -90,6 +100,12 @@ Semantic read-back: `{{accepted_meaning_scope_exclusions_and_expiry}}`
 - Ledger: `{{findings_ledger}}`
 - Blocking: `{{blocking_finding_ids_or_none}}`
 - Open non-blocking: `{{open_nonblocking_finding_ids_or_none}}`
+
+## Sequenced obligations
+
+| Obligation | Source | Why not a current blocker | Target/owner | Latest safe point and trigger | Safe interim posture |
+|---|---|---|---|---|---|
+| `{{obligation_id}}` | {{finding_or_discovery}} | {{reason}} | {{target_and_owner}} | {{safe_point_and_trigger}} | {{posture}} |
 
 ## Operator desk, integration, and cleanup receipt
 

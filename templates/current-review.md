@@ -10,6 +10,10 @@ notification; do not require the operator to locate a worker branch or worktree.
 - Current HRM: `{{current_hrm_or_none}}`
 - Target HRM: `{{target_hrm}}`
 - Outcome: {{operator_visible_outcome}}
+- Milestone claim/version: `{{milestone_claim_id_and_version}}`
+- Proof spine: `{{accepted_input_to_ordered_real_system_effects}}`
+- Supported breadth/cardinality: `{{input_contracts_variants_and_counts}}`
+- Explicit exclusions: `{{exclusions}}`
 - Status: `planned | executing | review_ready | in_review | remediation | awaiting_closure | closed | deferred | blocked`
 
 ## Operator action
@@ -21,6 +25,8 @@ notification; do not require the operator to locate a worker branch or worktree.
 - Function/UI/UX review: `{{not_ready_or_exact_action}}`
 - Latest safe response time: `{{time_or_not_applicable}}`
 - Recommended response: `{{recommendation_and_reply_syntax}}`
+- Next meaningful operator interaction: `{{event_and_forecast}}`
+- Time to formal HRM review: `{{forecast_or_unknown_with_reason}}`
 
 ## Review candidate
 
@@ -40,6 +46,7 @@ notification; do not require the operator to locate a worker branch or worktree.
 - Blockers: `{{blockers_or_none}}`
 - Input requirements/CTRQs: `{{ids_or_none}}`
 - HRM-discovery proposals: `{{ids_or_none}}`
+- Sequenced obligations: `{{ids_targets_and_latest_safe_points_or_none}}`
 - Activation posture: `{{planning_only_local_read_only_shadow_canary_enabled}}`
 - External mutations: `{{count}}`
 - Safe work continuing: `{{work_or_none}}`

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.2"
+version: "2.3"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -10,6 +10,7 @@ machine_readable: true
 required_inputs: [system_reference, target_hrm, milestone_outcome]
 optional_inputs:
   - project_hrm_map
+  - milestone_claim
   - implementation_manifest
   - brownfield_capability_inventory
   - system_node_registry
@@ -41,6 +42,10 @@ controls:
   - target-hrm-first
   - project-defined-milestones
   - milestone-contract-before-implementation
+  - milestone-claim-before-test-and-decomposition
+  - vertical-completion-horizontal-breadth
+  - owned-seam-equivalence
+  - proof-spine-safety-shell-scale-perimeter
   - independently-closable-hrm
   - brownfield-capability-parity
   - first-class-standalone-system-nodes
@@ -48,6 +53,8 @@ controls:
   - manual-lane-constraint-cannot-suppress-planning
   - authority-and-provenance
   - scenario-and-test-matrix-before-decomposition
+  - claim-derived-test-budget
+  - sequenced-obligation-no-silent-deferral
   - derived-lane-bundle
   - autonomous-contract-update-request
   - approval-before-material-hrm-or-contract-meaning-change
@@ -112,6 +119,7 @@ an input record, contract request, discovery, planning amendment, deferral, or b
 - **System or project:** `{{system_reference}}`
 - **Project root:** `{{project_root_or_discover}}`
 - **Project HRM map:** `{{project_hrm_map_or_discover}}`
+- **Milestone claim:** `{{milestone_claim_or_create}}`
 - **Implementation manifest:** `{{implementation_manifest_or_discover}}`
 - **Brownfield capability inventory:** `{{brownfield_capability_inventory_or_discover}}`
 - **System-node registry:** `{{system_node_registry_or_discover}}`
@@ -175,6 +183,7 @@ Advance this system to one Human Review Milestone.
 System: {{system_reference}}.
 Project root: {{project_root_or_discover}}.
 Project HRM map: {{project_hrm_map_or_discover}}.
+Milestone claim: {{milestone_claim_or_create}}.
 Implementation manifest: {{implementation_manifest_or_discover}}.
 Brownfield capability inventory: {{brownfield_capability_inventory_or_discover}}.
 System-node registry: {{system_node_registry_or_discover}}.
@@ -194,8 +203,9 @@ Manual lane constraint: {{manual_lane_constraint_or_none}}.
 The target HRM is the work session's controlling objective and must resolve from the
 published complete project HRM map. Do not ask the operator for a lane list. Derive the
 execution bundle only after resolving the milestone contract,
-current evidence, required capabilities, acceptance scenarios, dependency reach, and
-test architecture. Keep lanes visible as auditable implementation units, but keep
+current evidence, the vertically complete and horizontally bounded milestone claim,
+required capabilities, acceptance scenarios, dependency reach, and test architecture.
+Keep lanes visible as auditable implementation units, but keep
 routine execution quiet and report progress primarily as milestone readiness, contract
 requests, decisions, findings, function acceptance, and closure.
 
@@ -267,6 +277,10 @@ CREATE THE MILESTONE SESSION CONTRACT
    - project HRM map path, version, and target entry;
    - current and target HRM;
    - operator-visible outcome and review questions;
+   - milestone-claim path and version;
+   - proof spine, safety shell, supported horizontal breadth, cardinality, distinct
+     input/output seams, explicit exclusions, and scale perimeter;
+   - required scenario matrix and machine plus human-observable success evidence;
    - independently closable decision, prerequisites, closure criteria, closure effect,
      and downstream release effect;
    - requirements, invariants, policies, contracts, and acceptance scenarios in scope;
@@ -373,13 +387,58 @@ DECISION FRONTIER AND SEMANTIC READINESS
      cannot silently decide business meaning. Open gaps remain frozen or explicitly
      independent; passing tests cannot compensate for a failed semantic-readiness gate.
 
+FREEZE THE MILESTONE CLAIM BEFORE TEST DESIGN
+
+15e. Freeze one versioned milestone claim before test design, lane derivation, or substantive
+     implementation. Vertical completion defines the minimum real-system path from accepted
+     input through required operator actions and ordered effects to the claimed human-visible
+     result. Horizontal breadth defines exactly which input contracts, origins, variants,
+     cardinalities, mutations, and recurrence patterns are supported. A vertically complete
+     milestone may be intentionally narrow; a broad implementation is not a substitute for
+     completing its proof spine.
+15f. Divide the claim into a proof spine, safety shell, and scale perimeter. The proof spine
+     is the smallest ordered real-system path that makes the operator-visible claim true.
+     The safety shell contains identity, privacy, authorization, idempotency, partial-failure,
+     resume, reconciliation, stop, and rollback or compensation invariants required to run
+     that spine safely. The scale perimeter names generalized behavior, variants, automation,
+     history, and lifecycle work that is deliberately outside this milestone.
+15g. Build the required scenario matrix from owned contract seams, not interface labels. Each
+     distinct input or output contract gets a scenario unless an explicit equivalence class
+     proves that paths converge at an owned, versioned seam and share downstream semantics.
+     Equivalence may remove duplicate downstream proof only; upstream owners still prove the
+     path to the convergence seam. A label, screen, or channel is neither automatically a
+     separate system seam nor automatically equivalent.
+15h. State cardinality for inputs, operator actions, created records, messages, recipients,
+     acknowledgements, and retries. State explicit exclusions and fail-closed behavior for
+     unsupported inputs. If the claimed result is receipt or experience by a person, provider
+     `sent`, queued, or API success evidence is insufficient by itself: require a privacy-safe
+     human observation at the actual destination alongside machine receipts.
+15i. Make reachable implementation match the accepted breadth. Necessary safety or shared
+     infrastructure may extend beyond the proof spine, but generalized behavior that remains
+     reachable cannot escape its required correctness tests merely because it is outside the
+     milestone claim. Narrow, disable, or remove that behavior for this change unit, or amend
+     the claim and carry the corresponding evidence. Never use `out of scope` to defer an
+     unsafe reachable path.
+15j. Read the claim back to the operator before non-disposable work when it selects business
+     scope, supported origins, cardinality, human-visible effects, or explicit exclusions.
+     A later discovery may correct a defect within the claim, propose a claim amendment,
+     create a sequenced obligation, or trigger HRM discovery/rebaseline. Workers cannot
+     silently expand the claim; only the affected boundary freezes while compatible work
+     continues.
+
 DESIGN TEST COVERAGE BEFORE DECOMPOSITION
 
-16. Build the scenario-and-test matrix before creating lanes. For each changed behavior,
+16. Derive the scenario-and-test matrix from the frozen claim before creating lanes. For
+    each required scenario, claim-breaking failure mode, safety-shell invariant, and changed
+    behavior,
     record affected consumers, invariants, risk modifiers, exact repository-native command
     or deterministic scenario, phase, expected signal, fixture/environment, artifact,
-    timeout, and mutation safety. Map every acceptance criterion to positive, negative,
-    boundary, recovery, and accessibility/security coverage where applicable.
+    timeout, and mutation safety. Every planned check must trace to a claim, plausible
+    regression, safety invariant, dependency risk, or binding repository/release gate; raw
+    test count is not coverage. Map every acceptance criterion to positive, negative,
+    boundary, partial-failure, recovery, reconciliation, and accessibility/security coverage
+    where applicable. Test one failure mode at the lowest deterministic layer that can prove
+    it, and repeat it end to end only when the seam or integrated effect itself is the claim.
 17. Use behavior and dependency reach, not filenames alone:
 
     - UI presentation: build/lint, responsive visual smoke, overflow/wrapping/visibility,
@@ -425,8 +484,11 @@ DESIGN TEST COVERAGE BEFORE DECOMPOSITION
     structure changes; the affected surface cannot be bounded; targeted checks expose
     unexpected coupling; a mandatory checker requires it; or the exact head is prepared
     for canary, deployment, or release. A multi-lane lighter-weight bundle receives one
-    combined regression run at the integrated milestone head. Run the full suite again
-    before production canary or release. Isolated CSS, wording, spacing, layout, and
+    combined regression run at the integrated milestone head. During iteration prefer
+    focused checks; run the release-required full suite once on the frozen integrated head
+    and rerun it only when that head changes or the evidence is invalidated. Run the full
+    suite again before production canary or release only when it is a new exact head or the
+    release gate requires fresh evidence. Isolated CSS, wording, spacing, layout, and
     bounded control simplification do not independently trigger a full suite.
 
 PROVE THE END-TO-END INTENT CHEAPLY
@@ -479,6 +541,8 @@ RUN PREVIEWS AND THE FORMAL REVIEW
     pass, publish the HRM review package and move to REVIEW READY. The package contains:
 
     - project HRM map version, current and target HRM, outcome, and decisions requested;
+    - accepted milestone-claim version, proof spine, scenario matrix, cardinality,
+      explicit exclusions, and sequenced obligations;
     - capabilities completed in operator language, mapped to requirements and lanes;
     - exact integrated revision, configuration, data window, and activation posture;
     - live preview or deterministic review scenarios and expected outcomes;
@@ -505,6 +569,18 @@ CLASSIFY FINDINGS AND REMEDIATE
 27. Record findings append-only with stable FND IDs, time, evidence, classification,
     affected requirements/contracts/scenarios, blocking status, owner, disposition,
     remediation lane, and status.
+27a. Classify a finding as a current milestone blocker only when it is reachable in a
+     required scenario or accepted implementation surface and it violates the frozen claim,
+     a required invariant, or the safety shell; makes a required result false; or can
+     duplicate, misroute, expose, corrupt, or lose a required effect. A finding that adds
+     new breadth or later lifecycle capability does not enter the active implementation
+     without an operator-approved claim amendment. It becomes a sequenced obligation unless
+     it exposes unsafe reachable behavior, in which case narrow the implementation or fix
+     and test it now.
+27b. Every sequenced obligation records its originating finding or discovery, required
+     outcome, why it does not block the current claim, owner, target HRM or release, latest
+     safe point, promotion trigger, and safe interim posture. This is scheduled necessary
+     work, not an unowned backlog or evidence that the behavior already exists.
 28. After operator review or explicit finding disposition, a verified defect against an
     already-approved requirement may be converted into a bounded remediation lane,
     published to main, and executed in the same milestone session without another scope
@@ -548,7 +624,7 @@ CLOSE WITHOUT ACTIVATING
 
 ```yaml
 system_build_session:
-  schema_version: agent_playbooks.system_build_session.v2.2
+  schema_version: agent_playbooks.system_build_session.v2.3
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -587,6 +663,30 @@ system_build_session:
     closure_authority: human_operator
     closure_effect: null
     release_effect: null
+  milestone_claim:
+    path: "{{path}}"
+    id: "{{milestone_claim_id}}"
+    version: "{{version}}"
+    status: "proposed|accepted|superseded"
+    proof_spine:
+      input_event: null
+      required_real_systems: []
+      required_operator_actions: []
+      ordered_effects: []
+    safety_shell:
+      invariants: []
+      partial_failure_cases: []
+      retry_resume_reconciliation: []
+    horizontal_breadth:
+      supported_input_contracts: []
+      supported_variants: []
+      cardinality: []
+      explicit_exclusions: []
+      reachable_implementation_matches_claim: false
+    seam_equivalence: []
+    required_scenario_matrix: []
+    human_observations_required: []
+    scale_perimeter: []
   status: "resolving|defining|bundle_derivation|executing|review_ready|in_review|remediation|awaiting_closure|closed|deferred|blocked"
   authority_envelope:
     planning_changes: false
@@ -654,9 +754,20 @@ system_build_session:
       negative_scenarios: []
       boundary_scenarios: []
       recovery_scenarios: []
+      claim_failure_modes: []
       validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
       exact_checks: []
       full_suite_triggers: []
+  sequenced_obligations:
+    - id: "{{obligation_id}}"
+      source_finding_or_discovery: null
+      required_outcome: null
+      why_not_a_current_claim_blocker: null
+      target_hrm_or_release: null
+      owner: null
+      latest_safe_point: null
+      promotion_trigger: null
+      safe_posture_until_promoted: null
   lane_bundle:
     source: "derived|approved_existing|manual_constraint"
     planning_authority: "standing_hrm_contract|operator_approved_change|blocked"
@@ -697,6 +808,8 @@ system_build_session:
     candidate_head_sha: null
     integrated_head_sha: null
     next_action: null
+    time_to_next_meaningful_operator_interaction_seconds: null
+    time_to_formal_hrm_review_seconds: null
   review_package:
     status: "not_started|draft|published|superseded|accepted|deferred"
     operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
@@ -771,6 +884,10 @@ system_build_session:
 
 ## Change note
 
+- **2.3 — 2026-08-25:** Freezes a vertically complete and horizontally bounded milestone
+  claim before test design; adds proof-spine, safety-shell, scale-perimeter, owned-seam
+  equivalence, cardinality and destination evidence; derives validation from claim-breaking
+  failure modes; and routes non-blocking discoveries into owned sequenced obligations.
 - **2.2 — 2026-08-24:** Separates operator access from integration validation and requires
   completed discoveries, S0-S2 decisions, and prepared review surfaces to reach the operator
   after minimum packet checks rather than waiting for application CI or merge bookkeeping.

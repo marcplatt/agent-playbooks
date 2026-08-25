@@ -1,5 +1,5 @@
 hrm_discovery:
-  schema_version: agent_playbooks.hrm_discovery.v1
+  schema_version: agent_playbooks.hrm_discovery.v1.1
   id: "{{discovery_id}}"
   status: "observed|assessing|decision_needed|accepted|rejected|published|superseded"
   system_reference: "{{system_reference}}"
@@ -11,7 +11,7 @@ hrm_discovery:
   first_notified_at: null
   evidence: []
   discovery_summary: null
-  classification: "defect|remediation|requirement_amendment|contract_amendment|hrm_addition|hrm_split|dependency_change|supersession|no_change"
+  classification: "defect|remediation|milestone_claim_amendment|sequenced_obligation|requirement_amendment|contract_amendment|hrm_addition|hrm_split|dependency_change|supersession|no_change"
   distinct_hrm_test:
     operator_visible_outcome_differs: false
     separate_human_acceptance: false
@@ -30,6 +30,24 @@ hrm_discovery:
     authority_envelope: []
     evidence_requirements: []
     unknowns: []
+  milestone_claim_disposition:
+    current_claim_id: null
+    current_claim_version: null
+    claim_breaking_defect: false
+    breadth_added_or_removed: []
+    cardinality_change: []
+    real_system_or_effect_change: []
+    evidence_and_test_change: []
+    reachable_implementation_impact: []
+    sequenced_obligation:
+      id: null
+      required_outcome: null
+      why_not_a_current_claim_blocker: null
+      target_hrm_or_release: null
+      owner: null
+      latest_safe_point: null
+      promotion_trigger: null
+      safe_posture_until_promoted: null
   impact:
     affected_hrms: []
     affected_requirements: []
