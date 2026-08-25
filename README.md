@@ -97,14 +97,20 @@ Project planning and review:
 3. Generate each project system plan with provenance back to accepted organization records.
 4. Publish all HRMs that are presently knowable. Unknowns remain explicit; later discoveries
    use a versioned amendment rather than being forced into an existing milestone.
-5. Resolve the decision frontier and semantic-readiness gate before substantive code.
+5. Resolve the decision frontier and semantic-readiness gate before substantive code. Every
+   accepted decision emits a transition receipt in the response that acknowledges it, naming
+   its effect, newly eligible work, frozen boundaries, owner, next action, and target. Eligible
+   work in the same active HRM—or in a different HRM explicitly authorized by that decision—is
+   assigned immediately or receives an explicit blocker receipt.
 6. Publish completed discovery and decision packets after minimum packet validation; do not
    make operator interaction wait for application CI, merge, receipts, or cleanup.
 7. Freeze the milestone claim: its vertically complete proof spine, horizontally bounded
    scenario matrix, cardinality, real-system effects, evidence, exclusions, and scale perimeter.
 8. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
-9. Derive tests from claim-breaking failure modes, then derive implementation change units
-   and execute them under one HRM orchestrator.
+9. Derive tests from claim-breaking failure modes, then derive the smallest missing
+   implementation delta and execute its change units under one HRM orchestrator. In brownfield
+   systems, requirements are acceptance floors: reuse stronger compatible architecture,
+   components, workflows, and tests before adding or replacing implementation.
 10. Delegate declared checks, serialized merge, remote-main verification, and eligible cleanup
     to a source-read-only checker/merge-controller subagent. Repository queues may have
     dedicated controllers, but only one controller may hold the repository-global writer
@@ -133,6 +139,11 @@ HRM session. One HRM session may own multiple serial or parallel published chang
 published change unit gets one branch, normally one PR, and one integration receipt. A lane
 normally maps to one change unit; split it when independently reviewable ownership, risk,
 validation, rollback, or integration boundaries emerge instead of silently enlarging it.
+The smallest coherent bundle means the smallest new delta, not the smallest implementation
+considered in isolation. Every brownfield lane binds its requirements to the strongest compatible
+existing implementation and tests; replacement requires an explicit incompatibility, safety,
+retirement, parity, migration, rollback, and consumer-evidence basis. Serial classification names
+the exact dependency, shared path or resource, state, or authority boundary that requires it.
 Create a worktree only when concurrent execution, an active review runtime, or preservation
 of unique unmerged work requires it. Disposable API or behavior discovery may end without a
 PR; retain it only as a bounded evidence, contract, fixture, test, or documentation change

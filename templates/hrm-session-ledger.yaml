@@ -1,8 +1,13 @@
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.4
+  schema_version: agent_playbooks.hrm_session_ledger.v2.5
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
+  process_binding:
+    playbook_id: AP-LANE-001
+    version: "4.5"
+    source_sha: null
+    last_revalidated_at: null
   hrm_map:
     path: "{{project_hrm_map_path}}"
     version: "{{map_version}}"
@@ -68,6 +73,22 @@ milestone_session:
     recorded_s3: []
     semantic_read_backs: []
     gate: "blocked|ready"
+    latest_transition_receipt:
+      id: null
+      effect: "record_only|releases_change_units|closes_stage|closes_hrm"
+      decision_accepted_at: null
+      transition_reported_at: null
+      newly_eligible_change_units: []
+      newly_authorized_hrms: []
+      still_frozen_boundaries: []
+      assigned_work:
+        - change_unit_id: null
+          owner_or_task: null
+          builder_started_at: null
+          blocker_receipt_id: null
+      decision_to_builder_or_blocker_target_seconds: 600
+      actual_decision_to_builder_or_blocker_seconds: null
+      target_met: null
   disposable_end_to_end_proof:
     required: true
     path_or_url: null
@@ -103,6 +124,13 @@ milestone_session:
     unknown: []
     approved_removals_or_relocations: []
     candidate_reachability_evidence: []
+    implementation_reuse_map:
+      - requirement_or_capability: null
+        existing_components: []
+        existing_tests_and_evidence: []
+        disposition: "already_satisfied_reuse|reuse_with_adapter_or_wiring|reuse_with_missing_tests_or_evidence|extend_existing_implementation|genuine_implementation_gap|replacement_proposed_pending_approval"
+        missing_delta: null
+        replacement_authority: null
   system_nodes:
     - id: "{{system_node_id}}"
       kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
@@ -128,6 +156,11 @@ milestone_session:
     access_purpose: "semantic_decision|discovery_disposition|provisional_feedback|formal_integrated_review"
     candidate_head_sha: null
     integrated_head_sha: null
+    last_decision_transition_effect: null
+    newly_released_change_units: []
+    still_frozen_boundaries: []
+    decision_to_builder_or_blocker_target_seconds: 600
+    actual_decision_to_builder_or_blocker_seconds: null
     next_action: resolve_target_hrm
     next_meaningful_operator_interaction: null
     time_to_next_meaningful_operator_interaction_seconds: null
@@ -209,6 +242,12 @@ milestone_session:
     decided_at: null
     rationale: null
     released_next_bundle: []
+    transition_receipt_id: null
+  noise_posture:
+    routine_lane_updates: quiet
+    hrm_stop: noisy
+    transition_events: noisy
+    transition_events_include: [decision_accepted, capability_released, builder_assigned, release_target_missed, blocker_discovered, critical_path_changed]
   cleanup:
     operator_checkout: null
     current_review_index: null
@@ -224,6 +263,12 @@ lanes:
     contract: "{{path}}"
     state: queued
     dependencies: []
+    classification: "quick|serial|parallel|critical"
+    serialization_basis:
+      dependency_edges: []
+      conflicting_paths_or_resources: []
+      incompatible_state_or_authority_boundaries: []
+    implementation_reuse_map: []
     change_unit_id: null
     worktree: null
     branch: null

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.4"
+version: "4.5"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -41,6 +41,8 @@ controls:
   - governed-hrm-discovery-return
   - independently-closable-hrm-prerequisite
   - brownfield-capability-parity
+  - brownfield-reuse-first
+  - implementation-dominance
   - first-class-standalone-system-nodes
   - explicit-input-boundary-return
   - target-hrm-first
@@ -52,6 +54,7 @@ controls:
   - prospective-adoption-baseline
   - contradiction-register
   - queue-dependency-graph
+  - affirmative-serialization-evidence
   - implementation-and-semantic-readiness-gates
   - s0-s3-worker-escalation
   - worker-to-orchestrator-routing
@@ -82,6 +85,9 @@ controls:
   - source-read-only-controller
   - repository-global-writer-lease
   - early-classified-human-interruption
+  - decision-transition-receipt
+  - same-hrm-immediate-release
+  - transition-events-noisy
   - autonomous-contract-update-request-routing
   - quiet-lanes-noisy-hrm-stop
   - operator-function-acceptance
@@ -92,6 +98,7 @@ controls:
   - unique-work-preservation
   - operator-checkout-review-handoff
   - durable-supervisor-ledger
+  - current-playbook-version-rebinding
   - phase-timing-ledger
 ---
 
@@ -205,7 +212,9 @@ Supervisor rotation limits: {{supervisor_rotation_limits_or_default}}.
 The target HRM, not a list of lanes, is the work session's controlling objective. It
 must resolve from the complete-as-presently-knowable, versioned project HRM map. Obey
 every applicable AGENTS.md, approved system plan, milestone contract, milestone claim,
-and lane contract.
+and lane contract. Bind the session to the current `AP-LANE-001` version and source SHA.
+Recheck that binding after an operator decision, HRM-stage transition, policy-version change,
+or context compaction; rotate or issue a replacement handoff before continuing under drift.
 Do not ask the operator to enumerate lanes. If the map or target is undefined or not
 independently closable, the canonical planning package is absent, the bundle is absent,
 or the bundle cannot plausibly satisfy the milestone outcome, return control to the
@@ -280,8 +289,10 @@ ESTABLISH THE MILESTONE SESSION
 7. Record the lifecycle `planned -> executing -> review_ready -> in_review ->
    remediation -> awaiting_closure -> closed|deferred|blocked`. `review_ready` is a
    conspicuous hard human checkpoint, not completion or approval. Do not solve around
-   failed operator behavior, begin remediation, or release work assigned to a later HRM
-   while this milestone remains open and undispositioned.
+   failed operator behavior, begin remediation, or release work assigned to a different HRM
+   while this milestone remains open and undispositioned. Closure alone does not start a
+   different HRM; an operator decision that explicitly authorizes its published bundle does.
+   This does not delay newly eligible change units inside the active HRM.
 8. When completion mode is enabled, record one adoption SHA on main and treat earlier
    history as the legacy baseline. Reconcile contradictory rules once in a register,
    including lane versus change-unit granularity, documentation publication, business
@@ -289,17 +300,22 @@ ESTABLISH THE MILESTONE SESSION
    mode, and merge method. Build a completion manifest mapping every named lane or change
    unit to complete, deferred, cancelled, blocked_external, or active. Do not rewrite old
    merges, rename established lane IDs, or backfill historical evidence. Apply the new
-   contract prospectively to open and future changes. For an affected established UI,
-   require a capability/parity inventory that classifies required operator, advanced
-   operator, developer/audit, intentionally superseded, and unknown capabilities. Do not
-   accept simplification that makes required work unreachable without an approved HRM-
-   level removal or relocation.
+   contract prospectively to open and future changes. For an affected established
+   implementation, require a capability/parity and implementation-reuse inventory across
+   operator surfaces, domain services, workflows, persistence, integrations, recovery, and
+   audit behavior. Classify required operator, advanced, developer/audit, intentionally
+   superseded, and unknown capabilities. Do not accept simplification, duplication, or
+   replacement that discards a stronger compatible implementation without an approved
+   HRM-level removal or relocation.
 9. Maintain an operator-facing milestone banner throughout the session: system, current
    HRM, target HRM, milestone outcome, capabilities complete, capabilities remaining,
    blockers, contract-update requests, decisions requested, function review state,
    activation posture, integrated head, next meaningful operator interaction with forecast,
-   time to formal HRM review, and next action. Lane progress is quiet supporting detail
-   beneath this view unless it creates a classified HRM blocker.
+   time to formal HRM review, last decision-transition effect, newly released work, still-
+   frozen boundaries, decision-to-builder-or-blocker latency, and next action. Lane progress is
+   quiet supporting detail, but decision acceptance, capability release, builder assignment,
+   missed release target, newly discovered blocker, and critical-path change are always noisy
+   events.
 
 PLAN THE PUBLISHED BUNDLE ONCE
 
@@ -313,9 +329,11 @@ PLAN THE PUBLISHED BUNDLE ONCE
     base, worktree, branch, owned files, checker, validation class, risk, reviewer policy,
     PR/head, merge policy, policy SHA, order, cleanup disposition, timing, exception
     class, and next action in the milestone-session ledger.
-12. Classify lanes as QUICK, SERIAL, PARALLEL, or CRITICAL. Parallel implementation
-    requires proven dependency and ownership independence. Name safe parallel pairs;
-    otherwise overlap only read-only preparation, CI, review, or acceptance setup.
+12. Classify lanes as QUICK, SERIAL, PARALLEL, or CRITICAL. `SERIAL` requires an exact
+    dependency edge, conflicting owned path/resource, incompatible state transition, or
+    authority boundary. Uncertain independence triggers a bounded readiness audit, not
+    indefinite serialization. Name safe parallel pairs and the affirmative basis for every
+    serial edge; otherwise overlap read-only preparation, CI, review, or acceptance setup.
 
 PROVE READINESS BEFORE CODING
 
@@ -334,9 +352,17 @@ PROVE READINESS BEFORE CODING
     perimeter work without an accepted claim amendment, and the disposable end-to-end proof
     was reviewed or explicitly ruled unnecessary; the
     lane cannot compensate for an unresolved semantic decision or an unreviewed riskiest seam.
-14. Complete the exact test plan below, then mark the lane READY, READY WITH APPROVED
-    AMENDMENT, or BLOCKED. A merely planned, contradictory, unknown-contract, or test-
-    unspecified lane does not enter implementation.
+    For brownfield work, bind every requirement to existing components, contracts, tests, and
+    evidence before declaring an implementation gap. Classify the delta as reuse, adapter/
+    wiring, missing tests/evidence, extension, genuine gap, or replacement pending approval.
+    Requirements are acceptance floors: a stronger compatible implementation is reused, not
+    duplicated or rewritten. Replacement requires an exact violated invariant, unavoidable
+    incompatibility, unsafe behavior, or operator-approved retirement with parity, migration,
+    rollback, and affected-consumer evidence.
+14. Complete the exact test plan and implementation-reuse map below, then mark the lane READY,
+    READY WITH APPROVED AMENDMENT, or BLOCKED. A merely planned, contradictory, unknown-
+    contract, test-unspecified, or current-implementation-unreconciled lane does not enter
+    implementation.
 15. Batch foreseeable gaps into one amendment packet: observed reality, effect on the
     target HRM, proposed correction, files/owners, alternatives, safe default, and
     recommendation. A missing or inadequate inter-system promise becomes a stable `CTRQ`
@@ -532,9 +558,15 @@ change to the contract and human acceptance.
 
 RUN THE FASTEST SAFE FLOW
 
-16. Assign one builder per released lane. Multiple builders may run only for lanes
-    proved PARALLEL and READY. During serial work, use a free slot for the next lane's
-    read-only readiness audit, checker preparation, or acceptance scenarios.
+16. Assign one builder per released lane. Multiple builders may run only for lanes proved
+    PARALLEL and READY. Run bounded readiness audits concurrently for every likely next lane
+    that fits available capacity. During genuinely serial work, use a free slot for the next
+    lane's read-only readiness audit, checker preparation, or acceptance scenarios. After an
+    operator decision, issue the decision-transition receipt in the same response that
+    acknowledges it. Assign every newly eligible same-HRM lane immediately, plus eligible work
+    in a different HRM when that decision explicitly authorizes its published bundle. If
+    assignment cannot occur within the configured builder-or-blocker target, default 600
+    seconds, return the exact blocker instead of expanding planning work.
 17. Builders stay inside approved files and behavior, preserve safety seams and human
     control, add tests, and run focused checks. An undeclared file, policy, dependency,
     contract, HRM obligation, or external write returns to the coordinator as a scope
@@ -547,9 +579,12 @@ RUN THE FASTEST SAFE FLOW
     only when the operator declares the design batch ready. These previews are informal
     checkpoints inside the milestone session and do not open or close the HRM.
 19. At candidate freeze—or the operator-declared design freeze for a UI lane—classify
-    the final diff and apply its validation class. For a brownfield UI, first reconcile
-    the candidate against the required parity inventory and prove every retained operator
-    journey remains reachable; missing established capability blocks candidate freeze:
+    the final diff and apply its validation class. For any brownfield change, reconcile the
+    candidate against the required parity and implementation-reuse inventories. Prove reused
+    architecture remains authoritative, every retained capability remains reachable, and no
+    parallel lesser implementation was introduced. Missing established capability, unjustified
+    replacement, or duplicated behavior blocks candidate freeze. For UI, this includes every
+    retained operator journey:
 
     - UI PRESENTATION — CSS, spacing, static wording, labels, visual grouping, or button
       placement. During iteration use live preview and human review. At freeze run
@@ -726,9 +761,12 @@ PREPARE AND REVIEW THE TARGET HRM
     has a classification, owner, blocking status, disposition, and required evidence,
     and after function/UI/UX acceptance is recorded as accepted, accepted with findings,
     or rejected.
-    Closure makes the next published bundle eligible but does not start it. HRM closure
-    never by itself authorizes a canary, provider write, deployment, migration, or
-    production activation.
+    Closure alone makes a different HRM's next published bundle eligible but does not start
+    that new milestone session. When the closure decision explicitly authorizes that published
+    bundle, open its session and assign eligible work under the transition receipt. Newly
+    eligible change units inside the already-authorized active HRM start immediately. Any
+    assignment failure receives a bounded blocker receipt. HRM closure never by itself
+    authorizes a canary, provider write, deployment, migration, or production activation.
 
 CLOSE AND RECONCILE WORKSPACES
 
@@ -791,16 +829,19 @@ SUPERVISE AND HAND OFF
     becomes a second operator notification route.
 43. Rotate a long-running supervisor at configured limits, defaulting to 20 merge
     decisions, 14 days, 3 exception investigations, policy-version change, context
-    compaction, or inability to reconstruct state from live evidence. Reconcile live
-    state, record exact heads and next actions, and ensure exactly one integration writer
-    survives the handoff.
+    compaction, or inability to reconstruct state from live evidence. Rebind the session to
+    the current playbook ID/version/source SHA after every operator decision and HRM-stage
+    transition; policy drift requires rotation or a replacement handoff before more work.
+    Reconcile live state, record exact heads and next actions, and ensure exactly one
+    integration writer survives the handoff.
 
 MEASURE AND REPORT
 
 44. Timestamp session readiness, lane readiness/build, UI iteration, design freeze,
     checks, CI/review, corrections, integration, milestone-review readiness, human wait,
-    remediation, closure, post-merge verification, and cleanup. Separate active,
-    automated-wait, and human-wait time.
+    remediation, closure, post-merge verification, and cleanup. Also record operator-decision
+    acceptance, transition receipt, builder assignment or blocker receipt, and decision-to-
+    builder-or-blocker latency. Separate active, automated-wait, and human-wait time.
 45. Report the target HRM first: outcome, status, capabilities complete/remaining,
     review decisions, findings, integrated head, activation posture, closure effect, and
     next action. Report completed, blocked, deferred, cancelled, blocked-external, and
@@ -816,9 +857,14 @@ MEASURE AND REPORT
 
 ```yaml
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.4
+  schema_version: agent_playbooks.hrm_session_ledger.v2.5
   id: "{{session_id}}"
   system_reference: "{{system_reference}}"
+  process_binding:
+    playbook_id: AP-LANE-001
+    version: "4.5"
+    source_sha: null
+    last_revalidated_at: null
   hrm_map:
     path: "{{path}}"
     version: "{{version}}"
@@ -872,6 +918,22 @@ milestone_session:
     recorded_s3: []
     semantic_read_backs: []
     gate: "blocked|ready"
+    latest_transition_receipt:
+      id: null
+      effect: "record_only|releases_change_units|closes_stage|closes_hrm"
+      decision_accepted_at: null
+      transition_reported_at: null
+      newly_eligible_change_units: []
+      newly_authorized_hrms: []
+      still_frozen_boundaries: []
+      assigned_work:
+        - change_unit_id: null
+          owner_or_task: null
+          builder_started_at: null
+          blocker_receipt_id: null
+      decision_to_builder_or_blocker_target_seconds: 600
+      actual_decision_to_builder_or_blocker_seconds: null
+      target_met: null
   hrm_discoveries:
     observed: []
     returned_to_system_build: []
@@ -888,6 +950,11 @@ milestone_session:
     function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
     candidate_head_sha: null
     integrated_head_sha: null
+    last_decision_transition_effect: null
+    newly_released_change_units: []
+    still_frozen_boundaries: []
+    decision_to_builder_or_blocker_target_seconds: 600
+    actual_decision_to_builder_or_blocker_seconds: null
     next_action: null
     next_meaningful_operator_interaction: null
     time_to_next_meaningful_operator_interaction_seconds: null
@@ -916,6 +983,13 @@ milestone_session:
     unknown: []
     approved_removals_or_relocations: []
     candidate_reachability_evidence: []
+    implementation_reuse_map:
+      - requirement_or_capability: null
+        existing_components: []
+        existing_tests_and_evidence: []
+        disposition: "already_satisfied_reuse|reuse_with_adapter_or_wiring|reuse_with_missing_tests_or_evidence|extend_existing_implementation|genuine_implementation_gap|replacement_proposed_pending_approval"
+        missing_delta: null
+        replacement_authority: null
   system_nodes:
     - id: "{{system_node_id}}"
       kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
@@ -995,6 +1069,8 @@ milestone_session:
   noise_posture:
     routine_lane_updates: quiet
     hrm_stop: noisy
+    transition_events: noisy
+    transition_events_include: [decision_accepted, capability_released, builder_assigned, release_target_missed, blocker_discovered, critical_path_changed]
     last_operator_interrupt_reason: null
   closure:
     decision: "pending|closed|deferred"
@@ -1002,6 +1078,7 @@ milestone_session:
     decided_at: null
     rationale: null
     released_next_bundle: []
+    transition_receipt_id: null
     operator_function_acceptance:
       decision: "pending|accepted|accepted_with_findings|rejected"
       decided_by: null
@@ -1048,6 +1125,11 @@ lanes:
     milestone_contribution: []
     state: "queued|readiness_audit|blocked_contract|awaiting_amendment_approval|ready_to_build|building|design_iteration|candidate_frozen|checking|reviewing|correcting|eligible|merging|verifying_main|cleanup_pending|complete|deferred|cancelled|blocked_external|blocked"
     classification: "quick|serial|parallel|critical"
+    serialization_basis:
+      dependency_edges: []
+      conflicting_paths_or_resources: []
+      incompatible_state_or_authority_boundaries: []
+    implementation_reuse_map: []
     validation_profile: "review_packet|executable_contract|runtime_change"
     validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
     design_phase: "not_applicable|iterating|frozen"
@@ -1160,6 +1242,10 @@ milestone_cleanup:
 
 ## Change note
 
+- **4.5 — 2026-08-25:** Rebinds active sessions to the current playbook version at decision
+  and stage transitions, requires noisy decision-transition receipts and immediate same-HRM
+  release or bounded blocker reporting, requires affirmative evidence for serialization, and
+  makes brownfield reuse/adapter/extension analysis a pre-build and candidate-freeze gate.
 - **4.4 — 2026-08-25:** Delegates frozen-candidate checks, hosted-gate observation,
   serialized exact-head merge, remote-main verification, and eligible cleanup to one
   source-read-only Codex checker/merge-controller subagent per repository queue, constrains

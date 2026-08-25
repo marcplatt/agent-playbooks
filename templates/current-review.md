@@ -28,6 +28,17 @@ notification; do not require the operator to locate a worker branch or worktree.
 - Next meaningful operator interaction: `{{event_and_forecast}}`
 - Time to formal HRM review: `{{forecast_or_unknown_with_reason}}`
 
+## Decision transition
+
+- Last decision/effect: `{{decision_id_and_record_only_releases_change_units_closes_stage_or_closes_hrm}}`
+- Transition receipt: `{{receipt_id_and_time}}`
+- Newly eligible change units: `{{ids_or_none}}`
+- Newly authorized HRMs: `{{ids_and_authority_source_or_none}}`
+- Assigned owner/tasks and start times: `{{assignments_or_none}}`
+- Still-frozen boundaries: `{{boundary_reason_owner_or_none}}`
+- Decision-to-builder-or-blocker target/actual: `{{target_seconds_and_actual_seconds}}`
+- Missed-target blocker receipt: `{{receipt_or_not_applicable}}`
+
 ## Review candidate
 
 - Validation profile: `review_packet | executable_contract | runtime_change`
@@ -58,6 +69,7 @@ notification; do not require the operator to locate a worker branch or worktree.
 - External mutations: `{{count}}`
 - Safe work continuing: `{{work_or_none}}`
 - Next authorized action: `{{action}}`
+- Serial work and exact basis: `{{change_unit_dependency_edge_path_resource_state_or_authority_conflict_or_none}}`
 
 ## Workspace exceptions
 

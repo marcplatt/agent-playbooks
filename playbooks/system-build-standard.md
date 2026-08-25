@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.4"
+version: "2.5"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -49,8 +49,12 @@ controls:
   - proof-spine-safety-shell-scale-perimeter
   - independently-closable-hrm
   - brownfield-capability-parity
+  - brownfield-reuse-first
+  - implementation-dominance
   - first-class-standalone-system-nodes
   - explicit-input-boundary-disposition
+  - decision-transition-receipt
+  - same-hrm-immediate-release
   - manual-lane-constraint-cannot-suppress-planning
   - authority-and-provenance
   - scenario-and-test-matrix-before-decomposition
@@ -265,10 +269,13 @@ RESOLVE THE TARGET HRM
    only an informal lane label, stop implementation. The same stop applies when the
    system plan, target milestone contract, requirements ledger, implementation manifest,
    `CTRQ` surface, affected brownfield capability inventory, or system-node registry is
-   absent. Propose one consolidated planning amendment that publishes or repairs the
-   canonical package and full HRM journey. Preserve unknowns as `unknown-blocked`. Obtain
-   required operator approval and publish the package before deriving implementation
-   lanes. For an existing project, apply this prospectively and do not manufacture
+   absent. Propose one consolidated planning amendment only when the absence makes the
+   executable contract, authority, dependency graph, checker/test oracle, or HRM release
+   semantics materially indeterminate. Preserve unknowns as `unknown-blocked`. Obtain required
+   operator approval and publish that material repair before deriving affected implementation
+   lanes. A traceability-only update that restates already-published semantics travels with the
+   next already-required bounded change unit and does not create a separate planning or receipt-
+   only unit. For an existing project, apply this prospectively and do not manufacture
    historical HRM evidence.
 8. Determine the last explicitly closed or deferred milestone from durable records. A
    review meeting, merged lane, local preview, green suite, or completed implementation
@@ -308,7 +315,9 @@ CREATE THE MILESTONE SESSION CONTRACT
 10. Maintain an operator-facing session banner: current HRM, target HRM, why it matters,
     capabilities complete, capabilities remaining, blockers, decisions requested,
     contract requests, function/UI/UX review state, activation posture, integrated
-    revision, operator-access state, integration-validation state, and next action. Lane
+    revision, operator-access state, integration-validation state, last decision-transition
+    effect, newly released work, still-frozen boundaries, decision-to-builder-or-blocker
+    latency, and next action. Lane
     counts and IDs are secondary execution details. Apply the Operator Access and
     Validation Routing playbook: a completed discovery, S0-S2 decision packet, or prepared
     review surface becomes operator-accessible after minimum packet validation and never
@@ -319,17 +328,21 @@ CREATE THE MILESTONE SESSION CONTRACT
     review_ready -> in_review -> remediation -> awaiting_closure -> closed|deferred|
     blocked`. `review_ready` is a hard human stop: no autonomous remediation or attempt
     to reinterpret the outcome begins until the operator reviews the prepared function.
-    Keep the same session and target through remediation. Do not automatically begin the
-    next HRM when this one closes.
+    Keep the same session and target through remediation. Closure alone does not begin a
+    different HRM. When the operator decision explicitly authorizes that HRM's published
+    bundle, open its session and assign eligible work under the transition receipt. This
+    restriction does not delay a newly eligible change unit inside the already-authorized
+    active HRM.
 12. For an existing project adopting this standard, use completion mode prospectively.
     Record one adoption SHA, preserve established IDs and history, build a contradiction
     register, and map every named lane or change unit to complete, deferred, cancelled,
     blocked_external, or active. Apply the new session contract to open and future work.
     Do not rewrite historical merges or manufacture missing evidence. Before changing an
-    established operator surface, inventory every current control, journey, disclosure,
-    correction/recovery path, and audit surface as required operator workflow, advanced
-    operator capability, developer/audit capability, intentionally superseded, or unknown.
-    Bind the target HRM to a required parity set and approved removals/relocations.
+    established implementation, inventory every current operator surface, domain service,
+    workflow, state machine, persistence path, integration, recovery path, test seam, and audit
+    surface as required operator workflow, advanced capability, developer/audit capability,
+    intentionally superseded, or unknown. Bind the target HRM to a required parity set,
+    implementation-reuse map, and approved removals/relocations.
 
 ANALYZE THE SYSTEM BEFORE LANES
 
@@ -342,8 +355,11 @@ ANALYZE THE SYSTEM BEFORE LANES
     canonical location/workflow, versioned interfaces, readiness/compatibility evidence,
     topology, configuration, start/restart, health, monitoring, recovery, rollback, and
     read-back/reconciliation. Never model a standalone bridge as a consumer worktree.
-14. Compare the target contract with verified current behavior and evidence. Record each
-    gap as already satisfied, implementation needed, discovery needed, human decision
+14. Compare the target contract with verified current behavior, merged architecture, tests,
+    and evidence. Requirements are acceptance floors, not instructions to replace a stronger
+    compatible implementation. Record each gap as already satisfied and reusable, reusable
+    with adapter/wiring, reusable with missing tests/evidence, extension needed, genuine
+    implementation gap, replacement proposed pending approval, discovery needed, human decision
     needed, contract update needed, blocked external, or accepted limitation. Resolve
     unknown provider facts in read-only discovery while writes remain structurally
     disabled. For a missing or inadequate inter-system promise, create a stable `CTRQ`
@@ -354,7 +370,12 @@ ANALYZE THE SYSTEM BEFORE LANES
     requirement/scenario, safe posture, evidence, owner, consequence, and proven-
     independent permitted work. Assign one primary disposition: human decision, `CTRQ`,
     read-only discovery, planning amendment/rebaseline, accepted limitation, named-HRM
-    deferral, or `blocked_external`.
+    deferral, or `blocked_external`. Before assigning any implementation work, bind every
+    requirement to an existing component/contract/test or to evidence proving a genuine gap.
+    Prefer adapters, composition, extension, and missing tests over a parallel or replacement
+    implementation. Replacement requires a demonstrated violated invariant, unavoidable
+    incompatibility, unsafe behavior, or explicit operator-approved capability retirement,
+    plus parity, migration, rollback, and affected-consumer evidence.
 14a. Resolve unknown API or implementation behavior first through the smallest deliberately
      disposable discovery spike that can answer the question with fixtures, read-only calls,
      or writes structurally disabled. The spike remains attached to the current HRM and has
@@ -401,12 +422,13 @@ DECISION FRONTIER AND SEMANTIC READINESS
 FREEZE THE MILESTONE CLAIM BEFORE TEST DESIGN
 
 15e. Freeze one versioned milestone claim before test design, lane derivation, or substantive
-     implementation. Vertical completion defines the minimum real-system path from accepted
-     input through required operator actions and ordered effects to the claimed human-visible
-     result. Horizontal breadth defines exactly which input contracts, origins, variants,
+     implementation. Vertical completion defines the minimum new proof and real-system path
+     from accepted input through required operator actions and ordered effects to the claimed
+     human-visible result. Horizontal breadth defines exactly which input contracts, origins, variants,
      cardinalities, mutations, and recurrence patterns are supported. A vertically complete
      milestone may be intentionally narrow; a broad implementation is not a substitute for
-     completing its proof spine.
+     completing its proof spine. In brownfield work, this narrows the new delta and evidence;
+     it does not authorize reducing, hiding, duplicating, or rewriting compatible capabilities.
 15f. Divide the claim into a proof spine, safety shell, and scale perimeter. The proof spine
      is the smallest ordered real-system path that makes the operator-visible claim true.
      The safety shell contains identity, privacy, authorization, idempotency, partial-failure,
@@ -424,12 +446,15 @@ FREEZE THE MILESTONE CLAIM BEFORE TEST DESIGN
      unsupported inputs. If the claimed result is receipt or experience by a person, provider
      `sent`, queued, or API success evidence is insufficient by itself: require a privacy-safe
      human observation at the actual destination alongside machine receipts.
-15i. Make reachable implementation match the accepted breadth. Necessary safety or shared
-     infrastructure may extend beyond the proof spine, but generalized behavior that remains
+15i. Make newly introduced or changed reachable implementation match the accepted breadth.
+     Necessary safety or shared infrastructure may extend beyond the proof spine, but
+     generalized behavior that remains
      reachable cannot escape its required correctness tests merely because it is outside the
-     milestone claim. Narrow, disable, or remove that behavior for this change unit, or amend
-     the claim and carry the corresponding evidence. Never use `out of scope` to defer an
-     unsafe reachable path.
+     milestone claim. Narrow, disable, or remove newly introduced behavior for this change
+     unit, or amend the claim and carry the corresponding evidence. Preserve pre-existing
+     accepted behavior and its regression evidence unless it is unsafe, incompatible, or
+     explicitly retired through an operator-approved capability decision. Never use `out of
+     scope` to defer an unsafe reachable path or to erase stronger existing capability.
 15j. Read the claim back to the operator before non-disposable work when it selects business
      scope, supported origins, cardinality, human-visible effects, or explicit exclusions.
      A later discovery may correct a defect within the claim, propose a claim amendment,
@@ -526,12 +551,18 @@ PROVE THE END-TO-END INTENT CHEAPLY
 
 DERIVE AND PUBLISH THE LANE BUNDLE
 
-20. Derive the smallest coherent bundle that can satisfy the target HRM. Each lane must
-    declare requirement and scenario coverage, milestone contribution, in/out of scope,
+20. Derive the smallest coherent new delta from verified current implementation that can
+    satisfy the target HRM. Reuse dominates replacement when existing behavior satisfies or
+    exceeds the requirement without violating contract, authority, or the safety shell. Each
+    lane must declare requirement and scenario coverage, milestone contribution, in/out of scope,
     authority and activation posture, dependencies and exact base, owned files, state or
     data changes, migration/recovery posture, exact checker/test plan, human-readable
     acceptance, hard stops, handoff, and assigned target HRM.
 21. Use dependency and file-ownership evidence to mark lanes serial or safely parallel.
+    `SERIAL` requires an exact dependency edge, conflicting owned path/resource, incompatible
+    state transition, or authority boundary. Uncertain independence triggers a bounded
+    readiness audit, not indefinite serialization. Freeze only the affected boundary and
+    continue work proven independent.
     A manual lane constraint may narrow the proposal, but if it leaves the HRM outcome
     unsatisfied, report the gap rather than pretending the milestone is reachable. Do not
     stuff missing planning, contract, bridge readiness, or later-HRM work into a catch-all
@@ -625,8 +656,12 @@ CLOSE WITHOUT ACTIVATING
     operator's function/UI/UX acceptance is recorded as accepted, accepted with findings,
     or rejected.
 32. Record who decided, when, rationale, exact review head, residual risks, deferred
-    findings, and the next bundle made eligible. Closure releases eligibility only; it
-    does not automatically begin another milestone session.
+    findings, and the next bundle made eligible. Issue the decision-transition receipt in the
+    same response that acknowledges the operator decision. Closure alone releases eligibility
+    and does not begin another milestone session. When the same decision explicitly authorizes
+    the next HRM's published bundle, open its session and assign eligible work; already-authorized
+    newly eligible work inside the active HRM is likewise assigned immediately. Otherwise issue
+    a blocker receipt within the configured builder-or-blocker target, default 600 seconds.
 33. Keep implementation completion, HRM readiness, HRM closure, canary authority,
     deployment, provider/customer/money effects, irreversible migration, and production
     activation as distinct states. Require explicit action-time authority and exact
@@ -644,7 +679,7 @@ CLOSE WITHOUT ACTIVATING
 
 ```yaml
 system_build_session:
-  schema_version: agent_playbooks.system_build_session.v2.4
+  schema_version: agent_playbooks.system_build_session.v2.5
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -739,6 +774,22 @@ system_build_session:
     recorded_s3: []
     semantic_read_backs: []
     gate: "blocked|ready"
+    latest_transition_receipt:
+      id: null
+      effect: "record_only|releases_change_units|closes_stage|closes_hrm"
+      decision_accepted_at: null
+      transition_reported_at: null
+      newly_eligible_change_units: []
+      newly_authorized_hrms: []
+      still_frozen_boundaries: []
+      assigned_work:
+        - change_unit_id: null
+          owner_or_task: null
+          builder_started_at: null
+          blocker_receipt_id: null
+      decision_to_builder_or_blocker_target_seconds: 600
+      actual_decision_to_builder_or_blocker_seconds: null
+      target_met: null
   disposable_end_to_end_proof:
     path_or_url: null
     disposition: "not_started|discard|retain_with_approval|rebaseline_required"
@@ -761,6 +812,13 @@ system_build_session:
     intentionally_superseded: []
     unknown: []
     approved_removals_or_relocations: []
+    implementation_reuse_map:
+      - requirement_or_capability: null
+        existing_components: []
+        existing_tests_and_evidence: []
+        disposition: "already_satisfied_reuse|reuse_with_adapter_or_wiring|reuse_with_missing_tests_or_evidence|extend_existing_implementation|genuine_implementation_gap|replacement_proposed_pending_approval"
+        missing_delta: null
+        replacement_authority: null
   system_nodes:
     - id: "{{system_node_id}}"
       kind: "repository|local_bridge|daemon|desktop_process|provider|manual_service|other"
@@ -775,7 +833,11 @@ system_build_session:
       restart_health_recovery_rollback: []
   evidence_gap_analysis:
     verified_satisfied: []
+    reuse_with_adapter_or_wiring: []
+    reuse_with_missing_tests_or_evidence: []
+    extension_needed: []
     implementation_needed: []
+    replacement_proposed_pending_approval: []
     discovery_needed: []
     human_decision_needed: []
     contract_update_needed: []
@@ -822,6 +884,11 @@ system_build_session:
         requirement_ids: []
         dependencies: []
         classification: "quick|serial|parallel|critical"
+        serialization_basis:
+          dependency_edges: []
+          conflicting_paths_or_resources: []
+          incompatible_state_or_authority_boundaries: []
+        implementation_reuse_map: []
         validation_profile: "review_packet|executable_contract|runtime_change"
         validation_class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
         contract: "{{path}}"
@@ -850,6 +917,11 @@ system_build_session:
     function_review_state: "not_ready|review_ready|in_review|accepted|accepted_with_findings|rejected"
     candidate_head_sha: null
     integrated_head_sha: null
+    last_decision_transition_effect: null
+    newly_released_change_units: []
+    still_frozen_boundaries: []
+    decision_to_builder_or_blocker_target_seconds: 600
+    actual_decision_to_builder_or_blocker_seconds: null
     next_action: null
     time_to_next_meaningful_operator_interaction_seconds: null
     time_to_formal_hrm_review_seconds: null
@@ -909,6 +981,8 @@ system_build_session:
   noise_posture:
     routine_lane_updates: quiet
     hrm_stop: noisy
+    transition_events: noisy
+    transition_events_include: [decision_accepted, capability_released, builder_assigned, release_target_missed, blocker_discovered, critical_path_changed]
     last_operator_interrupt_reason: null
   closure:
     decision: "pending|closed|deferred"
@@ -918,6 +992,7 @@ system_build_session:
     exact_review_head_sha: null
     residual_risks: []
     released_next_bundle: []
+    transition_receipt_id: null
     operator_function_acceptance:
       decision: "pending|accepted|accepted_with_findings|rejected"
       decided_by: null
@@ -927,6 +1002,10 @@ system_build_session:
 
 ## Change note
 
+- **2.5 — 2026-08-25:** Makes requirements acceptance floors for brownfield work, requires
+  reuse/adapter/extension analysis before genuine implementation gaps or replacement, scopes
+  the smallest bundle to the new delta, requires affirmative serialization evidence, and adds
+  decision-transition receipts with immediate same-HRM release or bounded blocker reporting.
 - **2.4 — 2026-08-25:** Delegates deterministic checking and integration to a source-read-only
   checker/merge-controller subagent and makes targeted, affected, or full validation an
   explicit milestone-claim decision, including bounded canary CI without automatic full-

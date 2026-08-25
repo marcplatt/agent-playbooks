@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-PLAN-001
 title: Project System-Plan Generation
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: portfolio-assignment-to-project-plan
@@ -16,6 +16,8 @@ controls:
   - scenario-before-lane
   - vertical-completion-horizontal-breadth
   - owned-seam-equivalence
+  - brownfield-reuse-first
+  - implementation-dominance
   - complete-as-presently-knowable-hrm-map
 ---
 
@@ -53,8 +55,11 @@ Existing codebase: {{existing_codebase_or_none}}
    dependencies, privacy/security posture, lifecycle states, and explicit exclusions. Bind
    each to organization record IDs and versions.
 3. For brownfield systems, inventory required operator, advanced operator, developer/audit,
-   intentionally superseded, and unknown capabilities. No word such as simplify, modernize,
-   or remove authorizes retiring an established capability.
+   intentionally superseded, and unknown capabilities. Inspect the existing architecture,
+   components, workflows, tests, and evidence before proposing implementation. Treat each
+   requirement as an acceptance floor: when the current implementation already satisfies it
+   with equal or stronger compatible behavior, preserve and reuse that implementation. No word
+   such as simplify, modernize, narrow, or remove authorizes retiring an established capability.
 4. Build the operator decision frontier before requirements decomposition. Freeze affected
    boundaries and obtain semantic read-back for unresolved meaning, authority, identity,
    lifecycle, correctness-gap, external-effect, and capability-retirement decisions.
@@ -70,8 +75,13 @@ Existing codebase: {{existing_codebase_or_none}}
 6. Register every repository and standalone/local/provider/manual node with contract and
    deployment owners, canonical workflow, versioned interfaces, readiness evidence, health,
    recovery, rollback, and reconciliation.
-7. Create the implementation manifest. Map each requirement and scenario to current support,
-   gap, owner surface, validation evidence, dependencies, and target HRM. Do not create lanes.
+7. Create the implementation manifest. Map each requirement and scenario to the existing
+   components and tests, current support, reuse disposition, smallest missing delta, owner
+   surface, validation evidence, dependencies, and target HRM. Use reuse-as-is, adapter/wiring,
+   missing evidence, or extension before classifying a genuine implementation gap. A proposed
+   replacement must identify the violated invariant, incompatibility, unsafe behavior, or
+   operator-approved retirement and must include parity, migration, rollback, and consumer
+   evidence. Do not create lanes.
 8. Derive all HRMs presently knowable, from planning review through operator workflow and any
    separate activation, canary, production observation, or autonomy decisions. Unknown facts
    remain explicit and may later produce a governed HRM discovery.
@@ -80,14 +90,18 @@ Existing codebase: {{existing_codebase_or_none}}
     scale perimeter. Record necessary later work as sequenced obligations with an owner,
     target HRM or release, latest safe point, promotion trigger, and safe interim posture.
 9. Run the semantic-readiness gate. The project is planning-ready only when material terms,
-   authority, lifecycle, identity, contracts, scenarios, evidence freshness, and operator
-   review questions are explicit enough that implementation will not choose business meaning.
+   authority, lifecycle, identity, contracts, scenarios, brownfield reuse dispositions,
+   evidence freshness, and operator review questions are explicit enough that implementation
+   will not choose business meaning or silently replace stronger compatible work.
 10. Publish the package for operator review. Acceptance authorizes HRM session planning only;
     it does not authorize code, merge, deployment, activation, canary, or production effects.
 ```
 
 ## Change note
 
+- **1.2 — 2026-08-25:** Makes requirements acceptance floors in brownfield systems and requires
+  an implementation-reuse map so the plan derives the smallest missing delta instead of a
+  lesser parallel implementation.
 - **1.1 — 2026-08-25:** Separates vertical completion from horizontal breadth, makes owned
   convergence seams explicit, and adds bounded milestone claims with sequenced obligations.
 - **1.0 — 2026-08-24:** Initial organization-neutral project planning workflow.
