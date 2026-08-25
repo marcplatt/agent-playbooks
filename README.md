@@ -88,6 +88,7 @@ Project planning and review:
 - [HRM session ledger](templates/hrm-session-ledger.yaml)
 - [Workspace registry](templates/workspace-registry.yaml)
 - [Activation and production record](templates/activation-production-record.yaml)
+- [Codex global working agreements](templates/codex-global-agents.md)
 - [Fictional HRM-directed session](examples/hrm-directed-session.example.yaml)
 
 ## Operating model
