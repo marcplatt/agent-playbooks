@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-run-scorecard.schema.json",
+  "title": "HRM run scorecard",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_identity",
+    "instrumentation",
+    "hard_gates",
+    "flow",
+    "decisions",
+    "context",
+    "validation",
+    "scope",
+    "operator",
+    "verdict"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.hrm_run_scorecard.v0.1"},
+    "run_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "hrm_id", "experiment_profile", "execution_mode", "playbook_source_sha", "event_count"],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "hrm_id": {"type": "string", "minLength": 1},
+        "experiment_profile": {
+          "enum": ["runtime_build_fast_feedback", "production_observation_fail_closed", "custom"]
+        },
+        "execution_mode": {"enum": ["runtime_build", "production_observation", "discovery", "rollout"]},
+        "playbook_source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "event_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "instrumentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence_valid", "required_events_present", "missing_required_events", "aftercare_complete"],
+      "properties": {
+        "sequence_valid": {"type": "boolean"},
+        "required_events_present": {"type": "boolean"},
+        "missing_required_events": {"$ref": "#/$defs/string_array"},
+        "aftercare_complete": {"type": "boolean"}
+      }
+    },
+    "hard_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "explicit_terminal_decision",
+        "accepted_scenarios_dispositioned",
+        "accepted_scenarios_passed",
+        "required_checks_passed",
+        "unauthorized_external_effects",
+        "unresolved_ambiguous_mutations",
+        "capability_regressions_without_approval",
+        "escaped_p0_p1_defects"
+      ],
+      "properties": {
+        "explicit_terminal_decision": {"type": "boolean"},
+        "accepted_scenarios_dispositioned": {"type": "boolean"},
+        "accepted_scenarios_passed": {"type": "boolean"},
+        "required_checks_passed": {"type": "boolean"},
+        "unauthorized_external_effects": {"type": "integer", "minimum": 0},
+        "unresolved_ambiguous_mutations": {"type": "integer", "minimum": 0},
+        "capability_regressions_without_approval": {"type": "integer", "minimum": 0},
+        "escaped_p0_p1_defects": {"type": "integer", "minimum": 0}
+      }
+    },
+    "flow": {"$ref": "#/$defs/flow"},
+    "decisions": {"$ref": "#/$defs/decisions"},
+    "context": {"$ref": "#/$defs/context"},
+    "validation": {"$ref": "#/$defs/validation"},
+    "scope": {"$ref": "#/$defs/scope"},
+    "operator": {"$ref": "#/$defs/operator"},
+    "verdict": {"$ref": "#/$defs/verdict"}
+  },
+  "$defs": {
+    "nullable_integer": {"type": ["integer", "null"], "minimum": 0},
+    "nullable_boolean": {"type": ["boolean", "null"]},
+    "string_array": {"type": "array", "items": {"type": "string"}},
+    "flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_readiness_seconds",
+        "first_value_from_semantic_ready_seconds",
+        "review_ready_from_semantic_ready_seconds",
+        "total_elapsed_seconds",
+        "maximum_no_progress_seconds",
+        "nonruntime_units_before_first_value",
+        "maximum_correction_rounds"
+      ],
+      "properties": {
+        "semantic_readiness_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "first_value_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "review_ready_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "total_elapsed_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "maximum_no_progress_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "nonruntime_units_before_first_value": {"type": "integer", "minimum": 0},
+        "maximum_correction_rounds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "decisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_requests", "late_s0_s1_findings"],
+      "properties": {
+        "decision_requests": {"type": "integer", "minimum": 0},
+        "late_s0_s1_findings": {"type": "integer", "minimum": 0}
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_context_bytes",
+        "repeated_artifact_bytes",
+        "context_redundancy_ratio",
+        "files_outside_declared_dependencies",
+        "budget_violations"
+      ],
+      "properties": {
+        "active_context_bytes": {"type": "integer", "minimum": 0},
+        "repeated_artifact_bytes": {"type": "integer", "minimum": 0},
+        "context_redundancy_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "files_outside_declared_dependencies": {"type": "integer", "minimum": 0},
+        "budget_violations": {"type": "integer", "minimum": 0}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completed_checks", "ci_minutes", "duplicate_conclusive_checks"],
+      "properties": {
+        "completed_checks": {"type": "integer", "minimum": 0},
+        "ci_minutes": {"type": "number", "minimum": 0},
+        "duplicate_conclusive_checks": {"type": "integer", "minimum": 0}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_additions", "undispositioned_scope_additions", "nonblocking_additions_absorbed"],
+      "properties": {
+        "scope_additions": {"type": "integer", "minimum": 0},
+        "undispositioned_scope_additions": {"type": "integer", "minimum": 0},
+        "nonblocking_additions_absorbed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_seconds", "review_completed_unassisted", "confidence_1_to_5", "lane_level_questions_exposed"],
+      "properties": {
+        "review_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "review_completed_unassisted": {"$ref": "#/$defs/nullable_boolean"},
+        "confidence_1_to_5": {"type": ["integer", "null"], "minimum": 1, "maximum": 5},
+        "lane_level_questions_exposed": {"$ref": "#/$defs/nullable_integer"}
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_valid", "outcome_and_safety", "process_envelope", "overall", "reasons"],
+      "properties": {
+        "run_valid": {"type": "boolean"},
+        "outcome_and_safety": {"enum": ["pass", "fail", "pending", "blocked", "deferred"]},
+        "process_envelope": {"enum": ["pass", "fail", "pending"]},
+        "overall": {"enum": ["pass", "fail", "pending", "blocked", "deferred", "run_invalid"]},
+        "reasons": {"$ref": "#/$defs/string_array"}
+      }
+    }
+  }
+}

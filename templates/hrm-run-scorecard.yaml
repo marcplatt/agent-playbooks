@@ -1,0 +1,58 @@
+schema_version: agent_playbooks.hrm_run_scorecard.v0.1
+run_identity:
+  session_id: "{{stable_session_id}}"
+  hrm_id: "{{target_hrm}}"
+  experiment_profile: "runtime_build_fast_feedback|production_observation_fail_closed|custom"
+  execution_mode: "runtime_build|production_observation|discovery|rollout"
+  playbook_source_sha: "{{40_character_agent_playbooks_sha}}"
+  event_count: 0
+instrumentation:
+  sequence_valid: false
+  required_events_present: false
+  missing_required_events: []
+  aftercare_complete: false
+hard_gates:
+  explicit_terminal_decision: false
+  accepted_scenarios_dispositioned: false
+  accepted_scenarios_passed: false
+  required_checks_passed: false
+  unauthorized_external_effects: 0
+  unresolved_ambiguous_mutations: 0
+  capability_regressions_without_approval: 0
+  escaped_p0_p1_defects: 0
+flow:
+  semantic_readiness_seconds: null
+  first_value_from_semantic_ready_seconds: null
+  review_ready_from_semantic_ready_seconds: null
+  total_elapsed_seconds: null
+  maximum_no_progress_seconds: null
+  nonruntime_units_before_first_value: 0
+  maximum_correction_rounds: 0
+decisions:
+  decision_requests: 0
+  late_s0_s1_findings: 0
+context:
+  active_context_bytes: 0
+  repeated_artifact_bytes: 0
+  context_redundancy_ratio: 0.0
+  files_outside_declared_dependencies: 0
+  budget_violations: 0
+validation:
+  completed_checks: 0
+  ci_minutes: 0.0
+  duplicate_conclusive_checks: 0
+scope:
+  scope_additions: 0
+  undispositioned_scope_additions: 0
+  nonblocking_additions_absorbed: 0
+operator:
+  review_seconds: null
+  review_completed_unassisted: null
+  confidence_1_to_5: null
+  lane_level_questions_exposed: null
+verdict:
+  run_valid: false
+  outcome_and_safety: pending
+  process_envelope: pending
+  overall: pending
+  reasons: []

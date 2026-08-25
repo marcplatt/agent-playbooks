@@ -1,0 +1,58 @@
+schema_version: agent_playbooks.hrm_run_scorecard.v0.1
+run_identity:
+  session_id: MS-EXAMPLE-2026-08-25-HRM-2
+  hrm_id: HRM-2
+  experiment_profile: runtime_build_fast_feedback
+  execution_mode: runtime_build
+  playbook_source_sha: "1111111111111111111111111111111111111111"
+  event_count: 15
+instrumentation:
+  sequence_valid: true
+  required_events_present: true
+  missing_required_events: []
+  aftercare_complete: true
+hard_gates:
+  explicit_terminal_decision: true
+  accepted_scenarios_dispositioned: true
+  accepted_scenarios_passed: true
+  required_checks_passed: true
+  unauthorized_external_effects: 0
+  unresolved_ambiguous_mutations: 0
+  capability_regressions_without_approval: 0
+  escaped_p0_p1_defects: 0
+flow:
+  semantic_readiness_seconds: 600
+  first_value_from_semantic_ready_seconds: 600
+  review_ready_from_semantic_ready_seconds: 1500
+  total_elapsed_seconds: 2700
+  maximum_no_progress_seconds: 600
+  nonruntime_units_before_first_value: 1
+  maximum_correction_rounds: 0
+decisions:
+  decision_requests: 1
+  late_s0_s1_findings: 0
+context:
+  active_context_bytes: 23700
+  repeated_artifact_bytes: 1000
+  context_redundancy_ratio: 0.0606
+  files_outside_declared_dependencies: 0
+  budget_violations: 0
+validation:
+  completed_checks: 1
+  ci_minutes: 0.5
+  duplicate_conclusive_checks: 0
+scope:
+  scope_additions: 0
+  undispositioned_scope_additions: 0
+  nonblocking_additions_absorbed: 0
+operator:
+  review_seconds: 480
+  review_completed_unassisted: true
+  confidence_1_to_5: 4
+  lane_level_questions_exposed: 0
+verdict:
+  run_valid: true
+  outcome_and_safety: pass
+  process_envelope: pass
+  overall: pass
+  reasons: []

@@ -1,0 +1,77 @@
+schema_version: agent_playbooks.hrm_execution_capsule.v0.1
+session_id: "{{stable_session_id}}"
+playbook_pin:
+  kernel_id: AP-EXEC-001
+  kernel_version: 0.1.0-rc.1
+  source_sha: "{{40_character_agent_playbooks_sha}}"
+system_reference: "{{system_reference}}"
+project_root: "{{absolute_project_root}}"
+repository_bases:
+  - repository: "{{canonical_repository}}"
+    base_sha: "{{40_character_base_sha}}"
+hrm:
+  id: "{{target_hrm}}"
+  contract_path: "{{milestone_contract_path}}"
+  contract_version: "{{milestone_contract_version}}"
+  outcome: "{{operator_visible_outcome}}"
+  operator_decision: "{{one_independently_closing_decision}}"
+  accepted_scenarios: []
+experiment_profile: "runtime_build_fast_feedback|production_observation_fail_closed|custom"
+execution_mode: "runtime_build|production_observation|discovery|rollout"
+deliverable_type: "runtime_change|operational_evidence|review_packet|executable_contract"
+function_slice:
+  function_ids: []
+  required_real_seams: []
+  accepted_scenarios: []
+  non_goals: []
+  allowed_paths: []
+  proof_obligations: []
+authority:
+  planning_changes: false
+  routine_code_integration: false
+  provider_writes: false
+  deployment: false
+  activation: false
+  canary: false
+  production_observation: false
+  autonomy: false
+phase: planned
+current_change_unit:
+  id: null
+  deliverable_type: null
+  writer: null
+  allowed_paths: []
+  candidate_sha: null
+verification:
+  profile: "light|standard|full"
+  environment_id: "{{stable_verification_environment}}"
+  ci_plan_hash: null
+  exact_checks: []
+  full_suite_triggers: []
+reference_requests: []
+budgets:
+  max_consecutive_nonruntime_units: 1
+  max_correction_rounds: 2
+  no_material_progress_minutes: 45
+  max_ci_minutes: 30
+  max_context_redundancy_ratio: 0.15
+  context_bytes_by_role:
+    orchestrator: 32000
+    builder: 20000
+    checker: 12000
+    reviewer: 20000
+    operator: 8000
+progress:
+  last_material_event_sequence: 0
+  last_material_progress_at: null
+  repository_state_hash: null
+  consecutive_nonruntime_units: 0
+  correction_rounds: 0
+terminal:
+  state: active
+  stop_reason: null
+  evidence: []
+metrics:
+  event_log_path: "{{path_to_jsonl_event_log}}"
+  scorecard_path: "{{path_to_derived_scorecard}}"
+  aftercare_window_days: 14

@@ -1,0 +1,58 @@
+schema_version: agent_playbooks.hrm_experiment_profiles.v0.1
+profiles:
+  runtime_build_fast_feedback:
+    purpose: Prove an operator-visible runtime slice quickly without weakening outcome or safety gates.
+    execution_mode: runtime_build
+    deliverable_type: runtime_change
+    verification_profile: standard
+    budgets:
+      max_consecutive_nonruntime_units: 1
+      max_correction_rounds: 2
+      no_material_progress_minutes: 45
+      max_ci_minutes: 30
+      max_context_redundancy_ratio: 0.15
+    authority_defaults:
+      provider_writes: false
+      deployment: false
+      activation: false
+      canary: false
+      production_observation: false
+      autonomy: false
+    primary_measures:
+      - first_value_from_semantic_ready_seconds
+      - review_ready_from_semantic_ready_seconds
+      - maximum_no_progress_seconds
+      - duplicate_conclusive_checks
+      - context_redundancy_ratio
+      - nonblocking_additions_absorbed
+      - operator.review_completed_unassisted
+    pass_condition: All accepted scenarios pass; hard safety gates pass; the preregistered process envelope passes.
+
+  production_observation_fail_closed:
+    purpose: Prove the exact production envelope through operational evidence without treating implementation or deployment as production proof.
+    execution_mode: production_observation
+    deliverable_type: operational_evidence
+    verification_profile: standard
+    budgets:
+      max_consecutive_nonruntime_units: 1
+      max_correction_rounds: 1
+      no_material_progress_minutes: 30
+      max_ci_minutes: 20
+      max_context_redundancy_ratio: 0.10
+    authority_defaults:
+      provider_writes: false
+      deployment: false
+      activation: false
+      canary: false
+      production_observation: false
+      autonomy: false
+    authority_note: Set only the exact action-time authority already granted; false is the fail-closed default.
+    primary_measures:
+      - accepted_scenarios_passed
+      - unauthorized_external_effects
+      - unresolved_ambiguous_mutations
+      - escaped_p0_p1_defects
+      - aftercare_complete
+      - duplicate_conclusive_checks
+      - files_outside_declared_dependencies
+    pass_condition: Exact production scenarios pass with no unauthorized or ambiguous effects, process budgets pass, and timestamp-verified aftercare completes.

@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-execution-capsule.schema.json",
+  "title": "HRM execution capsule",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "playbook_pin",
+    "system_reference",
+    "project_root",
+    "repository_bases",
+    "hrm",
+    "experiment_profile",
+    "execution_mode",
+    "deliverable_type",
+    "function_slice",
+    "authority",
+    "phase",
+    "current_change_unit",
+    "verification",
+    "reference_requests",
+    "budgets",
+    "progress",
+    "terminal",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "agent_playbooks.hrm_execution_capsule.v0.1"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+    },
+    "playbook_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kernel_id", "kernel_version", "source_sha"],
+      "properties": {
+        "kernel_id": {"const": "AP-EXEC-001"},
+        "kernel_version": {"const": "0.1.0-rc.1"},
+        "source_sha": {"$ref": "#/$defs/sha"}
+      }
+    },
+    "system_reference": {"$ref": "#/$defs/nonempty"},
+    "project_root": {"$ref": "#/$defs/nonempty"},
+    "repository_bases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "base_sha"],
+        "properties": {
+          "repository": {"$ref": "#/$defs/nonempty"},
+          "base_sha": {"$ref": "#/$defs/sha"}
+        }
+      }
+    },
+    "hrm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "contract_path",
+        "contract_version",
+        "outcome",
+        "operator_decision",
+        "accepted_scenarios"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "contract_path": {"$ref": "#/$defs/nonempty"},
+        "contract_version": {"$ref": "#/$defs/nonempty"},
+        "outcome": {"$ref": "#/$defs/nonempty"},
+        "operator_decision": {"$ref": "#/$defs/nonempty"},
+        "accepted_scenarios": {"$ref": "#/$defs/nonempty_string_array"}
+      }
+    },
+    "execution_mode": {
+      "enum": ["runtime_build", "production_observation", "discovery", "rollout"]
+    },
+    "experiment_profile": {
+      "enum": ["runtime_build_fast_feedback", "production_observation_fail_closed", "custom"]
+    },
+    "deliverable_type": {
+      "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract"]
+    },
+    "function_slice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function_ids",
+        "required_real_seams",
+        "accepted_scenarios",
+        "non_goals",
+        "allowed_paths",
+        "proof_obligations"
+      ],
+      "properties": {
+        "function_ids": {"$ref": "#/$defs/nonempty_string_array"},
+        "required_real_seams": {"$ref": "#/$defs/string_array"},
+        "accepted_scenarios": {"$ref": "#/$defs/nonempty_string_array"},
+        "non_goals": {"$ref": "#/$defs/string_array"},
+        "allowed_paths": {"$ref": "#/$defs/string_array"},
+        "proof_obligations": {"$ref": "#/$defs/nonempty_string_array"}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planning_changes",
+        "routine_code_integration",
+        "provider_writes",
+        "deployment",
+        "activation",
+        "canary",
+        "production_observation",
+        "autonomy"
+      ],
+      "properties": {
+        "planning_changes": {"type": "boolean"},
+        "routine_code_integration": {"type": "boolean"},
+        "provider_writes": {"type": "boolean"},
+        "deployment": {"type": "boolean"},
+        "activation": {"type": "boolean"},
+        "canary": {"type": "boolean"},
+        "production_observation": {"type": "boolean"},
+        "autonomy": {"type": "boolean"}
+      }
+    },
+    "phase": {
+      "enum": [
+        "planned",
+        "semantic_readiness",
+        "ready",
+        "building",
+        "observing",
+        "candidate_frozen",
+        "checking",
+        "review_ready",
+        "closed",
+        "deferred",
+        "blocked"
+      ]
+    },
+    "current_change_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "deliverable_type", "writer", "allowed_paths", "candidate_sha"],
+      "properties": {
+        "id": {"type": ["string", "null"]},
+        "deliverable_type": {
+          "type": ["string", "null"],
+          "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract", null]
+        },
+        "writer": {"type": ["string", "null"]},
+        "allowed_paths": {"$ref": "#/$defs/string_array"},
+        "candidate_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "environment_id", "ci_plan_hash", "exact_checks", "full_suite_triggers"],
+      "properties": {
+        "profile": {"enum": ["light", "standard", "full"]},
+        "environment_id": {"$ref": "#/$defs/nonempty"},
+        "ci_plan_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "exact_checks": {"$ref": "#/$defs/string_array"},
+        "full_suite_triggers": {"$ref": "#/$defs/string_array"}
+      }
+    },
+    "reference_requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "question",
+          "source_path",
+          "source_heading",
+          "max_bytes",
+          "approved_by",
+          "disposition"
+        ],
+        "properties": {
+          "id": {"$ref": "#/$defs/nonempty"},
+          "question": {"$ref": "#/$defs/nonempty"},
+          "source_path": {"$ref": "#/$defs/nonempty"},
+          "source_heading": {"$ref": "#/$defs/nonempty"},
+          "max_bytes": {"type": "integer", "minimum": 1},
+          "approved_by": {"$ref": "#/$defs/nonempty"},
+          "disposition": {"enum": ["pending", "answered", "not_needed", "blocked"]}
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_consecutive_nonruntime_units",
+        "max_correction_rounds",
+        "no_material_progress_minutes",
+        "max_ci_minutes",
+        "max_context_redundancy_ratio",
+        "context_bytes_by_role"
+      ],
+      "properties": {
+        "max_consecutive_nonruntime_units": {"type": "integer", "minimum": 0},
+        "max_correction_rounds": {"type": "integer", "minimum": 0},
+        "no_material_progress_minutes": {"type": "integer", "minimum": 1},
+        "max_ci_minutes": {"type": "integer", "minimum": 0},
+        "max_context_redundancy_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "context_bytes_by_role": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["orchestrator", "builder", "checker", "reviewer", "operator"],
+          "properties": {
+            "orchestrator": {"type": "integer", "minimum": 1},
+            "builder": {"type": "integer", "minimum": 1},
+            "checker": {"type": "integer", "minimum": 1},
+            "reviewer": {"type": "integer", "minimum": 1},
+            "operator": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "last_material_event_sequence",
+        "last_material_progress_at",
+        "repository_state_hash",
+        "consecutive_nonruntime_units",
+        "correction_rounds"
+      ],
+      "properties": {
+        "last_material_event_sequence": {"type": "integer", "minimum": 0},
+        "last_material_progress_at": {"type": ["string", "null"]},
+        "repository_state_hash": {"type": ["string", "null"]},
+        "consecutive_nonruntime_units": {"type": "integer", "minimum": 0},
+        "correction_rounds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "stop_reason", "evidence"],
+      "properties": {
+        "state": {"enum": ["active", "closed", "deferred", "blocked"]},
+        "stop_reason": {
+          "type": ["string", "null"],
+          "enum": [
+            "done_verified",
+            "review_ready",
+            "blocked_input",
+            "blocked_external",
+            "scope_divergence",
+            "governance_loop",
+            "no_progress",
+            "budget_exhausted",
+            "superseded",
+            null
+          ]
+        },
+        "evidence": {"$ref": "#/$defs/string_array"}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_log_path", "scorecard_path", "aftercare_window_days"],
+      "properties": {
+        "event_log_path": {"$ref": "#/$defs/nonempty"},
+        "scorecard_path": {"$ref": "#/$defs/nonempty"},
+        "aftercare_window_days": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "string_array": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "nonempty_string_array": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

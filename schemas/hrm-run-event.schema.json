@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-run-event.schema.json",
+  "title": "HRM run event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "session_id", "hrm_id", "sequence", "event_type", "occurred_at"],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.hrm_run_event.v0.1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "hrm_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 1},
+    "event_type": {
+      "enum": [
+        "session_started",
+        "semantic_readiness_requested",
+        "decision_requested",
+        "decision_received",
+        "semantic_ready",
+        "change_unit_started",
+        "first_value_artifact",
+        "candidate_frozen",
+        "check_started",
+        "check_completed",
+        "review_ready",
+        "operator_review_started",
+        "operator_review_completed",
+        "finding_opened",
+        "finding_dispositioned",
+        "escaped_defect_recorded",
+        "hrm_closed",
+        "aftercare_observed",
+        "stop_reason"
+      ]
+    },
+    "occurred_at": {"type": "string", "minLength": 1},
+    "caused_by_sequence": {"type": ["integer", "null"], "minimum": 1},
+    "change_unit_id": {"type": ["string", "null"]},
+    "candidate_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "ci_plan_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "role": {
+      "type": ["string", "null"],
+      "enum": ["orchestrator", "builder", "checker", "reviewer", "operator", null]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instruction_bytes",
+        "artifact_bytes",
+        "repeated_artifact_bytes",
+        "tool_output_bytes",
+        "omitted_tool_output_bytes",
+        "files_loaded",
+        "files_outside_declared_dependencies"
+      ],
+      "properties": {
+        "instruction_bytes": {"type": "integer", "minimum": 0},
+        "artifact_bytes": {"type": "integer", "minimum": 0},
+        "repeated_artifact_bytes": {"type": "integer", "minimum": 0},
+        "tool_output_bytes": {"type": "integer", "minimum": 0},
+        "omitted_tool_output_bytes": {"type": "integer", "minimum": 0},
+        "files_loaded": {"type": "integer", "minimum": 0},
+        "files_outside_declared_dependencies": {"type": "integer", "minimum": 0}
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "environment_id", "conclusion", "duration_seconds", "conclusive"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "environment_id": {"type": "string", "minLength": 1},
+        "conclusion": {"enum": ["passed", "failed", "skipped", "cancelled", "timed_out"]},
+        "duration_seconds": {"type": "integer", "minimum": 0},
+        "conclusive": {"type": "boolean"}
+      }
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deliverable_type": {
+          "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract"]
+        },
+        "interrupt_class": {"enum": ["S0", "S1", "S2", "S3"]},
+        "after_non_disposable_work": {"type": "boolean"},
+        "finding_id": {"type": "string", "minLength": 1},
+        "scope_addition": {"type": "boolean"},
+        "blocking": {"type": "boolean"},
+        "disposition": {
+          "enum": ["current_claim_blocker", "defer", "separate_proposal", "accepted_current_scope"]
+        },
+        "closure_decision": {"enum": ["closed", "deferred", "blocked"]},
+        "scenario_results": {
+          "type": "object",
+          "additionalProperties": {"enum": ["passed", "deferred", "blocked", "failed"]}
+        },
+        "unauthorized_external_effects": {"type": "integer", "minimum": 0},
+        "unresolved_ambiguous_mutations": {"type": "integer", "minimum": 0},
+        "capability_regressions_without_approval": {"type": "integer", "minimum": 0},
+        "aftercare_complete": {"type": "boolean"},
+        "review_completed_unassisted": {"type": "boolean"},
+        "confidence_1_to_5": {"type": "integer", "minimum": 1, "maximum": 5},
+        "lane_level_questions_exposed": {"type": "integer", "minimum": 0},
+        "stop_reason": {
+          "enum": [
+            "done_verified",
+            "review_ready",
+            "blocked_input",
+            "blocked_external",
+            "scope_divergence",
+            "governance_loop",
+            "no_progress",
+            "budget_exhausted",
+            "superseded"
+          ]
+        },
+        "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+        "material_progress": {"type": "boolean"},
+        "note": {"type": "string"}
+      }
+    }
+  }
+}
