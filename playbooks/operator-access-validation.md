@@ -1,15 +1,15 @@
 ---
 playbook_id: AP-VALIDATE-001
 title: Operator Access and Validation Routing
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: early-operator-access-risk-scaled-validation
 human_readable: true
 machine_readable: true
 required_inputs: [validation_subject, changed_surfaces]
-optional_inputs: [change_unit, operator_packet, milestone_claim, repository_validation_policy, integration_policy]
-controls: [operator-access-before-integration, validation-profile-routing, claim-derived-validation-budget, no-duplicate-suite, non-recursive-receipts]
+optional_inputs: [change_unit, operator_packet, milestone_claim, checker_merge_controller_handoff, repository_validation_policy, integration_policy]
+controls: [operator-access-before-integration, validation-profile-routing, claim-derived-validation-budget, limited-scope-ci, dedicated-checker-merge-controller, no-duplicate-suite, non-recursive-receipts]
 ---
 
 # Operator Access and Validation Routing
@@ -48,6 +48,7 @@ Change unit: {{change_unit_or_none}}
 Changed surfaces: {{changed_surfaces}}
 Operator packet: {{operator_packet_or_none}}
 Milestone claim: {{milestone_claim_or_none}}
+Checker/merge-controller handoff: {{checker_merge_controller_handoff_or_none}}
 
 1. Classify the validation subject or repository diff as review_packet,
    executable_contract, or runtime_change and record the evidence for that classification
@@ -77,10 +78,23 @@ Milestone claim: {{milestone_claim_or_none}}
     changed-surface regression, dependency risk, or binding gate. Test a failure mode at
     the lowest deterministic layer that can prove it and repeat it end to end only when
     the integrated seam or real effect is itself claimed. Use focused iteration checks and
-    one release-required full-suite run on the frozen integrated head. If a generic policy
+    the accepted `targeted`, `affected`, or `full` validation scope on the frozen integrated
+    head. A canary or release label does not itself promote the scope to full. Limited scope
+    requires explicit claim/safety coverage, bounded dependency reach, exclusions with
+    reasons, fresh unaffected evidence where relied on, authority, and policy compatibility.
+    If a generic policy
     applies application tests to an inert review packet, preserve the policy gate but report
     the contradiction as a conformance amendment; never hide the safe packet from the operator.
-5. Configure CI so one candidate head does not receive duplicate equivalent suites from
+5. Delegate exact frozen-candidate checks, hosted-gate observation, merge readiness, remote-
+   main verification, and eligible cleanup to the Dedicated Checker and Merge Controller.
+   The controller enforces the accepted validation scope but cannot invent a reduction,
+   waive a gate, edit the candidate, classify findings, or contact the operator directly.
+   Bind controller evidence to candidate head, checked base, policy SHA, milestone-claim
+   identity and content hash, required-gate-set hash, check-definition hash, and environment.
+   Any candidate-head change invalidates all gate-satisfying checks and approvals. Other
+   binding drift requires an orchestrator-issued replacement handoff; the controller does not
+   judge prior gate evidence reusable.
+5a. Configure CI so one candidate head does not receive duplicate equivalent suites from
    both branch-push and pull-request events. Prefer a lightweight change classifier and
    one required aggregate result that records safely classified non-applicable jobs as pass.
 6. Treat remote Git and hosting read-back as authoritative integration identity. Do not
@@ -104,6 +118,9 @@ Milestone claim: {{milestone_claim_or_none}}
 
 ## Change note
 
+- **1.2 — 2026-08-25:** Delegates deterministic validation and integration evidence to the
+  source-read-only checker/merge controller and makes targeted, affected, or full CI--
+  including bounded canary CI--an explicit, policy-compatible validation decision.
 - **1.1 — 2026-08-25:** Derives runtime validation budgets from frozen milestone claims,
   distinct seams, failure modes, and safety invariants; preserves early access when local
   policy over-tests inert documentation; and separates first interaction from formal HRM time.

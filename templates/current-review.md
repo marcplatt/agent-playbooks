@@ -32,12 +32,19 @@ notification; do not require the operator to locate a worker branch or worktree.
 
 - Validation profile: `review_packet | executable_contract | runtime_change`
 - Integration validation: `not_started | running | passed | failed | not_applicable`
+- Accepted CI scope: `targeted | affected | full`
+- CI-scope authority/basis: `{{reference_and_bounded_reason}}`
+- CI evidence binding: `{{candidate_base_policy_claim_gate_set_check_definition_environment_and_expiry}}`
+- Checker/merge controller: `{{task_id_lifecycle_state_and_candidate_or_none}}`
+- Controller writer lease: `{{canonical_remote_target_ref_lease_id_epoch_expiry_or_none}}`
+- Controller exception/route: `{{exception_classification_and_orchestrator_route_or_none}}`
 - Validation subject: `{{kind_id_version_content_hash_provenance_and_optional_repository_sha}}`
 - Review package: `{{path_or_url}}`
 - Operator-access candidate head/artifact digest: `{{candidate_revision}}`
 - Integrated HRM head/artifact digest: `{{integrated_revision_or_not_integrated}}`
 - Active change units/branches/PRs: `{{ids_branches_prs_or_none}}`
 - Integration receipts: `{{ids_or_none}}`
+- Controller receipt: `{{check_merge_main_cleanup_receipt_or_none}}`
 - Preview command or URL: `{{preview}}`
 - Configuration and data window: `{{configuration_and_data_window}}`
 

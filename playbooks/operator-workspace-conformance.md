@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-CONFORM-001
 title: Operator-Workspace Conformance and Synchronization
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: read-only-audit-then-authorized-synchronization
@@ -64,13 +64,20 @@ A workspace is not conformant until fresh-session evidence shows that it:
 6. Provides one stable operator review surface and makes safe discovery, decision, and review
    packets available before unrelated application CI, merge receipts, or cleanup.
 7. Classifies validation subjects by behavior and dependency reach as review_packet,
-   executable_contract, or runtime_change without weakening mandatory project controls.
-8. Keeps implementation, integration, HRM acceptance, deployment, activation, canary,
+   executable_contract, or runtime_change and records targeted, affected, or full CI without
+   weakening mandatory project controls or automatically promoting canaries to full CI.
+8. Delegates exact-head checks, serialized merge, remote-main verification, and eligible
+   cleanup to a source-read-only checker/merge controller. Dedicated repository queues may
+   have separate controllers, but repository mutation requires the one current, read-back-
+   verified writer lease for the canonical remote and target ref. A hosted merge queue acting
+   as writer puts controllers in observe-only mode. Controllers cannot edit candidates,
+   decide semantics, waive gates, or contact the operator.
+9. Keeps implementation, integration, HRM acceptance, deployment, activation, canary,
    production observation, and autonomy eligibility as independent evidence and authority
    states.
-9. Consumes organization changes only through status-qualified, exact-source, semantically
+10. Consumes organization changes only through status-qualified, exact-source, semantically
    readable inputs and never treats a proposed or stale record as adopted.
-10. Uses hosting read-back as the terminal integration receipt, avoids recursive receipt-only
+11. Uses hosting read-back as the terminal integration receipt, avoids recursive receipt-only
     changes, and cleans only worktrees proven clean, integrated, unlocked, non-review-dependent,
     free of unique artifacts, and unused by running processes.
 
@@ -124,8 +131,10 @@ Operator preferences: {{operator_preferences_or_none}}
    the controlling process and organization sources, distinguish proposed from adopted
    records, stop on a missing HRM contract, route an S1 ambiguity before implementation,
    propose HRM_DISCOVERY for a newly distinct human outcome, allow early access to a safe
-   review_packet without application CI, require affected checks for runtime_change, refuse
-   to infer activation from merge or deployment, and preserve a dirty or unique worktree.
+   review_packet without application CI, enforce an explicitly justified limited-scope
+   canary CI handoff without inventing a full-suite requirement, delegate check/merge/read-
+   back/cleanup to a source-read-only controller, require affected checks for runtime_change,
+   refuse to infer activation from merge or deployment, and preserve a dirty or unique worktree.
    Record observed behavior, not expected behavior.
 8. Present a concise conversational gap summary grouped by transferable process,
    organization adoption, project binding, operator preference, machine capability, and
@@ -157,6 +166,9 @@ session without a durable report.
 
 ## Change note
 
+- **1.1 — 2026-08-25:** Adds conformance probes for the source-read-only checker/merge
+  controller and explicitly authorized targeted, affected, or full CI, including bounded
+  canary validation.
 - **1.0 — 2026-08-25:** Initial organization-neutral account, machine, workspace, and project
   conformance audit with portable layers, fixed HRM assertions, operator-authorized writes,
   and fresh-session behavioral probes.

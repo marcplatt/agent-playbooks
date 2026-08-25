@@ -1,5 +1,5 @@
 milestone_claim:
-  schema_version: agent_playbooks.milestone_claim.v1
+  schema_version: agent_playbooks.milestone_claim.v1.1
   id: "{{milestone_claim_id}}"
   version: "{{version}}"
   status: "proposed|accepted|superseded"
@@ -80,6 +80,18 @@ milestone_claim:
     evidence_freshness: []
     privacy_safe_storage: []
   validation_budget:
+    scope: "targeted|affected|full"
+    scope_authority_reference: null
+    scope_authority_expires_at: null
+    limited_scope_basis:
+      bounded_changed_surfaces: []
+      dependency_reach: []
+      excluded_checks_with_reason: []
+      fresh_unaffected_evidence_relied_on: []
+      repository_policy_compatible: false
+      unknown_reach_absent: false
+      required_hosted_gate_dispositions: []
+      full_suite_trigger_dispositions: []
     failure_mode_test_map: []
     focused_iteration_checks: []
     frozen_candidate_checks: []

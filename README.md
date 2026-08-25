@@ -54,6 +54,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Validation | [Operator Access and Validation Routing](playbooks/operator-access-validation.md) | Make completed discovery and decision packets available before integration CI while routing risk-scaled checks and non-recursive receipts. |
 | Build | [System Build and Human Review Milestone Standard](playbooks/system-build-standard.md) | Advance one independently closable HRM through semantic readiness, a disposable vertical proof, derived implementation, and operator review. |
 | Execute | [HRM Bundle Coordination Standard](playbooks/lane-coordination-standard.md) | Execute a published HRM bundle quietly with exact-head evidence and worker-to-orchestrator escalation. |
+| Integrate | [Dedicated Checker and Merge Controller](playbooks/checker-merge-controller.md) | Delegate declared checks, exact-head merge, remote-main verification, and eligible cleanup to a source-read-only Codex subagent under one repository-global writer lease. |
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
@@ -81,6 +82,7 @@ Project planning and review:
 - [Operator decision packet](templates/operator-decision-packet.yaml)
 - [Input-boundary record](templates/input-boundary-record.yaml)
 - [Contract-update request](templates/contract-update-request.yaml)
+- [Checker/merge-controller handoff](templates/checker-merge-controller-handoff.yaml)
 - [HRM review package](templates/hrm-review-package.md)
 - [Stable current-review index](templates/current-review.md)
 - [HRM session ledger](templates/hrm-session-ledger.yaml)
@@ -103,8 +105,12 @@ Project planning and review:
 8. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
 9. Derive tests from claim-breaking failure modes, then derive implementation change units
    and execute them under one HRM orchestrator.
-10. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
-11. Treat deployment, activation, canary, production observation, and autonomy as separate
+10. Delegate declared checks, serialized merge, remote-main verification, and eligible cleanup
+    to a source-read-only checker/merge-controller subagent. Repository queues may have
+    dedicated controllers, but only one controller may hold the repository-global writer
+    lease for a canonical remote and target ref at a time.
+11. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
+12. Treat deployment, activation, canary, production observation, and autonomy as separate
    action-time gates with current evidence.
 
 Vertical completeness and horizontal breadth are separate controls. Vertical completeness
@@ -133,6 +139,11 @@ PR; retain it only as a bounded evidence, contract, fixture, test, or documentat
 unit. Each project designates one stable operator checkout and one stable current-review index;
 worker agents never implement in that checkout. Reconcile and remove eligible worktrees after
 verified integration rather than waiting for HRM closure.
+
+The HRM orchestrator owns meaning, scope, finding disposition, operator interaction, and
+closure. A dedicated checker/merge-controller subagent owns the deterministic check and Git
+integration segment for one repository queue. It remains source-read-only, never waives a
+gate or edits a failing candidate, and reports exceptions back through the orchestrator.
 
 ## Using a playbook
 

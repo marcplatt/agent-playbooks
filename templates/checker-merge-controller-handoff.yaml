@@ -1,0 +1,220 @@
+checker_merge_controller:
+  schema_version: agent_playbooks.checker_merge_controller.v1
+  id: "{{controller_handoff_id}}"
+  status: "draft|ready|active|blocked|complete|superseded"
+  execution:
+    implementation: "codex_subagent|equivalent_authenticated_repository_worker"
+    controller_task_id: null
+    orchestrator_task_id: null
+    dedicated_repository_queue: true
+    source_read_only: true
+    writer_lease:
+      canonical_remote: null
+      target_ref: refs/heads/main
+      lease_id: null
+      epoch: null
+      holder_task_id: null
+      acquired_at: null
+      expires_at: null
+      predecessor_release_receipt: null
+      atomic_acquisition_evidence: []
+      read_back_verified: false
+      active: false
+      hosted_merge_queue_is_writer: false
+  repository:
+    absolute_path: "{{repository_path}}"
+    remote: null
+    default_branch: main
+    canonical_remote_identity: null
+    target_ref: refs/heads/main
+    policy_sha: null
+    project_rules: []
+  milestone:
+    session_id: null
+    target_hrm: null
+    milestone_claim_id: null
+    milestone_claim_version: null
+    milestone_claim_content_hash: null
+  queue:
+    id: "{{repository_queue_id}}"
+    dependency_order: []
+    current_candidate: null
+    remaining_candidates: []
+  candidate:
+    change_unit_id: null
+    lane_id: null
+    worktree: null
+    branch: null
+    pull_request: null
+    base_sha: null
+    expected_head_sha: null
+    artifact_id: null
+    artifact_digest: null
+    checked_base_sha: null
+    checked_head_sha: null
+    required_gate_set_hash: null
+    check_definition_hash: null
+    environment_identity: null
+    implementation_complete: false
+    controller_source_mutations: 0
+  validation:
+    profile: "review_packet|executable_contract|runtime_change"
+    class: "ui_presentation|ui_interaction|application_behavior|critical_integration|release_bundle"
+    scope: "targeted|affected|full"
+    scope_authority_reference: null
+    scope_authority_expires_at: null
+    scope_basis:
+      milestone_claim_coverage: []
+      safety_shell_coverage: []
+      bounded_changed_surfaces: []
+      dependency_reach: []
+      excluded_checks_with_reason: []
+      fresh_unaffected_evidence_relied_on: []
+      canary_or_release_stage: null
+      repository_policy_compatible: false
+      unknown_reach_absent: false
+    exact_checks:
+      - id: "{{check_id}}"
+        phase: "frozen_candidate|integrated_release|post_merge"
+        command_or_scenario: null
+        expected_signal: null
+        artifact: null
+        timeout_seconds: null
+        environment: null
+        mutation_safety: "none|fake|disposable_local|dry_run"
+        parallel_group: null
+    required_hosted_checks:
+      - id: null
+        disposition: "pending|passed|not_applicable|failed"
+        reason: null
+        policy_or_checker_reference: null
+        policy_sha: null
+        deciding_authority: null
+        authorization_evidence: []
+        controller_receipt_evidence: []
+        evidence: []
+    required_reviews_or_approvals: []
+    full_suite_required: false
+    full_suite_triggers:
+      - id: null
+        disposition: "not_triggered|satisfied|blocking"
+        reason: null
+        policy_or_checker_reference: null
+        policy_sha: null
+        deciding_authority: null
+        authorization_evidence: []
+        controller_receipt_evidence: []
+        evidence: []
+    evidence:
+      binding:
+        candidate_head_sha: null
+        checked_base_sha: null
+        policy_sha: null
+        milestone_claim_id: null
+        milestone_claim_version: null
+        milestone_claim_content_hash: null
+        required_gate_set_hash: null
+        check_definition_hash: null
+        environment_identity: null
+      passed: []
+      failed: []
+      skipped: []
+      timed_out: []
+      warnings: []
+      artifacts: []
+      hosted_runs: []
+      mutation_audit: []
+    transient_retry:
+      permitted: false
+      used: false
+      evidence: null
+  integration:
+    mode: "observe_only|prepare_merge|merge_with_standing_authority|merge_after_explicit_authority"
+    writer: "hosted_merge_queue|expected_head_controller|controller_manual_call"
+    merge_method: null
+    dependency_gate_passed: false
+    expected_head_binding_required: true
+    standing_authority_reference: null
+    action_specific_authority_reference: null
+    authority_expires_at: null
+    merge_ready: false
+    merge_attempted_at: null
+    ambiguous_result:
+      state: "none|confirmed_merged|confirmed_not_merged|unresolved"
+      original_mutation_or_request_id: null
+      observed_at: []
+      pr_read_back: []
+      accepted_head_sha: null
+      remote_main_sha: null
+      ancestry_or_content_evidence: []
+      retry_permitted: false
+    hosting_read_back:
+      pr_identity: null
+      accepted_head_sha: null
+      merge_or_main_sha: null
+      merged_at: null
+    remote_main_read_back:
+      sha: null
+      accepted_head_is_ancestor: null
+      content_equivalence: null
+    post_merge_checks: []
+  cleanup:
+    policy: null
+    policy_sha: null
+    registered_worktree_identity:
+      absolute_path: null
+      branch: null
+      head_sha: null
+      registry_read_back: []
+    remote_incorporation_proof: []
+    tracked_clean: false
+    untracked_clean: false
+    ignored_audited: false
+    nested_repositories_clean: false
+    process_audited: false
+    lock_audited: false
+    locked: null
+    review_dependency_absent: false
+    unique_work_absent: false
+    worktree_eligible_derived: false
+    exact_removal_action: null
+    worktree_disposition: "pending|removed|retained"
+    registry_absent_read_back: false
+    filesystem_absent_read_back: false
+    branch_deletion_permitted: false
+    branch_disposition: "pending|deleted|preserved"
+    receipt: null
+  lifecycle:
+    state: "awaiting_candidate|checking|awaiting_hosted_gates|merge_ready|merging|verifying_main|cleaning|complete|blocked"
+    changed_at: null
+    reason: null
+  exception:
+    classification: "none|candidate_failed|infrastructure_blocked|policy_conflict|head_drift|evidence_stale|authority_missing|queue_conflict|merge_result_unresolved|cleanup_ambiguous|controller_stuck"
+    orchestrator_route: "none|builder_correction|replacement_handoff|persistent_blocker|S1_before_work|S2_batched"
+    operator_notification_by_controller: prohibited
+    evidence: []
+    returned_to_orchestrator_at: null
+    operator_contacted_directly: false
+  timings:
+    handed_off_at: null
+    checks_started_at: null
+    checks_completed_at: null
+    hosted_wait_seconds: 0
+    merge_queue_wait_seconds: 0
+    merge_completed_at: null
+    verification_completed_at: null
+    cleanup_completed_at: null
+  receipt:
+    id: null
+    lifecycle_state: null
+    exception_classification: null
+    orchestrator_route: null
+    writer_lease_read_back: []
+    exact_candidate_head: null
+    exact_artifact_id: null
+    exact_artifact_digest: null
+    evidence_binding: []
+    checks_and_hosted_gates: []
+    merge_and_main_read_back: []
+    cleanup_result: null
+    next_authorized_action: null
