@@ -1,0 +1,109 @@
+milestone_claim:
+  schema_version: agent_playbooks.milestone_claim.v1
+  id: "{{milestone_claim_id}}"
+  version: "{{version}}"
+  status: "proposed|accepted|superseded"
+  system_reference: "{{system_reference}}"
+  target_hrm: "{{target_hrm}}"
+  sources:
+    project_hrm_map:
+      path: null
+      version: null
+    system_plan: null
+    requirements: []
+    contracts: []
+    decisions: []
+  claim:
+    operator_visible_outcome: null
+    independently_closable_decision: null
+    success_statements: []
+  vertical_completion:
+    proof_spine:
+      input_event: null
+      required_real_systems: []
+      required_operator_actions: []
+      ordered_effects:
+        - order: 1
+          effect_id: "{{effect_id}}"
+          actor_or_system: null
+          action: null
+          destination: null
+          machine_receipts: []
+          human_observation_required: false
+    safety_shell:
+      invariants: []
+      stop_conditions: []
+      partial_failure_cases: []
+      retry_and_resume_rules: []
+      reconciliation_rules: []
+      rollback_or_compensation: []
+  horizontal_breadth:
+    supported_input_contracts:
+      - id: "{{input_contract_id}}"
+        owner_system: null
+        owned_boundary: null
+        equivalence_class: null
+        required_real_execution: false
+    supported_variants: []
+    cardinality:
+      input_events: null
+      operator_actions: null
+      ordered_effects: null
+      recipient_effects: null
+    explicit_exclusions: []
+    unsupported_inputs_fail_closed: true
+    reachable_implementation_matches_claim: false
+  seam_equivalence:
+    - equivalence_class: "{{equivalence_class}}"
+      converges_at_owned_seam: null
+      shared_downstream_contract: null
+      upstream_equivalence_evidence: []
+      represented_by_scenario: null
+      limitations: []
+  required_scenario_matrix:
+    - id: "{{scenario_id}}"
+      input_contract: null
+      representative_for: []
+      starting_state: null
+      operator_action: null
+      ordered_effect_ids: []
+      real_systems_required: []
+      success_proof:
+        machine_receipts: []
+        human_observations: []
+      failure_modes: []
+      recovery_proof: []
+      execution_stage: "fixture|mutation_disabled|integrated|canary|production_observation"
+  acceptance_evidence:
+    machine_receipts: []
+    human_observations: []
+    evidence_freshness: []
+    privacy_safe_storage: []
+  validation_budget:
+    failure_mode_test_map: []
+    focused_iteration_checks: []
+    frozen_candidate_checks: []
+    integrated_head_checks: []
+    full_suite_triggers: []
+    real_system_executions: []
+    duplicate_equivalent_coverage_removed: []
+  scale_perimeter:
+    generalized_behavior_not_required_now: []
+    sequenced_obligations:
+      - id: "{{obligation_id}}"
+        source_finding_or_discovery: null
+        required_outcome: null
+        why_not_a_current_claim_blocker: null
+        target_hrm_or_release: null
+        owner: null
+        latest_safe_point: null
+        promotion_trigger: null
+        safe_posture_until_promoted: null
+  change_control:
+    accepted_by: null
+    accepted_at: null
+    semantic_read_back: null
+    scope_change_requires_operator_decision: true
+    new_hrm_routes_to_discovery_rebaseline: true
+    unsafe_reachable_behavior_cannot_be_deferred: true
+  does_not_authorize: [code, merge, deployment, activation, canary, production]

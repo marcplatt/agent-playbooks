@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.2"
+version: "4.3"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -14,6 +14,7 @@ optional_inputs:
   - brownfield_capability_inventory
   - system_node_registry
   - milestone_session_contract
+  - milestone_claim
   - published_lane_bundle
   - approved_lane_bundle
   - manual_lane_bundle
@@ -43,6 +44,7 @@ controls:
   - explicit-input-boundary-return
   - target-hrm-first
   - published-milestone-bundle
+  - frozen-milestone-claim
   - no-operator-lane-enumeration
   - manual-lane-constraint-cannot-suppress-inputs
   - bounded-scope
@@ -67,6 +69,8 @@ controls:
   - no-duplicate-equivalent-ci
   - non-recursive-integration-receipts
   - change-surface-test-matrix
+  - claim-derived-validation-budget
+  - finding-blocker-test
   - hotl-design-batching
   - risk-based-review
   - release-boundary-regression
@@ -117,6 +121,7 @@ the operator explicitly closes or defers the target HRM.
 - **Target HRM:** `{{target_hrm}}`
 - **Milestone outcome:** `{{milestone_outcome}}`
 - **Milestone session contract:** `{{milestone_session_contract_or_discover}}`
+- **Milestone claim:** `{{milestone_claim_or_session_contract}}`
 - **Published lane bundle:** `{{published_lane_bundle_or_derive_from_session_contract}}`
 - **Legacy approved-lane bundle:** `{{approved_lane_bundle_or_none}}`
 - **Manual lane bundle:** `{{manual_lane_bundle_or_none}}`
@@ -167,6 +172,7 @@ Current HRM: {{current_hrm_or_discover}}.
 Target HRM: {{target_hrm}}.
 Milestone outcome: {{milestone_outcome}}.
 Milestone session contract: {{milestone_session_contract_or_discover}}.
+Milestone claim: {{milestone_claim_or_session_contract}}.
 Published lane bundle: {{published_lane_bundle_or_derive_from_session_contract}}.
 Legacy approved-lane bundle: {{approved_lane_bundle_or_none}}.
 Manual lane bundle: {{manual_lane_bundle_or_none}}.
@@ -187,7 +193,8 @@ Supervisor rotation limits: {{supervisor_rotation_limits_or_default}}.
 
 The target HRM, not a list of lanes, is the work session's controlling objective. It
 must resolve from the complete-as-presently-knowable, versioned project HRM map. Obey
-every applicable AGENTS.md, approved system plan, milestone contract, and lane contract.
+every applicable AGENTS.md, approved system plan, milestone contract, milestone claim,
+and lane contract.
 Do not ask the operator to enumerate lanes. If the map or target is undefined or not
 independently closable, the canonical planning package is absent, the bundle is absent,
 or the bundle cannot plausibly satisfy the milestone outcome, return control to the
@@ -242,7 +249,10 @@ ESTABLISH THE MILESTONE SESSION
    decisions, findings, published lane
    specs, and predecessor handoffs. Prove the target HRM exists in the map and has one
    independently closable outcome, review questions, closure criteria, closure effect,
-   authority envelope, activation posture, downstream release effect, and lane bundle.
+   authority envelope, activation posture, downstream release effect, accepted milestone
+   claim, and lane bundle. Verify the claim states its proof spine, safety shell, supported
+   horizontal breadth, cardinality, distinct seams and equivalence classes, scenario matrix,
+   evidence, explicit exclusions, and scale perimeter.
    If the canonical package is absent or silently incomplete, stop and return a rebaseline
    request; do not manufacture missing milestones or bridge readiness.
 7. Record the lifecycle `planned -> executing -> review_ready -> in_review ->
@@ -265,8 +275,9 @@ ESTABLISH THE MILESTONE SESSION
 9. Maintain an operator-facing milestone banner throughout the session: system, current
    HRM, target HRM, milestone outcome, capabilities complete, capabilities remaining,
    blockers, contract-update requests, decisions requested, function review state,
-   activation posture, integrated head, and next action. Lane progress is quiet supporting
-   detail beneath this view unless it creates a classified HRM blocker.
+   activation posture, integrated head, next meaningful operator interaction with forecast,
+   time to formal HRM review, and next action. Lane progress is quiet supporting detail
+   beneath this view unless it creates a classified HRM blocker.
 
 PLAN THE PUBLISHED BUNDLE ONCE
 
@@ -296,9 +307,11 @@ PROVE READINESS BEFORE CODING
     identity, contract and deployment owners, canonical workflow, versioned interface,
     readiness evidence, topology, configuration, start/restart, health, recovery,
     rollback, and reconciliation. Never create a consumer worktree as a proxy for it.
-    Confirm the session's semantic-readiness gate passed and the disposable end-to-end
-    proof was reviewed or explicitly ruled unnecessary; the lane cannot compensate for
-    an unresolved semantic decision or an unreviewed riskiest seam.
+    Confirm the session's semantic-readiness gate passed, the milestone claim is accepted,
+    the lane contributes to its proof spine or safety shell and does not implement scale-
+    perimeter work without an accepted claim amendment, and the disposable end-to-end proof
+    was reviewed or explicitly ruled unnecessary; the
+    lane cannot compensate for an unresolved semantic decision or an unreviewed riskiest seam.
 14. Complete the exact test plan below, then mark the lane READY, READY WITH APPROVED
     AMENDMENT, or BLOCKED. A merely planned, contradictory, unknown-contract, or test-
     unspecified lane does not enter implementation.
@@ -339,6 +352,19 @@ PROVE READINESS BEFORE CODING
      external effects, or HRM closure/release semantics, stop and return to system build.
 
 SELECT THE EXACT TEST PLAN
+
+Derive the validation budget from the frozen milestone claim before applying changed-surface
+rules. Each check must trace to a required scenario, claim-breaking failure mode, safety-shell
+invariant, plausible changed-surface regression, dependency risk, or binding repository/release
+gate. Raw test count is not evidence of completeness. Exercise each distinct owned contract
+seam; remove duplicate downstream coverage only when the claim records an evidenced convergence
+class and the upstream path to that seam is proved.
+
+Test a failure mode once at the lowest deterministic layer that can prove it, then repeat it
+end to end only when the integrated seam or real effect is itself under review. Use focused
+checks during implementation and reserve the required repository-wide suite for the frozen
+integrated head. If code remains reachable beyond the claimed breadth, either narrow it or
+carry its necessary correctness tests; `out of scope` never excuses an unsafe reachable path.
 
 Testing follows changed behavior and dependency reach, not filenames alone. A CSS file
 can alter accessibility or interaction; a JavaScript edit can be presentational, local
@@ -556,7 +582,12 @@ RUN THE FASTEST SAFE FLOW
     and rerun only its applicable checks and reviews. A blocking exact-head review that
     reproduces a real defect and fails closed is a healthy implementation control, not by
     itself a planning failure; preserve the stop and separately return any contributing
-    planning/decomposition weakness. After two material correction
+    planning/decomposition weakness. Before expanding the lane, apply the milestone blocker
+    test: the finding must be reachable in a required scenario or accepted implementation
+    surface and violate the frozen claim, a required invariant, or its safety shell; make a
+    required result false; or risk duplicating, misrouting, exposing, corrupting, or losing
+    a required effect. Otherwise return it as a sequenced obligation or claim-amendment
+    proposal. Unsafe reachable behavior must be narrowed or fixed now. After two material correction
     rounds, stop patch cycling and reassess readiness, decomposition, and contract.
 
 INTEGRATE AND VERIFY
@@ -625,7 +656,10 @@ PREPARE AND REVIEW THE TARGET HRM
     requirements may become published remediation lanes and execute without another
     scope decision only after operator review or explicit finding disposition. Missing
     functions, policy or authority changes, new persistence or external effects, or
-    changed milestone outcomes require one batched operator approval.
+    changed milestone outcomes require one batched operator approval. Non-blocking necessary
+    work receives a sequenced obligation with owner, target HRM or release, latest safe point,
+    promotion trigger, and safe interim posture; it is neither silently deferred nor pulled
+    into the current implementation without authority.
 33. Keep the same milestone session and target HRM through approved remediation. Pause
     downstream work, execute only the published remediation bundle, revalidate affected
     evidence, rebaseline downstream specifications, and republish the review package.
@@ -723,7 +757,7 @@ MEASURE AND REPORT
 
 ```yaml
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.2
+  schema_version: agent_playbooks.hrm_session_ledger.v2.3
   id: "{{session_id}}"
   system_reference: "{{system_reference}}"
   hrm_map:
@@ -741,6 +775,19 @@ milestone_session:
   target_hrm: "{{target_hrm}}"
   milestone_contract: "{{path}}"
   milestone_outcome: "{{operator_visible_outcome}}"
+  milestone_claim:
+    path: "{{path}}"
+    id: "{{milestone_claim_id}}"
+    version: "{{version}}"
+    accepted: false
+    proof_spine: []
+    safety_shell: []
+    supported_input_contracts: []
+    seam_equivalence: []
+    required_scenario_matrix: []
+    cardinality: []
+    explicit_exclusions: []
+    reachable_implementation_matches_claim: false
   closability:
     independently_closable: false
     composite_states: []
@@ -783,6 +830,9 @@ milestone_session:
     candidate_head_sha: null
     integrated_head_sha: null
     next_action: null
+    next_meaningful_operator_interaction: null
+    time_to_next_meaningful_operator_interaction_seconds: null
+    time_to_formal_hrm_review_seconds: null
   published_lane_bundle: []
   legacy_approved_lane_bundle: []
   manual_lane_constraint: []
@@ -857,6 +907,14 @@ milestone_session:
     open: []
     blocking: []
     remediation_bundle: []
+  sequenced_obligations:
+    - id: "{{obligation_id}}"
+      source_finding_or_discovery: null
+      target_hrm_or_release: null
+      owner: null
+      latest_safe_point: null
+      promotion_trigger: null
+      safe_posture_until_promoted: null
   contract_update_requests:
     open: []
     resolved: []
@@ -1000,6 +1058,10 @@ milestone_cleanup:
 
 ## Change note
 
+- **4.3 — 2026-08-25:** Enforces the frozen milestone claim during execution, derives a
+  validation budget from distinct seams and claim-breaking failure modes, adds a blocker
+  test before scope expansion, records time to meaningful operator interaction, and routes
+  necessary later work into owned sequenced obligations.
 - **4.2 — 2026-08-24:** Adds operator-access, executable-contract, and runtime validation
   routing; prevents application suites from blocking inert review packets; avoids duplicate
   equivalent CI on one head; and prohibits recursive receipt-only PRs by default.

@@ -1,5 +1,5 @@
 project_hrm_map:
-  schema_version: agent_playbooks.project_hrm_map.v3
+  schema_version: agent_playbooks.project_hrm_map.v3.1
   system_reference: "{{system_reference}}"
   version: "{{map_version}}"
   status: "proposed|published|accepted|superseded"
@@ -31,6 +31,7 @@ project_hrm_map:
     implementation_manifest: null
     contract_catalog: null
     contract_update_request_surface: null
+    milestone_claims: null
     brownfield_capability_inventory: null
     system_node_registry: null
   publication_gate:
@@ -46,11 +47,13 @@ project_hrm_map:
     operator_review_state: "pending|accepted|accepted_with_findings|rejected"
     decision_frontier_resolved_or_explicitly_blocked: false
     semantic_readiness_reviewed: false
+    milestone_claims_complete: false
   milestones:
     - id: "{{hrm_id}}"
       title: "{{title}}"
       version: "{{hrm_version}}"
       contract_path: "{{milestone_contract_path}}"
+      milestone_claim_path: "{{milestone_claim_path}}"
       status: planned
       depends_on: []
       purpose: "{{why_this_milestone_exists}}"
@@ -59,6 +62,20 @@ project_hrm_map:
         independently_closable: false
         composite_states: []
       capabilities: []
+      vertical_completion:
+        proof_spine_defined: false
+        safety_shell_defined: false
+        required_real_systems: []
+        ordered_effects: []
+      horizontal_breadth:
+        supported_input_contracts: []
+        supported_variants: []
+        cardinality: []
+        explicit_exclusions: []
+        reachable_implementation_matches_claim: false
+      required_scenario_matrix: []
+      seam_equivalence: []
+      sequenced_obligations: []
       review_questions: []
       review_scenarios:
         - id: "{{scenario_id}}"

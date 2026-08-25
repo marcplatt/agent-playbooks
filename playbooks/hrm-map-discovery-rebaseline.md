@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-HRM-MAP-001
 title: HRM Map Discovery and Rebaseline
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: hrm-map-governance
@@ -9,7 +9,7 @@ human_readable: true
 machine_readable: true
 required_inputs: [project_hrm_map, discovery_or_change]
 optional_inputs: [current_hrm_session, operator_decision, affected_projects]
-controls: [complete-as-presently-knowable, append-only-history, early-escalation, compatible-work-only]
+controls: [complete-as-presently-knowable, append-only-history, milestone-claim-disposition, sequenced-obligation, early-escalation, compatible-work-only]
 ---
 
 # HRM Map Discovery and Rebaseline
@@ -27,6 +27,12 @@ Unknown API or implementation behavior also normally remains inside the existing
 disposable discovery spike. It creates no PR unless retained evidence is published as a
 bounded change unit.
 
+Inside an existing HRM, classify the discovery before changing implementation: it may be a
+defect against the accepted claim, an operator-approved amendment to horizontal breadth, a
+necessary sequenced obligation for a named later HRM or release, or evidence that a distinct
+HRM now exists. A sequenced obligation is not permission to leave unsafe reachable behavior;
+that behavior must be narrowed or corrected in the current change.
+
 ## Prompt
 
 ```text
@@ -43,8 +49,14 @@ Current session: {{current_hrm_session_or_none}}
    unaccepted HRM proposal.
 3. Test whether the existing map can absorb the discovery without changing outcome, closure
    authority, closure effect, evidence state, or downstream release. Record why or why not.
-4. Classify as defect/remediation, requirement or contract amendment, HRM addition, HRM split,
+4. Classify as defect/remediation within the accepted milestone claim, claim-scope amendment,
+   sequenced obligation, requirement or contract amendment, HRM addition, HRM split,
    dependency change, supersession/removal, or no map change.
+4a. For a claim-scope amendment, show the added or removed input contracts, variants,
+    cardinality, real-system effects, evidence, exclusions, tests, and reachable-code impact.
+    Obtain operator semantic read-back before non-disposable implementation. For a sequenced
+    obligation, record owner, target HRM or release, latest safe point, promotion trigger,
+    and safe interim posture.
 5. For a material map change, prepare `HRM_DISCOVERY` with proposed outcome, dependencies,
    review questions, closure and release effects, authority, evidence/unknowns, affected work,
    permitted continuation, recommendation, and no more than three alternatives.
@@ -63,6 +75,9 @@ was amended. Discovery itself is expected; late controlled response is the failu
 
 ## Change note
 
+- **1.2 — 2026-08-25:** Routes discoveries within an HRM as in-claim defects, milestone-
+  claim amendments, owned sequenced obligations, or distinct HRM changes, while prohibiting
+  unsafe reachable behavior from being deferred.
 - **1.1 — 2026-08-24:** Keeps unforeseen API and implementation discovery inside the
   current HRM by default, allows disposable spikes with no PR, and publishes only retained
   evidence as a bounded change unit.

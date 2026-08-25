@@ -1,5 +1,5 @@
 rollout_record:
-  schema_version: agent_playbooks.activation_production_record.v1
+  schema_version: agent_playbooks.activation_production_record.v1.1
   id: "{{rollout_record_id}}"
   system_reference: "{{system_reference}}"
   stage: "artifact_proof|deployment_readiness|deployment|activation_readiness|activation|canary|production_observation|autonomy_readiness"
@@ -8,6 +8,18 @@ rollout_record:
     id: null
     version: null
     closure_revision: null
+  milestone_claim:
+    id: null
+    version: null
+    path: null
+    semantic_read_back: null
+    supported_input_contracts: []
+    distinct_owned_seams: []
+    seam_equivalence: []
+    required_scenario_matrix: []
+    cardinality: []
+    ordered_effects: []
+    explicit_exclusions: []
   candidate:
     repository_sha: null
     artifact_id: null
@@ -30,6 +42,14 @@ rollout_record:
     expires_at: null
     semantic_read_back: null
   bounded_effects: []
+  real_execution_matrix:
+    - scenario_id: null
+      input_contract: null
+      represented_equivalent_paths: []
+      required_real_systems: []
+      status: "planned|executing|succeeded|failed|blocked"
+      machine_receipts: []
+      human_destination_observations: []
   expected_receipts: []
   health_signals: []
   stop_conditions: []
@@ -40,6 +60,8 @@ rollout_record:
     observed_state: null
     provider_read_back: []
     ambiguous_results: []
+    completed_effects_not_repeated: []
+    first_incomplete_effect: null
   observation_window:
     starts_at: null
     ends_at: null

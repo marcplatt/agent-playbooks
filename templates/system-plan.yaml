@@ -1,5 +1,5 @@
 system_plan:
-  schema_version: agent_playbooks.system_plan.v1
+  schema_version: agent_playbooks.system_plan.v1.1
   system_reference: "{{system_reference}}"
   version: "{{version}}"
   status: "draft|in_review|accepted|superseded"
@@ -37,6 +37,15 @@ system_plan:
       - recovery
       - reconciliation
       - rollback
+    owned_seams: []
+    equivalence_classes: []
+  milestone_claims:
+    location: null
+    vertical_completion_defined: false
+    horizontal_breadth_defined: false
+    required_scenario_matrices_complete: false
+    explicit_exclusions_complete: false
+    sequenced_obligations_routed: false
   contracts:
     catalog: null
     open_update_requests: []

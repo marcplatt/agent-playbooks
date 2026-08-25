@@ -1,15 +1,15 @@
 ---
 playbook_id: AP-VALIDATE-001
 title: Operator Access and Validation Routing
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: early-operator-access-risk-scaled-validation
 human_readable: true
 machine_readable: true
 required_inputs: [validation_subject, changed_surfaces]
-optional_inputs: [change_unit, operator_packet, repository_validation_policy, integration_policy]
-controls: [operator-access-before-integration, validation-profile-routing, no-duplicate-suite, non-recursive-receipts]
+optional_inputs: [change_unit, operator_packet, milestone_claim, repository_validation_policy, integration_policy]
+controls: [operator-access-before-integration, validation-profile-routing, claim-derived-validation-budget, no-duplicate-suite, non-recursive-receipts]
 ---
 
 # Operator Access and Validation Routing
@@ -32,6 +32,12 @@ provenance; Git paths, diffs, and SHAs are optional and apply only when reposito
 If a supposedly inert record is consumed at runtime, raise its profile. Do not raise an
 inert review packet merely because the repository also contains application code.
 
+For runtime changes, a validation budget is complete when it covers every required milestone
+scenario, claim-breaking failure mode, safety invariant, demonstrated dependency risk, and
+binding release gate--not when it reaches a target number of tests. Equivalent downstream
+paths may share evidence only through an explicit owned-seam equivalence record. Generalized
+reachable behavior outside the milestone claim must be narrowed or receive its necessary tests.
+
 ## Prompt
 
 ```text
@@ -41,6 +47,7 @@ Validation subject: {{validation_subject}}
 Change unit: {{change_unit_or_none}}
 Changed surfaces: {{changed_surfaces}}
 Operator packet: {{operator_packet_or_none}}
+Milestone claim: {{milestone_claim_or_none}}
 
 1. Classify the validation subject or repository diff as review_packet,
    executable_contract, or runtime_change and record the evidence for that classification
@@ -66,6 +73,13 @@ Operator packet: {{operator_packet_or_none}}
    every mandatory broader trigger. A runtime_change follows demonstrated dependency reach.
    Unknown consumer reach or classifier failure fails integration closed and is never an
    explicit validation pass, while any already-safe operator packet remains visible.
+4a. For a runtime change, trace every check to the frozen milestone claim, a plausible
+    changed-surface regression, dependency risk, or binding gate. Test a failure mode at
+    the lowest deterministic layer that can prove it and repeat it end to end only when
+    the integrated seam or real effect is itself claimed. Use focused iteration checks and
+    one release-required full-suite run on the frozen integrated head. If a generic policy
+    applies application tests to an inert review packet, preserve the policy gate but report
+    the contradiction as a conformance amendment; never hide the safe packet from the operator.
 5. Configure CI so one candidate head does not receive duplicate equivalent suites from
    both branch-push and pull-request events. Prefer a lightweight change classifier and
    one required aggregate result that records safely classified non-applicable jobs as pass.
@@ -83,11 +97,16 @@ Operator packet: {{operator_packet_or_none}}
 8. Record operator_packet_published_at, operator_access_ready_at, validation_started_at,
    candidate identity (packet ID/version/content hash or Git SHA), integrated_head_sha when
    repository-backed, integration_eligible_at, and any avoidable wait caused by
-   misclassification, duplicate CI, or receipt recursion.
+   misclassification, duplicate CI, or receipt recursion. Also record time to first meaningful
+   operator interaction and time to formal HRM review so fast packet access is not confused
+   with milestone completion.
 ```
 
 ## Change note
 
+- **1.1 — 2026-08-25:** Derives runtime validation budgets from frozen milestone claims,
+  distinct seams, failure modes, and safety invariants; preserves early access when local
+  policy over-tests inert documentation; and separates first interaction from formal HRM time.
 - **1.0 — 2026-08-24:** Separates operator access from integration and activation gates,
   defines review-packet, executable-contract, and runtime-change validation profiles,
   prevents duplicate equivalent CI suites, and prohibits recursive receipt-only PRs by

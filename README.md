@@ -75,6 +75,7 @@ Organization and portfolio:
 Project planning and review:
 
 - [System plan](templates/system-plan.yaml)
+- [Milestone claim and scenario matrix](templates/milestone-claim.yaml)
 - [Complete-as-presently-knowable project HRM map](templates/project-hrm-map.yaml)
 - [HRM-discovery proposal](templates/hrm-discovery-proposal.yaml)
 - [Operator decision packet](templates/operator-decision-packet.yaml)
@@ -97,11 +98,21 @@ Project planning and review:
 5. Resolve the decision frontier and semantic-readiness gate before substantive code.
 6. Publish completed discovery and decision packets after minimum packet validation; do not
    make operator interaction wait for application CI, merge, receipts, or cleanup.
-7. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
-8. Derive implementation change units and execute them under one HRM orchestrator.
-9. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
-10. Treat deployment, activation, canary, production observation, and autonomy as separate
+7. Freeze the milestone claim: its vertically complete proof spine, horizontally bounded
+   scenario matrix, cardinality, real-system effects, evidence, exclusions, and scale perimeter.
+8. Prove the riskiest end-to-end path with a deliberately disposable vertical skeleton.
+9. Derive tests from claim-breaking failure modes, then derive implementation change units
+   and execute them under one HRM orchestrator.
+10. Stop at `review_ready` for explicit operator function/UI/UX acceptance and finding disposition.
+11. Treat deployment, activation, canary, production observation, and autonomy as separate
    action-time gates with current evidence.
+
+Vertical completeness and horizontal breadth are separate controls. Vertical completeness
+proves the required real systems, operator actions, ordered effects, recovery, and human-
+observable result from accepted input to destination. Horizontal breadth states exactly which
+origins, variants, cardinalities, and mutations are supported. Paths that converge at an owned,
+versioned contract seam may share downstream proof only when upstream equivalence is evidenced;
+labels alone neither create nor eliminate a distinct scenario.
 
 The operator decides business outcome and meaning, material scope or capability retirement,
 authority, risk acceptance, HRM closure, and production-affecting action. The orchestrator
