@@ -1,0 +1,77 @@
+schema_version: agent_playbooks.hrm_execution_capsule.v0.1
+session_id: MS-EXAMPLE-2026-08-25-HRM-2
+playbook_pin:
+  kernel_id: AP-EXEC-001
+  kernel_version: 0.1.0-rc.1
+  source_sha: "1111111111111111111111111111111111111111"
+system_reference: SYS-EXAMPLE-001
+project_root: /example/project
+repository_bases:
+  - repository: example/project
+    base_sha: "2222222222222222222222222222222222222222"
+hrm:
+  id: HRM-2
+  contract_path: docs/milestones/HRM-2.md
+  contract_version: 1.0.0
+  outcome: The operator can complete and correct the local workflow and understand failures.
+  operator_decision: Accept or defer the complete local workflow represented by this exact candidate.
+  accepted_scenarios: [ACC-EX-01]
+experiment_profile: runtime_build_fast_feedback
+execution_mode: runtime_build
+deliverable_type: runtime_change
+function_slice:
+  function_ids: [FUNC-EX-RFQ-REVIEW]
+  required_real_seams: [local_intake_store, operator_review_surface]
+  accepted_scenarios: [ACC-EX-01]
+  non_goals: [provider_write, deployment, production_activation]
+  allowed_paths: [src/example/**, tests/example/**]
+  proof_obligations: [stable_identity, safe_validation_failure, restart_recovery]
+authority:
+  planning_changes: true
+  routine_code_integration: true
+  provider_writes: false
+  deployment: false
+  activation: false
+  canary: false
+  production_observation: false
+  autonomy: false
+phase: closed
+current_change_unit:
+  id: CU-EX-02
+  deliverable_type: runtime_change
+  writer: builder-example
+  allowed_paths: [src/example/**, tests/example/**]
+  candidate_sha: "3333333333333333333333333333333333333333"
+verification:
+  profile: standard
+  environment_id: local:ruby-2.6.10
+  ci_plan_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  exact_checks: [ruby scripts/example_check.rb]
+  full_suite_triggers: [shared_runtime_contract_changed]
+reference_requests: []
+budgets:
+  max_consecutive_nonruntime_units: 1
+  max_correction_rounds: 2
+  no_material_progress_minutes: 45
+  max_ci_minutes: 30
+  max_context_redundancy_ratio: 0.15
+  context_bytes_by_role:
+    orchestrator: 32000
+    builder: 20000
+    checker: 12000
+    reviewer: 20000
+    operator: 8000
+progress:
+  last_material_event_sequence: 14
+  last_material_progress_at: "2026-08-25T00:45:00Z"
+  repository_state_hash: "3333333333333333333333333333333333333333"
+  consecutive_nonruntime_units: 0
+  correction_rounds: 0
+terminal:
+  state: closed
+  stop_reason: done_verified
+  evidence: [ACC-EX-01, "candidate:3333333333333333333333333333333333333333"]
+metrics:
+  event_log_path: examples/hrm-run-events.example.jsonl
+  scorecard_path: examples/hrm-run-scorecard.example.yaml
+  aftercare_window_days: 14

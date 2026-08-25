@@ -24,6 +24,9 @@ branches, worktrees, lanes, tests, and agents are subordinate implementation mec
 - `templates/` contains neutral records that an organization copies into its owning
   master-plan or project repository and adapts without changing the control semantics.
 - `examples/` contains fictional, non-normative uses without secrets or customer data.
+- `schemas/` contains fail-closed machine contracts for experimental execution records.
+- `scripts/` contains repository-local validators and metric derivation; `tests/` protects
+  their behavior with fictional fixtures.
 - The adopting organization's governance and each project's `AGENTS.md` remain authoritative.
 - The organization master plan owns business outcomes, system portfolio, authority,
   cross-system policy, and accepted change envelopes.
@@ -58,6 +61,27 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
+## Experimental compact execution
+
+[Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
+bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
+during the `0.1.0-rc.1` experiment. It preserves their non-negotiable safety constraints in
+one small kernel and requires a validated HRM execution capsule. Do not preload the replaced
+playbooks into an experimental task. They are heading-bounded, metered references available
+only through an approved question in the capsule.
+
+This is intentionally an experiment rather than a new default. Pin the exact Agent Playbooks
+commit in each capsule, keep the event log append-only, and derive the scorecard with the
+repository script. Compare the resulting flow, context, CI, scope, safety, and operator-review
+measures with the preregistered budgets; do not infer success from agent self-report.
+
+```sh
+ruby scripts/hrm_experiment.rb validate-capsule path/to/hrm-execution-capsule.yaml
+ruby scripts/hrm_experiment.rb validate-events path/to/hrm-run-events.jsonl
+ruby scripts/hrm_experiment.rb evaluate \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
+```
+
 ## Change-propagation playbooks
 
 | Playbook | Use |
@@ -89,7 +113,13 @@ Project planning and review:
 - [Workspace registry](templates/workspace-registry.yaml)
 - [Activation and production record](templates/activation-production-record.yaml)
 - [Codex global working agreements](templates/codex-global-agents.md)
+- [Compact HRM execution capsule](templates/hrm-execution-capsule.yaml)
+- [Compact HRM experiment profiles](templates/hrm-experiment-profiles.yaml)
+- [Derived HRM run scorecard shape](templates/hrm-run-scorecard.yaml)
 - [Fictional HRM-directed session](examples/hrm-directed-session.example.yaml)
+- [Fictional compact execution capsule](examples/hrm-execution-capsule.example.yaml)
+- [Fictional compact run events](examples/hrm-run-events.example.jsonl)
+- [Fictional derived run scorecard](examples/hrm-run-scorecard.example.yaml)
 
 ## Operating model
 
