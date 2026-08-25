@@ -1,5 +1,11 @@
 # Organization-to-System Agent Playbooks
 
+**New operator or workspace?** Start with the interactive setup prompt in
+[Operator-Workspace Onboarding and Method Orientation](playbooks/operator-workspace-onboarding.md).
+If the operator already knows the method and is configuring another account, machine, or
+project set, use [Operator-Workspace Conformance and Synchronization](playbooks/operator-workspace-conformance.md)
+instead. In every playbook ID, `AP` means **Agent Playbooks**.
+
 Version-controlled, human-readable, and machine-readable workflows for turning an
 organization's business intent into governed system delivery. The repository is
 organization-neutral: adopting organizations keep their own names, authority assignments,
@@ -28,6 +34,13 @@ branches, worktrees, lanes, tests, and agents are subordinate implementation mec
 Playbooks may coordinate approved work, but may not invent business meaning, assign
 authority, weaken checkers, bypass human gates, or treat proposed, local, tested, merged,
 deployed, activated, canary, or production-verified states as interchangeable.
+
+## Operator and workspace setup
+
+| Playbook | Use |
+|---|---|
+| [Operator-Workspace Onboarding and Method Orientation](playbooks/operator-workspace-onboarding.md) | Adaptively teach a human operator and their chosen workspace how to use the method, audit the available organization-to-system path, and discuss personalization without making writes. |
+| [Operator-Workspace Conformance and Synchronization](playbooks/operator-workspace-conformance.md) | Audit and align a new account, machine, workspace, or project set when the operator already knows the method or wants a direct conformance path. |
 
 ## Lifecycle playbooks
 
