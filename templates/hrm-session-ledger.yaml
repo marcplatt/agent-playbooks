@@ -1,5 +1,5 @@
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.3
+  schema_version: agent_playbooks.hrm_session_ledger.v2.4
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -132,6 +132,35 @@ milestone_session:
     next_meaningful_operator_interaction: null
     time_to_next_meaningful_operator_interaction_seconds: null
     time_to_formal_hrm_review_seconds: null
+    checker_merge_controller_lifecycle_state: null
+    checker_merge_controller_exception: null
+    checker_merge_controller_orchestrator_route: null
+  checker_merge_controller:
+    playbook: AP-INTEGRATE-001
+    handoff: null
+    controller_task_id: null
+    repository_queue_id: null
+    source_read_only: true
+    writer_lease:
+      canonical_remote: null
+      target_ref: refs/heads/main
+      lease_id: null
+      epoch: null
+      holder_task_id: null
+      acquired_at: null
+      expires_at: null
+      predecessor_release_receipt: null
+      atomic_acquisition_evidence: []
+      read_back_verified: false
+      active: false
+      hosted_merge_queue_is_writer: false
+    validation_scope: "targeted|affected|full"
+    validation_scope_authority: null
+    lifecycle_state: "not_started|awaiting_candidate|checking|awaiting_hosted_gates|merge_ready|merging|verifying_main|cleaning|complete|blocked"
+    current_candidate_head: null
+    exception_classification: "none|candidate_failed|infrastructure_blocked|policy_conflict|head_drift|evidence_stale|authority_missing|queue_conflict|merge_result_unresolved|cleanup_ambiguous|controller_stuck"
+    orchestrator_route: "none|builder_correction|replacement_handoff|persistent_blocker|S1_before_work|S2_batched"
+    receipt: null
   review_package:
     status: not_started
     operator_access_state: "not_ready|operator_access_ready|operator_access_blocked|in_review|withdrawn|superseded"
@@ -205,10 +234,27 @@ lanes:
     integration_receipt: null
     validation_profile: runtime_change
     validation_class: application_behavior
+    validation_scope: "targeted|affected|full"
+    validation_scope_authority: null
+    validation_scope_authority_expires_at: null
+    limited_scope_basis:
+      milestone_claim_coverage: []
+      safety_shell_coverage: []
+      bounded_changed_surfaces: []
+      dependency_reach: []
+      excluded_checks_with_reason: []
+      fresh_unaffected_evidence_relied_on: []
+      repository_policy_compatible: false
+      unknown_reach_absent: false
+      required_hosted_gate_dispositions: []
+      full_suite_trigger_dispositions: []
     exact_checks: []
     full_suite_triggers: []
     external_mutations: 0
     cleanup_disposition: pending
+    controller_handoff: null
+    controller_lifecycle_state: "not_started|awaiting_candidate|checking|awaiting_hosted_gates|merge_ready|merging|verifying_main|cleaning|complete|blocked"
+    controller_exception_classification: null
 discovery_spikes:
   - id: "{{discovery_id}}"
     assigned_hrm: "{{target_hrm}}"

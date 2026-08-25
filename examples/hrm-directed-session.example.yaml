@@ -116,6 +116,44 @@ system_build_session:
         - npm run build
         - "browser scenario: complete, correct, and retry the affected workflow with keyboard-only input"
       full_suite_triggers: []
+  checker_merge_controller:
+    playbook: AP-INTEGRATE-001
+    handoff: docs/integration/CU-EX-02.1-controller.yaml
+    repository_queue_id: EXAMPLE-HRM-2
+    source_read_only: true
+    writer_lease:
+      canonical_remote: https://example.invalid/example/project.git
+      target_ref: refs/heads/main
+      lease_id: LEASE-EXAMPLE-PROJECT-MAIN-0042
+      epoch: 42
+      holder_task_id: controller-example-02
+      acquired_at: "2026-08-21T17:00:00Z"
+      expires_at: "2026-08-21T18:00:00Z"
+      predecessor_release_receipt: LEASE-EXAMPLE-PROJECT-MAIN-0041-RELEASED
+      atomic_acquisition_evidence: [LEASE-EXAMPLE-PROJECT-MAIN-0042-READBACK]
+      read_back_verified: true
+      active: true
+      hosted_merge_queue_is_writer: false
+    validation_scope: targeted
+    validation_scope_authority: MS-EXAMPLE-2026-08-21-HRM-2
+    validation_scope_authority_expires_at: "2026-08-21T18:00:00Z"
+    limited_scope_basis:
+      milestone_claim_coverage: [complete_the_local_workflow]
+      safety_shell_coverage: [reject_invalid_input_with_recovery_guidance]
+      bounded_changed_surfaces: [local_workflow_ui]
+      dependency_reach: [local_workflow_ui]
+      excluded_checks_with_reason:
+        - "repository-wide application suite: no shared runtime surface changed"
+      fresh_unaffected_evidence_relied_on: []
+      repository_policy_compatible: true
+      unknown_reach_absent: true
+      required_hosted_gate_dispositions: [targeted-controller-check-required]
+      full_suite_trigger_dispositions: [no_full_suite_trigger_reached]
+    lifecycle_state: awaiting_candidate
+    current_candidate_head: null
+    exception_classification: none
+    orchestrator_route: none
+    receipt: null
   lane_bundle:
     source: derived
     planning_authority: standing_hrm_contract

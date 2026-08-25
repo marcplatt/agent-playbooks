@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-ONBOARD-001
 title: Operator-Workspace Onboarding and Method Orientation
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: adaptive-read-only-orientation
@@ -40,7 +40,7 @@ modifiable.
 
 | Control level | Meaning | Examples |
 |---|---|---|
-| `workflow_invariant` | Required for conformance with this HRM method | Operator-owned meaning and protected action, complete-as-presently-knowable HRM maps, controlled HRM discovery, early S0-S2 escalation, semantic readiness, bounded change units, stable review access, separate rollout states, and evidence-safe cleanup. |
+| `workflow_invariant` | Required for conformance with this HRM method | Operator-owned meaning and protected action, complete-as-presently-knowable HRM maps, controlled HRM discovery, early S0-S2 escalation, semantic readiness, bounded change units, stable review access, source-read-only checker/merge control, separate rollout states, and evidence-safe cleanup. |
 | `governed_organization_choice` | Modifiable only through the organization's accepted authority and versioned decision process | Terminology, organizational roles, system boundaries, authoritative subjects, risk thresholds, review roles, providers, activation policy, and permitted deviations from a process version. |
 | `operator_workspace_preference` | Personalizable for the operator-workspace pair without changing organization meaning | Explanation depth, notification urgency, decision batching, review presentation, tool familiarity, model or tool preference, operator checkout, and interaction style. |
 
@@ -95,7 +95,12 @@ Existing preferences: {{existing_operator_preferences_or_none}}
 6. Explain that tasks, conversations, branches, worktrees, lanes, tests, previews, and agents
    are supporting mechanisms, not the operator-facing plan. Show how the stable current-review
    surface lets the operator find the active HRM, decisions, exact candidate, review artifact,
-   blockers, and next authorized action without hunting through worktrees.
+   blockers, and next authorized action without hunting through worktrees. Explain that one
+   dedicated source-read-only checker/merge controller may run explicitly scoped CI, merge
+   only eligible exact heads while holding the one repository-global writer lease, verify
+   remote main, and clean eligible worktrees while returning every semantic or authority
+   exception through the HRM orchestrator. Multiple repository queues may have controllers,
+   but they do not create multiple integration writers for the same remote and target ref.
 7. Audit lifecycle progress from available evidence. For each stage--business elicitation,
    organization operating model, system portfolio, process adoption, project system plan,
    requirements and scenarios, HRM map, decision frontier, implementation, integration, HRM
@@ -128,5 +133,7 @@ Completion authorizes no writes or external effects.
 
 ## Change note
 
+- **1.1 — 2026-08-25:** Adds the dedicated source-read-only checker/merge controller and
+  explicitly scoped CI to the fixed HRM workflow orientation.
 - **1.0 — 2026-08-25:** Initial organization-neutral operator-workspace onboarding,
   adaptive FAQ, lifecycle audit, foundation-gap handoff, and read-only personalization flow.

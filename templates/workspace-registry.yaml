@@ -1,5 +1,5 @@
 workspace_registry:
-  schema_version: agent_playbooks.workspace_registry.v1.1
+  schema_version: agent_playbooks.workspace_registry.v1.2
   project_repository: "{{project_repository}}"
   source_revision: null
   operator_desk:
@@ -21,6 +21,28 @@ workspace_registry:
     normal_pr_count_per_change_unit: 1
     one_integration_receipt_per_change_unit: true
     worktree_is_conditional: true
+  checker_merge_controller:
+    handoff: null
+    controller_task_id: null
+    repository_queue_id: null
+    source_read_only: true
+    writer_lease:
+      canonical_remote: null
+      target_ref: refs/heads/main
+      lease_id: null
+      epoch: null
+      holder_task_id: null
+      acquired_at: null
+      expires_at: null
+      predecessor_release_receipt: null
+      atomic_acquisition_evidence: []
+      read_back_verified: false
+      active: false
+      hosted_merge_queue_is_writer: false
+    cleanup_authority_reference: null
+    lifecycle_state: null
+    exception_classification: null
+    orchestrator_route: null
   worktrees:
     - path: "{{absolute_worktree_path}}"
       branch: null
@@ -39,6 +61,17 @@ workspace_registry:
       review_dependency: null
       cleanup_condition: null
       cleanup_action: null
+      cleanup_controller_receipt: null
+      cleanup_evidence:
+        cleanup_policy_sha: null
+        registered_identity_read_back: []
+        remote_incorporation_proof: []
+        tracked_untracked_ignored_nested_audit: []
+        process_and_lock_audit: []
+        review_and_unique_work_audit: []
+        exact_removal_action: null
+        registry_absent_read_back: false
+        filesystem_absent_read_back: false
   branches_without_worktrees: []
   unexplained_entries: []
   cleanup_receipts: []

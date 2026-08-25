@@ -56,6 +56,11 @@ Semantic read-back: `{{accepted_meaning_scope_exclusions_and_expiry}}`
 
 ## Validation evidence
 
+- Accepted CI scope: `targeted | affected | full`
+- CI-scope authority and basis: `{{reference_coverage_exclusions_freshness_and_policy}}`
+- CI evidence binding: `{{candidate_base_policy_claim_gate_set_check_definition_environment_and_expiry}}`
+- Checker/merge-controller receipt: `{{check_hosted_merge_main_cleanup_receipt}}`
+
 | Change or risk class | Exact head | Command or scenario | Result | Artifact |
 |---|---|---|---|---|
 | {{class}} | {{sha}} | {{check}} | {{result}} | {{artifact}} |

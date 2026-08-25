@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.3"
+version: "4.4"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -15,6 +15,7 @@ optional_inputs:
   - system_node_registry
   - milestone_session_contract
   - milestone_claim
+  - checker_merge_controller_handoff
   - published_lane_bundle
   - approved_lane_bundle
   - manual_lane_bundle
@@ -77,6 +78,9 @@ controls:
   - bounded-correction-loops
   - deterministic-integration
   - single-writer-integration
+  - dedicated-checker-merge-controller
+  - source-read-only-controller
+  - repository-global-writer-lease
   - early-classified-human-interruption
   - autonomous-contract-update-request-routing
   - quiet-lanes-noisy-hrm-stop
@@ -111,6 +115,11 @@ iteration phase inside the milestone session, not a sequence of acceptance candi
 or milestones. The session remains open through review and approved remediation until
 the operator explicitly closes or defers the target HRM.
 
+By default, the coordinator delegates frozen-candidate checks, hosted-gate observation,
+serialized merge, remote-main verification, and eligible cleanup to the Dedicated Checker
+and Merge Controller. The controller is a source-read-only Codex subagent and one integration
+writer, not a second HRM orchestrator or operator route.
+
 ## Inputs
 
 - **System or project:** `{{system_reference}}`
@@ -122,6 +131,7 @@ the operator explicitly closes or defers the target HRM.
 - **Milestone outcome:** `{{milestone_outcome}}`
 - **Milestone session contract:** `{{milestone_session_contract_or_discover}}`
 - **Milestone claim:** `{{milestone_claim_or_session_contract}}`
+- **Checker/merge-controller handoff:** `{{checker_merge_controller_handoff_or_create}}`
 - **Published lane bundle:** `{{published_lane_bundle_or_derive_from_session_contract}}`
 - **Legacy approved-lane bundle:** `{{approved_lane_bundle_or_none}}`
 - **Manual lane bundle:** `{{manual_lane_bundle_or_none}}`
@@ -173,6 +183,7 @@ Target HRM: {{target_hrm}}.
 Milestone outcome: {{milestone_outcome}}.
 Milestone session contract: {{milestone_session_contract_or_discover}}.
 Milestone claim: {{milestone_claim_or_session_contract}}.
+Checker/merge-controller handoff: {{checker_merge_controller_handoff_or_create}}.
 Published lane bundle: {{published_lane_bundle_or_derive_from_session_contract}}.
 Legacy approved-lane bundle: {{approved_lane_bundle_or_none}}.
 Manual lane bundle: {{manual_lane_bundle_or_none}}.
@@ -213,10 +224,16 @@ instead of silently selecting between conflicting instructions.
 
 AUTHORITY AND ROLES
 
-1. The coordinator or merge supervisor owns the milestone-session ledger, authority
-   classification, lane dependencies, worktrees, assignments, evidence, human gates,
-   correction decisions, integration order, cleanup, continuity, and report. A
-   deterministic merge controller, when configured, is the routine integration writer.
+1. The HRM coordinator owns the milestone-session ledger, authority classification, lane
+   dependencies, assignments, human gates, correction decisions, integration order,
+   continuity, and report. It delegates deterministic check and integration execution to
+   one Dedicated Checker and Merge Controller per repository queue.
+1a. The controller owns frozen-candidate checks, hosted-gate observation, merge readiness,
+    serialized exact-head merge, remote-main verification, declared integrated-head checks,
+    and eligible cleanup. It is source-read-only, never classifies HRM meaning or findings,
+    never asks the operator directly, and returns exceptions to the coordinator. Dedicated
+    queues may have controllers, but exactly one integration writer lease may survive for a
+    canonical remote and target ref across all queues and HRMs.
 2. The system-build playbook owns HRM definition, gap analysis, lane creation or
    rebaselining, contract-update requests, findings disposition, and the canonical
    milestone package. The lane coordinator executes only the published bundle and
@@ -239,6 +256,11 @@ AUTHORITY AND ROLES
 5. Keep full logs in the PR or an artifact. Require compact handoffs with target HRM,
    state, exact SHA, policy SHA, evidence, findings, unresolved decisions, exception
    class, cleanup disposition, and next authorized action.
+5a. Give the controller only the repository and policy identity, target HRM and milestone-
+    claim version, change-unit/lane identity, worktree/branch/PR, exact base and candidate
+    head, dependency order, declared candidate and integrated-head checks, required hosted
+    gates and approvals, merge mode/authority, cleanup policy, stop rules, and receipt target.
+    Do not pass the whole orchestrator conversation as integration authority.
 
 ESTABLISH THE MILESTONE SESSION
 
@@ -464,8 +486,9 @@ fine` and `the change is small` are not reasons to omit a relevant check.
   invalid input, unauthenticated/unauthorized, not-found/conflict, timeout, rate-limit,
   duplicate/replay, partial failure, and response serialization as applicable. Use fakes
   or mutation-disabled dry runs for provider calls, then require idempotency, reconcile-
-  before-retry, exact provider read-back, full-suite, and separately approved canary/
-  rollback gates before live effects.
+  before-retry, exact provider read-back, the accepted targeted/affected/full validation
+  budget, and separately approved canary/rollback gates before live effects. Shared or
+  unbounded reach triggers the repository-wide suite.
 - Documentation, schemas, examples, or contract mirrors: parse and schema validation,
   configured documentation lint/link checks, executable example or command smoke, and a
   repository search proving canonical and mirrored references agree. Documentation-only
@@ -542,44 +565,58 @@ RUN THE FASTEST SAFE FLOW
     - APPLICATION BEHAVIOR — form handling, routes, state transitions, persistence, or
       API contracts. Run focused tests during implementation; at freeze run the lane
       checker and the affected package suite, with one independent reviewer normally.
-    - CRITICAL INTEGRATION — QBO sends, GHL writes, identity, concurrency, authentication,
+    - CRITICAL INTEGRATION — provider sends or writes, identity, concurrency, authentication,
       or financial/customer effects. Run focused tests and mutation-disabled dry runs
-      during implementation; at freeze require the full suite, exact-head review,
-      provider readiness/read-back, and separately approved canary gates. Use at most
+      during implementation; at freeze require the accepted targeted, affected, or full
+      validation budget, exact-head review, provider readiness/read-back, and separately
+      approved canary gates. Use at most
       two independent reviewers.
     - RELEASE BUNDLE — several merged lanes approaching activation. It has no design-
-      iteration validation; run the full suite once against the integrated exact head.
+      iteration validation; run one combined regression against the integrated exact head
+      at the accepted `targeted`, `affected`, or `full` scope. The number of merged lanes
+      does not itself require full CI.
 
-20. Freeze one acceptance commit, verify its ownership boundary, run the applicable
-    checks plus every still-mandatory lane checker, push, and bind the PR body, human
-    acceptance, automated evidence, and required review to the candidate head SHA. The
+20. Freeze one acceptance commit, verify its ownership boundary, run the builder's focused
+    iteration checks, push, and bind the PR body and controller handoff to the candidate head
+    SHA. The dedicated controller then runs every declared frozen-candidate check and still-
+    mandatory lane checker against that exact head. The
     PR represents one published change unit and may contain multiple intention-revealing
     commits; it does not need to contain the entire HRM. A disposable discovery spike has
     no PR unless its retained evidence was published as a change unit. Publishing an
     operator packet and starting interaction do not wait for this integration gate.
-21. Run applicable CI and risk-scaled exact-head review concurrently. Blocking findings
+21. The controller observes applicable CI while risk-scaled exact-head review runs
+    concurrently. Blocking findings
     require a violated invariant plus a reproduction, failing test, or concrete contract
     mismatch. A presentation-only lane needs lightweight automated visual/accessibility
     evidence; operator acceptance occurs against the integrated HRM function/UI/UX
     journey, not as a separate lane-management gate.
-22. A repository-wide suite is required only when at least one of these is true:
+22. Record CI scope as `targeted`, `affected`, or `full`. A bounded canary or release may use
+    limited-scope CI when the frozen claim and safety shell are covered, the final diff and
+    dependency reach are bounded, exclusions and fresh unaffected evidence are explicit,
+    and repository policy permits it. The controller enforces this accepted scope and does
+    not promote it merely for reassurance. A repository-wide suite is required only when at
+    least one of these is true:
 
     - shared domain, contract, persistence, authentication, or provider code changed;
     - a public API, schema, state transition, or dependency changed;
     - the affected surface cannot be bounded confidently;
     - targeted checks reveal unexpected cross-component coupling;
-    - the approved lane checker explicitly requires it;
-    - the exact head is being prepared for a canary, deployment, or release; or
-    - several lighter-weight lanes are integrated for one combined regression run.
+    - the approved lane checker or binding repository/release policy explicitly requires it.
+
+    Several lighter-weight lanes still receive one combined affected regression run at the
+    integrated head. Promote that run to full only when one of the conditions above is met.
 
     CSS, static wording, layout, responsive spacing, and bounded control simplification
     do not independently trigger a full suite. Escalate immediately if targeted checks
-    show that a supposedly isolated UI change is coupled to deeper behavior.
+    show that a supposedly isolated change is coupled to deeper behavior. The controller
+    cannot invent limited scope, waive a hosted gate, or accept unknown reach; it returns
+    those conditions to the HRM orchestrator before merge.
 23. Deduplicate and reproduce findings, then send one correction batch. A new commit
-    makes the prior SHA no longer the exact head and invalidates evidence or approval
-    that claims that candidate or covers its changed surface; it does not erase reusable
-    contract facts or operator feedback from design iteration. Reclassify the new diff
-    and rerun only its applicable checks and reviews. A blocking exact-head review that
+    makes the prior SHA no longer the exact head and invalidates every controller gate-
+    satisfying exact-head check and approval; it does not erase reusable contract facts or
+    operator feedback from design iteration. The controller blocks for an orchestrator-issued
+    replacement handoff. The orchestrator reclassifies the new diff and identifies any
+    reusable non-gate evidence; the controller never makes that coverage judgment. A blocking exact-head review that
     reproduces a real defect and fails closed is a healthy implementation control, not by
     itself a planning failure; preserve the stop and separately return any contributing
     planning/decomposition weakness. Before expanding the lane, apply the milestone blocker
@@ -592,12 +629,20 @@ RUN THE FASTEST SAFE FLOW
 
 INTEGRATE AND VERIFY
 
-24. A PR is ELIGIBLE only when its current base, merge policy, lane contract, target-HRM
+24. Dispatch the versioned controller handoff when the candidate is frozen. A PR is ELIGIBLE
+    only when its current base, merge policy, lane contract, target-HRM
     coverage, dependencies, scope, mandatory exact-head checks, review policy, protected
     paths, current head SHA, and clean merge state all pass. `Ready for review` means
     implementation completeness, not business approval or milestone closure.
-25. Use exactly one integration writer: a hosted merge queue, deterministic expected-head
-    controller, or coordinator in manual mode. The merge call must bind the expected
+    Reject the controller handoff if any controller-phase check permits live mutation; record
+    that execution only in the AP-ROLLOUT real-execution matrix under action-time authority.
+25. Use the Dedicated Checker and Merge Controller as the sole integration writer unless a
+    hosted merge queue is itself the recorded writer. The HRM orchestrator supervises
+    exceptions and never races it. Direct controller mutations require one active, atomically
+    acquired writer lease for the canonical remote plus target ref across every HRM and queue,
+    with ID, epoch, holder, expiry, predecessor release, and read-back. Revalidate it before
+    every mutation. When the hosted merge queue is the writer, controllers remain
+    `observe_only` for integration mutations. The merge call must bind the expected
     head SHA and record checked base/head, policy version, CI run, review/audit evidence,
     merge identity, operator, and decision mode. A reasoning task supervises exceptions;
     it does not race the integration writer.
@@ -607,14 +652,24 @@ INTEGRATE AND VERIFY
     only when repository policy and standing merge authority allow them. Keep merge
     authority separate from business, milestone, canary, deployment, and production
     authority.
-27. If a branch is behind but clean, update and recheck it according to project policy.
-    Classify unresolved conditions as needs-human-ci, needs-human-conflict,
-    needs-human-governance, needs-human-evidence, or controller-stuck. Never weaken a
-    check, auto-resolve a content conflict, invent evidence, or merge under stale state.
-28. Before every serialized merge decision, fetch and re-read origin/main and verify the
+27. If a branch is behind but clean, the controller may update and recheck it only according
+    to explicit project policy and handoff authority. A base update that changes the
+    candidate head ends the current evidence binding; the controller returns `head_drift`
+    and waits for an orchestrator-issued replacement handoff before running gate-satisfying
+    checks or merging the successor head.
+    Record lifecycle separately from the canonical controller exception and orchestrator
+    route. Use `candidate_failed`, `infrastructure_blocked`, `policy_conflict`, `head_drift`,
+    `evidence_stale`, `authority_missing`, `queue_conflict`, `merge_result_unresolved`,
+    `cleanup_ambiguous`, or `controller_stuck` and the AP-INTEGRATE-001 routing table. Never
+    weaken a check, auto-resolve a content conflict, invent evidence, or merge under stale state.
+28. Before every serialized merge decision, the controller fetches and re-reads origin/main
+    and verifies the
     head and gates. Merge one dependency-ordered candidate, read back the remote merge
     and main SHA, wait for required post-merge CI, and record a compact handoff before
-    releasing the next. Reconcile any ambiguous mutation result before retrying.
+    releasing the next. Reconcile an ambiguous mutation to `confirmed_merged`,
+    `confirmed_not_merged`, or `unresolved` using original mutation identity and timestamped
+    hosting/main evidence. Retry only a confirmed non-merge with current lease, authority,
+    and head; an unresolved result blocks without retry.
 28a. Remote Git and hosting read-back are authoritative for integration identity. Do not
     open a new change unit or PR solely to record the merge of the immediately preceding
     documentation/governance unit. Reconcile its receipt through an append-only external
@@ -627,10 +682,13 @@ INTEGRATE AND VERIFY
 
 PREPARE AND REVIEW THE TARGET HRM
 
-29. Once the published bundle is integrated, validate the integrated exact head. For a
+29. Once the published bundle is integrated, the controller validates the integrated exact
+    head using only the declared integrated-release checks. For a
     bundle of lighter-weight lanes, run scoped lane checks and one combined regression
     suite at this boundary when the milestone contract or full-suite triggers require
-    it. Run the full suite again before any production canary or release.
+    it. Before a production canary or release, run the accepted validation scope against
+    the exact integrated head; run the full suite only when its triggers or binding policy
+    require it.
 30. Publish one milestone review package containing the project HRM map version, system
     and target HRM; milestone outcome and decisions requested; capabilities completed in
     operator language; exact
@@ -639,7 +697,7 @@ PREPARE AND REVIEW THE TARGET HRM
     affected standalone/local system-node readiness and deployment boundaries; limitations
     and blockers; external-mutation and activation posture; open input requirements and
     their dispositions; open/resolved/blocking contract-update requests;
-    cleanup/integration receipt; provisional downstream impact; explicit operator
+    controller check/merge/main/cleanup receipt; provisional downstream impact; explicit operator
     function/UI/UX acceptance fields; and the exact effect of closure. Move the session
     to REVIEW READY, make the stop noisy, and pause for the operator. A visible UI,
     completed lane list, or ended meeting is not function acceptance or HRM closure.
@@ -678,7 +736,7 @@ CLOSE AND RECONCILE WORKSPACES
     workers never implement in the operator checkout. Before `review_ready`, the index must
     name target HRM, map version, outcome, decisions, exact review SHA, preview, blockers,
     HRM discoveries, activation posture, and next action. After each lane's remote-main and
-    required post-merge checks are verified, inventory
+    required post-merge checks are verified, direct the controller to inventory
     this project only with `git worktree list --porcelain`. Resolve every path to an exact
     absolute path under the current repository's registered worktrees. Never scan, prune,
     switch, or delete a sibling repository or a broad parent directory. Move the lane to
@@ -729,7 +787,8 @@ SUPERVISE AND HAND OFF
     milestone/change records, and one milestone-session ledger, in that order. Task
     context is a cache, not the audit record. Remain quiet while routine integration is
     healthy; alert only for a classified exception, the prepared HRM, reserved authority,
-    or controller failure.
+    or controller failure. The controller reports only to the HRM orchestrator; it never
+    becomes a second operator notification route.
 43. Rotate a long-running supervisor at configured limits, defaulting to 20 merge
     decisions, 14 days, 3 exception investigations, policy-version change, context
     compaction, or inability to reconstruct state from live evidence. Reconcile live
@@ -757,7 +816,7 @@ MEASURE AND REPORT
 
 ```yaml
 milestone_session:
-  schema_version: agent_playbooks.hrm_session_ledger.v2.3
+  schema_version: agent_playbooks.hrm_session_ledger.v2.4
   id: "{{session_id}}"
   system_reference: "{{system_reference}}"
   hrm_map:
@@ -833,6 +892,8 @@ milestone_session:
     next_meaningful_operator_interaction: null
     time_to_next_meaningful_operator_interaction_seconds: null
     time_to_formal_hrm_review_seconds: null
+    checker_merge_controller_lifecycle_state: null
+    checker_merge_controller_exception: null
   published_lane_bundle: []
   legacy_approved_lane_bundle: []
   manual_lane_constraint: []
@@ -955,6 +1016,30 @@ milestone_session:
     rotate_after_decisions: 20
     rotate_after_days: 14
     rotate_after_exceptions: 3
+  checker_merge_controller:
+    playbook: AP-INTEGRATE-001
+    handoff: null
+    controller_task_id: null
+    repository_queue_id: null
+    source_read_only: true
+    writer_lease:
+      canonical_remote: null
+      target_ref: refs/heads/main
+      lease_id: null
+      epoch: null
+      holder_task_id: null
+      acquired_at: null
+      expires_at: null
+      predecessor_release_receipt: null
+      atomic_acquisition_evidence: []
+      read_back_verified: false
+      active: false
+      hosted_merge_queue_is_writer: false
+    lifecycle_state: "not_started|awaiting_candidate|checking|awaiting_hosted_gates|merge_ready|merging|verifying_main|cleaning|complete|blocked"
+    current_candidate_head: null
+    exception_classification: "none|candidate_failed|infrastructure_blocked|policy_conflict|head_drift|evidence_stale|authority_missing|queue_conflict|merge_result_unresolved|cleanup_ambiguous|controller_stuck"
+    orchestrator_route: "none|builder_correction|replacement_handoff|persistent_blocker|S1_before_work|S2_batched"
+    receipt: null
 
 lanes:
   - id: "{{lane_id}}"
@@ -974,7 +1059,24 @@ lanes:
     branch: null
     allowed_files: []
     checker: null
+    controller_handoff: null
+    controller_lifecycle_state: "not_started|awaiting_candidate|checking|awaiting_hosted_gates|merge_ready|merging|verifying_main|cleaning|complete|blocked"
+    controller_exception_classification: null
     test_plan:
+      validation_scope: "targeted|affected|full"
+      validation_scope_authority: null
+      validation_scope_authority_expires_at: null
+      limited_scope_basis:
+        milestone_claim_coverage: []
+        safety_shell_coverage: []
+        bounded_changed_surfaces: []
+        dependency_reach: []
+        excluded_checks_with_reason: []
+        fresh_unaffected_evidence_relied_on: []
+        repository_policy_compatible: false
+        unknown_reach_absent: false
+        required_hosted_gate_dispositions: []
+        full_suite_trigger_dispositions: []
       changed_surfaces: []
       affected_consumers: []
       changed_invariants: []
@@ -990,7 +1092,7 @@ lanes:
           command_or_scenario: "{{exact_command_or_scenario}}"
           expected_signal: "{{expected_result}}"
           artifact: "{{artifact_or_log}}"
-          mutation_safety: "none|fake|disposable_local|dry_run|approved_live"
+          mutation_safety: "none|fake|disposable_local|dry_run"
       not_applicable: []
       full_suite:
         required: false
@@ -1058,6 +1160,11 @@ milestone_cleanup:
 
 ## Change note
 
+- **4.4 — 2026-08-25:** Delegates frozen-candidate checks, hosted-gate observation,
+  serialized exact-head merge, remote-main verification, and eligible cleanup to one
+  source-read-only Codex checker/merge-controller subagent per repository queue, constrains
+  mutation with one repository-global writer lease, and lets the controller enforce explicitly
+  authorized targeted, affected, or full CI, including bounded canaries.
 - **4.3 — 2026-08-25:** Enforces the frozen milestone claim during execution, derives a
   validation budget from distinct seams and claim-breaking failure modes, adds a blocker
   test before scope expansion, records time to meaningful operator interaction, and routes

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.3"
+version: "2.4"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -25,6 +25,7 @@ optional_inputs:
   - primary_checkout
   - completion_mode
   - operating_profile
+  - checker_merge_controller_policy
   - manual_lane_constraint
 controls:
   - project-rules-first
@@ -56,6 +57,7 @@ controls:
   - claim-derived-test-budget
   - sequenced-obligation-no-silent-deferral
   - derived-lane-bundle
+  - dedicated-checker-merge-controller
   - autonomous-contract-update-request
   - approval-before-material-hrm-or-contract-meaning-change
   - canonical-lane-publication
@@ -134,6 +136,7 @@ an input record, contract request, discovery, planning amendment, deferral, or b
 - **Operator checkout:** `{{operator_checkout_or_primary_checkout_or_discover}}`
 - **Completion mode:** `{{completion_mode_or_false}}`
 - **Operating profile:** `{{operating_profile_or_one-human}}`
+- **Checker/merge-controller policy:** `{{checker_merge_controller_policy_or_default}}`
 - **Manual lane constraint:** `{{manual_lane_constraint_or_none}}`
 
 ## Quick-start example
@@ -198,6 +201,7 @@ Activation posture: {{activation_posture_or_safe_current_state}}.
 Operator checkout: {{operator_checkout_or_primary_checkout_or_discover}}.
 Completion mode: {{completion_mode_or_false}}.
 Operating profile: {{operating_profile_or_one-human}}.
+Checker/merge-controller policy: {{checker_merge_controller_policy_or_default}}.
 Manual lane constraint: {{manual_lane_constraint_or_none}}.
 
 The target HRM is the work session's controlling objective and must resolve from the
@@ -221,6 +225,13 @@ AUTHORITY AND ROLES
 3. The lane coordinator owns execution of the published bundle: lane readiness, exact
    tests, worktrees, assignments, reviews, deterministic integration, exact-head evidence,
    and cleanup. Lane workers cannot redefine the HRM or enlarge their lanes.
+3a. The lane coordinator delegates frozen-candidate checks, hosted-gate observation,
+    serialized merge, remote-main verification, and eligible cleanup to one source-read-only
+    checker/merge-controller subagent per repository queue. Only one controller may hold the
+    active writer lease for a canonical remote and target ref across all queues and HRMs; a
+    hosted merge queue acting as writer makes controllers observe-only. The controller cannot
+    edit the candidate, classify findings, change validation scope, or contact the operator
+    directly.
 4. The human operator owns unresolved product or authority decisions, prepared milestone
    function/UI/UX review and acceptance, closure or deferral, and action-time authority for provider/customer/money,
    canary, deployment, credentials, irreversible migration, or production effects.
@@ -469,8 +480,10 @@ DESIGN TEST COVERAGE BEFORE DECOMPOSITION
       invariants, all direct consumers, clean startup/build/install, and full suite.
     - Provider or external-write paths: success and applicable invalid/auth/conflict/
       timeout/rate-limit/replay/partial-failure paths using fakes or mutation-disabled dry
-      runs, followed by idempotency, reconcile-before-retry, exact read-back, full suite,
-      and separately authorized canary/rollback gates before live effects.
+      runs, followed by idempotency, reconcile-before-retry, exact read-back, the accepted
+      targeted/affected/full validation budget, and separately authorized canary/rollback
+      gates before live effects. Provider reach that is shared or cannot be bounded triggers
+      the full suite.
     - Documentation/configuration/contracts: parse/schema, links or configured lint,
       executable examples, canonical/mirror search, defaults, missing/malformed/conflicting
       values, safe-off behavior, secret/PII non-disclosure, and affected-mode startup.
@@ -479,16 +492,22 @@ DESIGN TEST COVERAGE BEFORE DECOMPOSITION
     the provisional validation class. Required check categories may be marked not
     applicable only with a bounded reason. A mandatory checker remains binding unless an
     explicit approved lane-doc amendment changes it.
-19. A repository-wide suite is required when shared domain, contract, persistence,
+19. Select `targeted`, `affected`, or `full` validation from the frozen milestone claim,
+    changed-surface reach, safety shell, dependency map, evidence freshness, and binding
+    repository/release policy. A canary, deployment, or release label does not alone require
+    a repository-wide suite. Limited-scope CI must name every covered scenario and invariant,
+    excluded check with reason, fresh unaffected evidence relied on, scope authority, and the
+    policy permitting it. Unknown reach fails closed. A repository-wide suite is required
+    when shared domain, contract, persistence,
     authentication, provider, public API, schema, state transition, dependency, or core
     structure changes; the affected surface cannot be bounded; targeted checks expose
-    unexpected coupling; a mandatory checker requires it; or the exact head is prepared
-    for canary, deployment, or release. A multi-lane lighter-weight bundle receives one
+    unexpected coupling; a mandatory checker requires it; or binding repository/release
+    policy requires it. A multi-lane lighter-weight bundle receives one
     combined regression run at the integrated milestone head. During iteration prefer
     focused checks; run the release-required full suite once on the frozen integrated head
     and rerun it only when that head changes or the evidence is invalidated. Run the full
-    suite again before production canary or release only when it is a new exact head or the
-    release gate requires fresh evidence. Isolated CSS, wording, spacing, layout, and
+    suite again before production canary or release only when the accepted validation budget
+    or binding release gate requires fresh evidence. Isolated CSS, wording, spacing, layout, and
     bounded control simplification do not independently trigger a full suite.
 
 PROVE THE END-TO-END INTENT CHEAPLY
@@ -527,8 +546,9 @@ DERIVE AND PUBLISH THE LANE BUNDLE
     affected contracts/tests/downstream HRMs, alternatives, safe default, and exact
     operator decision requested.
 23. Pass the published milestone-session contract and derived bundle to the HRM Bundle
-    Coordination Standard. Do not translate the session back into an operator-maintained
-    lane queue.
+    Coordination Standard, which creates the bounded Dedicated Checker and Merge Controller
+    handoff for frozen candidates. Do not translate the session back into an operator-
+    maintained lane queue or make the HRM orchestrator babysit routine checks and merges.
 
 RUN PREVIEWS AND THE FORMAL REVIEW
 
@@ -553,7 +573,7 @@ RUN PREVIEWS AND THE FORMAL REVIEW
     - open input requirements and their primary dispositions;
     - open, resolved, and blocking contract-update requests;
     - external-mutation count and boundary/read-back evidence;
-    - cleanup and integration receipt;
+    - checker/merge-controller validation, integration, remote-main, and cleanup receipt;
     - provisional downstream impact and rebaseline state;
     - explicit operator function/UI/UX acceptance fields; and
     - the exact authority or bundle released by closure.
@@ -624,7 +644,7 @@ CLOSE WITHOUT ACTIVATING
 
 ```yaml
 system_build_session:
-  schema_version: agent_playbooks.system_build_session.v2.3
+  schema_version: agent_playbooks.system_build_session.v2.4
   id: "{{stable_session_id}}"
   system_reference: "{{system_reference}}"
   project_root: "{{absolute_path}}"
@@ -686,6 +706,20 @@ system_build_session:
     seam_equivalence: []
     required_scenario_matrix: []
     human_observations_required: []
+    validation_budget:
+      scope: "targeted|affected|full"
+      scope_authority_reference: null
+      scope_authority_expires_at: null
+      limited_scope_basis:
+        bounded_changed_surfaces: []
+        dependency_reach: []
+        excluded_checks_with_reason: []
+        fresh_unaffected_evidence_relied_on: []
+        repository_policy_compatible: false
+        unknown_reach_absent: false
+        required_hosted_gate_dispositions: []
+        full_suite_trigger_dispositions: []
+      full_suite_triggers: []
     scale_perimeter: []
   status: "resolving|defining|bundle_derivation|executing|review_ready|in_review|remediation|awaiting_closure|closed|deferred|blocked"
   authority_envelope:
@@ -768,6 +802,15 @@ system_build_session:
       latest_safe_point: null
       promotion_trigger: null
       safe_posture_until_promoted: null
+  checker_merge_controller:
+    playbook: AP-INTEGRATE-001
+    policy: "dedicated_codex_subagent|equivalent_authenticated_repository_worker"
+    handoff_template: templates/checker-merge-controller-handoff.yaml
+    dedicated_controller_per_repository_queue: true
+    repository_global_writer_lease_per_remote_and_target_ref: true
+    hosted_merge_queue_writer_requires_controller_observe_only: true
+    source_read_only: true
+    controller_may_contact_operator: false
   lane_bundle:
     source: "derived|approved_existing|manual_constraint"
     planning_authority: "standing_hrm_contract|operator_approved_change|blocked"
@@ -884,6 +927,10 @@ system_build_session:
 
 ## Change note
 
+- **2.4 — 2026-08-25:** Delegates deterministic checking and integration to a source-read-only
+  checker/merge-controller subagent and makes targeted, affected, or full validation an
+  explicit milestone-claim decision, including bounded canary CI without automatic full-
+  suite promotion while failing closed on unknown reach or binding-policy conflicts.
 - **2.3 — 2026-08-25:** Freezes a vertically complete and horizontally bounded milestone
   claim before test design; adds proof-spine, safety-shell, scale-perimeter, owned-seam
   equivalence, cardinality and destination evidence; derives validation from claim-breaking

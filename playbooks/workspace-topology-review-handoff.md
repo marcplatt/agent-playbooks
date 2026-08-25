@@ -1,15 +1,15 @@
 ---
 playbook_id: AP-WORKSPACE-001
 title: Workspace Topology and Review Handoff
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: operator-readable-workspace-control
 human_readable: true
 machine_readable: true
 required_inputs: [project_repository, operator_checkout]
-optional_inputs: [current_hrm, published_change_units, cleanup_policy]
-controls: [task-is-not-change-unit, one-operator-desk, conditional-worktrees, evidence-safe-cleanup]
+optional_inputs: [current_hrm, published_change_units, checker_merge_controller_handoff, cleanup_policy]
+controls: [task-is-not-change-unit, one-operator-desk, conditional-worktrees, controller-owned-post-merge-cleanup, evidence-safe-cleanup]
 ---
 
 # Workspace Topology and Review Handoff
@@ -25,6 +25,8 @@ Use this playbook to keep fast-moving Git work subordinate to one stable operato
 - A worktree is optional and exists only for concurrency, active review runtime, or preservation.
 - One designated project checkout is the operator desk; workers never implement there.
 - One current-review index locates the HRM package, exact SHA, preview, decisions, and blockers.
+- One source-read-only checker/merge controller performs post-merge cleanup only after exact
+  integration and policy eligibility are read back; it never normalizes ambiguous state.
 
 ## Project-policy adoption text
 
@@ -46,6 +48,7 @@ Reconcile project workspace topology and prepare the operator review handoff.
 Project: {{project_repository}}
 Operator checkout: {{operator_checkout}}
 Current HRM: {{current_hrm_or_none}}
+Checker/merge-controller handoff: {{checker_merge_controller_handoff_or_none}}
 
 1. Read project policy and inventory this repository only: remote main, local branches,
    registered worktrees, PRs, processes, dirty state, untracked/ignored unique artifacts, and
@@ -62,8 +65,12 @@ Current HRM: {{current_hrm_or_none}}
    activation posture, and next authorized action. The operator never hunts for a worktree.
 6. Classify each worktree as active-current-HRM, retained-for-review, unique-unmerged-recovery,
    cleanup-eligible, or unexplained-blocker. Return unexplained entries before review handoff.
-7. After verified integration, remove a clean eligible worktree using repository-safe Git
-   operations and read back the result. Dirty, ambiguous, locked, review-dependent, or unique
+7. After verified integration, delegate cleanup to the checker/merge controller. Before
+   removal, bind the exact registered absolute path, branch, and head to the cleanup-policy
+   SHA and remote-incorporation proof; audit tracked, untracked, ignored, nested-repository,
+   process, lock, review-dependency, and unique-work state. Derive eligibility from those
+   results, execute the exact recorded removal action, then read back both registry and
+   filesystem absence. Dirty, ambiguous, locked, review-dependent, or unique
    work is retained with evidence and recovery action. Never force-delete or discard.
 8. Delete branches only under explicit repository policy after remote incorporation and unique-
    work proof. Cleanup need not wait for HRM closure. Finish with a workspace receipt.
@@ -71,6 +78,8 @@ Current HRM: {{current_hrm_or_none}}
 
 ## Change note
 
+- **1.2 — 2026-08-25:** Makes the source-read-only checker/merge controller responsible for
+  verified post-merge cleanup while preserving ambiguous, review-dependent, or unique state.
 - **1.1 — 2026-08-24:** Clarifies that one HRM may own multiple change units and that each
   change unit uses one branch, normally one PR, and one integration receipt.
 - **1.0 — 2026-08-24:** Initial operator-desk, workspace-registry, and conditional-worktree workflow.

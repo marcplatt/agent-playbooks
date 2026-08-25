@@ -1,5 +1,5 @@
 rollout_record:
-  schema_version: agent_playbooks.activation_production_record.v1.1
+  schema_version: agent_playbooks.activation_production_record.v1.2
   id: "{{rollout_record_id}}"
   system_reference: "{{system_reference}}"
   stage: "artifact_proof|deployment_readiness|deployment|activation_readiness|activation|canary|production_observation|autonomy_readiness"
@@ -28,6 +28,43 @@ rollout_record:
     environment: null
     configuration: null
     contract_versions: []
+  validation_readiness:
+    scope: "targeted|affected|full"
+    scope_authority_reference: null
+    binding:
+      exact_validated_repository_sha: null
+      exact_validated_artifact_digest: null
+      controller_receipt_id: null
+      policy_sha: null
+      bounded_changed_surfaces: []
+      dependency_reach: []
+      required_hosted_gates:
+        - id: null
+          disposition: "satisfied|not_applicable|blocking"
+          reason: null
+          policy_or_checker_reference: null
+          policy_sha: null
+          deciding_authority: null
+          controller_receipt_evidence: []
+          evidence: []
+      full_suite_triggers:
+        - id: null
+          disposition: "not_triggered|satisfied|blocking"
+          reason: null
+          policy_or_checker_reference: null
+          policy_sha: null
+          deciding_authority: null
+          controller_receipt_evidence: []
+          evidence: []
+      observed_at: null
+      expires_at: null
+      candidate_match_verified: false
+    milestone_claim_coverage: []
+    safety_shell_coverage: []
+    excluded_checks_with_reason: []
+    fresh_unaffected_evidence_relied_on: []
+    repository_policy_compatible: false
+    unknown_reach_absent: false
   entry_criteria: []
   evidence:
     observed_at: null

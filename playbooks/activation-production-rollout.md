@@ -1,15 +1,15 @@
 ---
 playbook_id: AP-ROLLOUT-001
 title: Activation, Canary, and Production Rollout
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: post-implementation-rollout
 human_readable: true
 machine_readable: true
 required_inputs: [accepted_hrm, rollout_target, action_time_authority]
-optional_inputs: [milestone_claim, deployment_plan, canary_plan, recovery_plan, observation_window]
-controls: [state-separation, exact-artifact, accepted-milestone-claim, scenario-matrix-canary, destination-observation, action-time-approval, read-back-reconciliation, rollback]
+optional_inputs: [milestone_claim, validation_scope, deployment_plan, canary_plan, recovery_plan, observation_window]
+controls: [state-separation, exact-artifact, accepted-milestone-claim, scoped-canary-validation, scenario-matrix-canary, destination-observation, action-time-approval, read-back-reconciliation, rollback]
 ---
 
 # Activation, Canary, and Production Rollout
@@ -32,13 +32,24 @@ Accepted HRM: {{accepted_hrm}}
 Rollout target: {{rollout_target}}
 Action-time authority: {{action_time_authority}}
 Milestone claim: {{milestone_claim_or_accepted_hrm_record}}
+Validation scope: {{validation_scope_or_accepted_milestone_budget}}
 
 1. Verify the accepted HRM, exact candidate SHA/artifact/manifest, target environment,
    configuration, dependencies, contract versions, owner, credential/permission state,
    data/privacy boundary, and evidence freshness. A producer build does not prove the actual
    promoted artifact or usable consumer contents. Resolve the accepted milestone-claim
    version and confirm its proof spine, safety shell, supported breadth, scenario matrix,
-   cardinality, exclusions, and evidence requirements match the rollout request.
+   cardinality, exclusions, and evidence requirements match the rollout request. Verify the
+   accepted `targeted`, `affected`, or `full` validation scope, coverage, exclusions,
+   freshness, authority, and policy compatibility. A canary label does not itself require
+   full CI; unknown reach or a binding full-suite gate remains blocking. Fail closed unless
+   the rollout candidate repository SHA and artifact digest exactly match the unexpired
+   validation-readiness binding, including policy SHA, bounded changed surfaces, dependency
+   reach, required hosted-gate dispositions, full-suite-trigger dispositions, and controller
+   receipt. Every `not_applicable` hosted gate or `not_triggered` full-suite trigger requires
+   a reason, binding policy/checker reference and SHA, deciding authority, and controller-
+   receipt evidence; an empty disposition is blocking. A stage label or later build cannot
+   inherit evidence from a different candidate.
 2. Identify the single requested stage. Reject composite `go live` authority that conflates
    deployment, activation, canary, production observation, and autonomy.
 3. Prepare stage-specific entry criteria, bounded effects, expected receipts, health signals,
@@ -71,6 +82,8 @@ Milestone claim: {{milestone_claim_or_accepted_hrm_record}}
 
 ## Change note
 
+- **1.2 — 2026-08-25:** Accepts explicitly authorized targeted, affected, or full canary
+  validation without treating the canary label itself as a full-suite trigger.
 - **1.1 — 2026-08-25:** Binds canaries to the accepted milestone claim and its distinct
   contract seams, cardinality, ordered effects, destination observation, and partial-failure
   resume rules without expanding horizontal scope during rollout.
