@@ -1,14 +1,27 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.1
+schema_version: agent_playbooks.hrm_execution_capsule.v0.2
 session_id: "{{stable_session_id}}"
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.1
+  kernel_version: 0.1.0-rc.2
   source_sha: "{{40_character_agent_playbooks_sha}}"
 system_reference: "{{system_reference}}"
 project_root: "{{absolute_project_root}}"
 repository_bases:
   - repository: "{{canonical_repository}}"
     base_sha: "{{40_character_base_sha}}"
+target_resolution:
+  source_path: "{{accepted_project_hrm_map_path}}"
+  source_version: "{{accepted_project_hrm_map_version}}"
+  source_status: accepted
+  current_target_hrm: "{{accepted_current_target_hrm}}"
+  method: derived_current
+  resolved_hrm_id: "{{resolved_target_hrm}}"
+  explicit_hrm_id: null
+session_lineage:
+  predecessor_session_id: null
+  capsule_sequence: 1
+  continuation_reason: initial
+  inherited_state_path: null
 hrm:
   id: "{{target_hrm}}"
   contract_path: "{{milestone_contract_path}}"
@@ -26,22 +39,47 @@ function_slice:
   non_goals: []
   allowed_paths: []
   proof_obligations: []
+workflow_lease:
+  objective: advance_to_next_human_gate
+  permitted_routine_actions:
+    - inspect_read_only
+    - manage_task_branch_worktree
+    - implement_frozen_slice
+    - commit_in_scope_changes
+    - publish_or_update_review_pr
+    - run_declared_checks
+    - correct_within_budget
+    - wait_for_declared_checks
+    - post_authorized_merge_readback
+  continue_across_in_scope_change_units: true
+  merge_policy: exact_head_operator_release
+  operator_gate_classes:
+    - business_meaning
+    - operator_function_review
+    - exact_head_merge_release
+    - live_effect_authority
+    - hrm_closure
 authority:
-  planning_changes: false
-  routine_code_integration: false
-  provider_writes: false
-  deployment: false
-  activation: false
-  canary: false
-  production_observation: false
-  autonomy: false
-phase: planned
-current_change_unit:
-  id: null
-  deliverable_type: null
-  writer: null
-  allowed_paths: []
-  candidate_sha: null
+  workflow:
+    inspect_read_only: true
+    manage_task_branch_worktree: true
+    implement_allowed_paths: true
+    commit_changes: true
+    publish_review_pr: true
+    bounded_ci_correction: true
+    run_declared_checks: true
+    wait_for_declared_checks: true
+    prepare_private_inputs: false
+    record_operational_evidence: false
+    post_authorized_merge_readback: true
+    merge_without_grant: false
+  operational:
+    provider_writes: false
+    deployment: false
+    activation: false
+    canary: false
+    production_observation: false
+    autonomy: false
 verification:
   profile: "light|standard|full"
   environment_id: "{{stable_verification_environment}}"
@@ -55,23 +93,18 @@ budgets:
   no_material_progress_minutes: 45
   max_ci_minutes: 30
   max_context_redundancy_ratio: 0.15
+  max_mechanical_operator_prompts_before_review_ready: 0
+  max_context_compactions_before_first_value: 0
+  max_inline_raw_log_bytes: 2000
+  max_state_artifact_echo_bytes: 1000
   context_bytes_by_role:
     orchestrator: 32000
     builder: 20000
     checker: 12000
     reviewer: 20000
     operator: 8000
-progress:
-  last_material_event_sequence: 0
-  last_material_progress_at: null
-  repository_state_hash: null
-  consecutive_nonruntime_units: 0
-  correction_rounds: 0
-terminal:
-  state: active
-  stop_reason: null
-  evidence: []
 metrics:
   event_log_path: "{{path_to_jsonl_event_log}}"
+  session_state_path: "{{path_to_derived_session_state}}"
   scorecard_path: "{{path_to_derived_scorecard}}"
   aftercare_window_days: 14

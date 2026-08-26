@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-authority-grant.schema.json",
+  "title": "HRM authority grant",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "grant_id",
+    "session_id",
+    "hrm_id",
+    "grant_type",
+    "issued_by",
+    "issued_at",
+    "expires_at",
+    "repository",
+    "candidate_sha",
+    "allowed_effects",
+    "conditions",
+    "one_time"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.hrm_authority_grant.v0.1"},
+    "grant_id": {"$ref": "#/$defs/nonempty"},
+    "session_id": {"$ref": "#/$defs/nonempty"},
+    "hrm_id": {"$ref": "#/$defs/nonempty"},
+    "grant_type": {
+      "enum": ["operator_function_acceptance", "merge_release", "live_effect_authority", "hrm_closure"]
+    },
+    "issued_by": {"$ref": "#/$defs/nonempty"},
+    "issued_at": {"$ref": "#/$defs/nonempty"},
+    "expires_at": {"type": ["string", "null"], "minLength": 1},
+    "repository": {"type": ["string", "null"], "minLength": 1},
+    "candidate_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "allowed_effects": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "operator_function_acceptance",
+          "merge_exact_head",
+          "provider_write",
+          "deployment",
+          "activation",
+          "canary_execution",
+          "production_observation",
+          "autonomy",
+          "hrm_closure"
+        ]
+      }
+    },
+    "conditions": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}},
+    "one_time": {"const": true}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1}
+  }
+}

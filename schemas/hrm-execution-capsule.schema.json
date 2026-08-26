@@ -11,24 +11,23 @@
     "system_reference",
     "project_root",
     "repository_bases",
+    "target_resolution",
+    "session_lineage",
     "hrm",
     "experiment_profile",
     "execution_mode",
     "deliverable_type",
     "function_slice",
+    "workflow_lease",
     "authority",
-    "phase",
-    "current_change_unit",
     "verification",
     "reference_requests",
     "budgets",
-    "progress",
-    "terminal",
     "metrics"
   ],
   "properties": {
     "schema_version": {
-      "const": "agent_playbooks.hrm_execution_capsule.v0.1"
+      "const": "agent_playbooks.hrm_execution_capsule.v0.2"
     },
     "session_id": {
       "type": "string",
@@ -40,7 +39,7 @@
       "required": ["kernel_id", "kernel_version", "source_sha"],
       "properties": {
         "kernel_id": {"const": "AP-EXEC-001"},
-        "kernel_version": {"const": "0.1.0-rc.1"},
+        "kernel_version": {"const": "0.1.0-rc.2"},
         "source_sha": {"$ref": "#/$defs/sha"}
       }
     },
@@ -57,6 +56,48 @@
           "repository": {"$ref": "#/$defs/nonempty"},
           "base_sha": {"$ref": "#/$defs/sha"}
         }
+      }
+    },
+    "target_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_path",
+        "source_version",
+        "source_status",
+        "current_target_hrm",
+        "method",
+        "resolved_hrm_id",
+        "explicit_hrm_id"
+      ],
+      "properties": {
+        "source_path": {"$ref": "#/$defs/nonempty"},
+        "source_version": {"$ref": "#/$defs/nonempty"},
+        "source_status": {"const": "accepted"},
+        "current_target_hrm": {"$ref": "#/$defs/nonempty"},
+        "method": {"enum": ["derived_current", "explicit_exact_override"]},
+        "resolved_hrm_id": {"$ref": "#/$defs/nonempty"},
+        "explicit_hrm_id": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "session_lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["predecessor_session_id", "capsule_sequence", "continuation_reason", "inherited_state_path"],
+      "properties": {
+        "predecessor_session_id": {"type": ["string", "null"], "minLength": 1},
+        "capsule_sequence": {"type": "integer", "minimum": 1},
+        "continuation_reason": {
+          "enum": [
+            "initial",
+            "playbook_changed",
+            "target_changed",
+            "contract_changed",
+            "function_slice_changed",
+            "execution_mode_changed"
+          ]
+        },
+        "inherited_state_path": {"type": ["string", "null"], "minLength": 1}
       }
     },
     "hrm": {
@@ -108,58 +149,115 @@
         "proof_obligations": {"$ref": "#/$defs/nonempty_string_array"}
       }
     },
-    "authority": {
+    "workflow_lease": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "planning_changes",
-        "routine_code_integration",
-        "provider_writes",
-        "deployment",
-        "activation",
-        "canary",
-        "production_observation",
-        "autonomy"
+        "objective",
+        "permitted_routine_actions",
+        "continue_across_in_scope_change_units",
+        "merge_policy",
+        "operator_gate_classes"
       ],
       "properties": {
-        "planning_changes": {"type": "boolean"},
-        "routine_code_integration": {"type": "boolean"},
-        "provider_writes": {"type": "boolean"},
-        "deployment": {"type": "boolean"},
-        "activation": {"type": "boolean"},
-        "canary": {"type": "boolean"},
-        "production_observation": {"type": "boolean"},
-        "autonomy": {"type": "boolean"}
+        "objective": {"const": "advance_to_next_human_gate"},
+        "permitted_routine_actions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "inspect_read_only",
+              "manage_task_branch_worktree",
+              "implement_frozen_slice",
+              "commit_in_scope_changes",
+              "publish_or_update_review_pr",
+              "run_declared_checks",
+              "correct_within_budget",
+              "wait_for_declared_checks",
+              "prepare_private_inputs",
+              "record_operational_evidence",
+              "post_authorized_merge_readback"
+            ]
+          }
+        },
+        "continue_across_in_scope_change_units": {"const": true},
+        "merge_policy": {
+          "enum": ["exact_head_operator_release", "repository_preauthorized_exact_head", "never"]
+        },
+        "operator_gate_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "business_meaning",
+              "operator_function_review",
+              "exact_head_merge_release",
+              "live_effect_authority",
+              "hrm_closure"
+            ]
+          }
+        }
       }
     },
-    "phase": {
-      "enum": [
-        "planned",
-        "semantic_readiness",
-        "ready",
-        "building",
-        "observing",
-        "candidate_frozen",
-        "checking",
-        "review_ready",
-        "closed",
-        "deferred",
-        "blocked"
-      ]
-    },
-    "current_change_unit": {
+    "authority": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "deliverable_type", "writer", "allowed_paths", "candidate_sha"],
+      "required": ["workflow", "operational"],
       "properties": {
-        "id": {"type": ["string", "null"]},
-        "deliverable_type": {
-          "type": ["string", "null"],
-          "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract", null]
+        "workflow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inspect_read_only",
+            "manage_task_branch_worktree",
+            "implement_allowed_paths",
+            "commit_changes",
+            "publish_review_pr",
+            "bounded_ci_correction",
+            "run_declared_checks",
+            "wait_for_declared_checks",
+            "prepare_private_inputs",
+            "record_operational_evidence",
+            "post_authorized_merge_readback",
+            "merge_without_grant"
+          ],
+          "properties": {
+            "inspect_read_only": {"type": "boolean"},
+            "manage_task_branch_worktree": {"type": "boolean"},
+            "implement_allowed_paths": {"type": "boolean"},
+            "commit_changes": {"type": "boolean"},
+            "publish_review_pr": {"type": "boolean"},
+            "bounded_ci_correction": {"type": "boolean"},
+            "run_declared_checks": {"type": "boolean"},
+            "wait_for_declared_checks": {"type": "boolean"},
+            "prepare_private_inputs": {"type": "boolean"},
+            "record_operational_evidence": {"type": "boolean"},
+            "post_authorized_merge_readback": {"type": "boolean"},
+            "merge_without_grant": {"const": false}
+          }
         },
-        "writer": {"type": ["string", "null"]},
-        "allowed_paths": {"$ref": "#/$defs/string_array"},
-        "candidate_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+        "operational": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_writes",
+            "deployment",
+            "activation",
+            "canary",
+            "production_observation",
+            "autonomy"
+          ],
+          "properties": {
+            "provider_writes": {"type": "boolean"},
+            "deployment": {"type": "boolean"},
+            "activation": {"type": "boolean"},
+            "canary": {"type": "boolean"},
+            "production_observation": {"type": "boolean"},
+            "autonomy": {"type": "boolean"}
+          }
+        }
       }
     },
     "verification": {
@@ -208,6 +306,10 @@
         "no_material_progress_minutes",
         "max_ci_minutes",
         "max_context_redundancy_ratio",
+        "max_mechanical_operator_prompts_before_review_ready",
+        "max_context_compactions_before_first_value",
+        "max_inline_raw_log_bytes",
+        "max_state_artifact_echo_bytes",
         "context_bytes_by_role"
       ],
       "properties": {
@@ -216,6 +318,10 @@
         "no_material_progress_minutes": {"type": "integer", "minimum": 1},
         "max_ci_minutes": {"type": "integer", "minimum": 0},
         "max_context_redundancy_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_mechanical_operator_prompts_before_review_ready": {"type": "integer", "minimum": 0},
+        "max_context_compactions_before_first_value": {"type": "integer", "minimum": 0},
+        "max_inline_raw_log_bytes": {"type": "integer", "minimum": 0},
+        "max_state_artifact_echo_bytes": {"type": "integer", "minimum": 0},
         "context_bytes_by_role": {
           "type": "object",
           "additionalProperties": false,
@@ -230,54 +336,13 @@
         }
       }
     },
-    "progress": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "last_material_event_sequence",
-        "last_material_progress_at",
-        "repository_state_hash",
-        "consecutive_nonruntime_units",
-        "correction_rounds"
-      ],
-      "properties": {
-        "last_material_event_sequence": {"type": "integer", "minimum": 0},
-        "last_material_progress_at": {"type": ["string", "null"]},
-        "repository_state_hash": {"type": ["string", "null"]},
-        "consecutive_nonruntime_units": {"type": "integer", "minimum": 0},
-        "correction_rounds": {"type": "integer", "minimum": 0}
-      }
-    },
-    "terminal": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["state", "stop_reason", "evidence"],
-      "properties": {
-        "state": {"enum": ["active", "closed", "deferred", "blocked"]},
-        "stop_reason": {
-          "type": ["string", "null"],
-          "enum": [
-            "done_verified",
-            "review_ready",
-            "blocked_input",
-            "blocked_external",
-            "scope_divergence",
-            "governance_loop",
-            "no_progress",
-            "budget_exhausted",
-            "superseded",
-            null
-          ]
-        },
-        "evidence": {"$ref": "#/$defs/string_array"}
-      }
-    },
     "metrics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_log_path", "scorecard_path", "aftercare_window_days"],
+      "required": ["event_log_path", "session_state_path", "scorecard_path", "aftercare_window_days"],
       "properties": {
         "event_log_path": {"$ref": "#/$defs/nonempty"},
+        "session_state_path": {"$ref": "#/$defs/nonempty"},
         "scorecard_path": {"$ref": "#/$defs/nonempty"},
         "aftercare_window_days": {"type": "integer", "minimum": 0}
       }

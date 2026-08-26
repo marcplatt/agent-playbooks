@@ -1,0 +1,14 @@
+schema_version: agent_playbooks.hrm_authority_grant.v0.1
+grant_id: GRANT-EXAMPLE-MERGE-001
+session_id: MS-EXAMPLE-2026-08-25-HRM-2
+hrm_id: HRM-2
+grant_type: merge_release
+issued_by: Example Operator
+issued_at: "2026-08-25T00:44:00Z"
+expires_at: null
+repository: example/project
+candidate_sha: "3333333333333333333333333333333333333333"
+allowed_effects: [merge_exact_head]
+conditions:
+  - Hosted head and declared checks still match the reviewed candidate.
+one_time: true
