@@ -1,14 +1,27 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.1
+schema_version: agent_playbooks.hrm_execution_capsule.v0.2
 session_id: MS-EXAMPLE-2026-08-25-HRM-2
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.1
+  kernel_version: 0.1.0-rc.2
   source_sha: "1111111111111111111111111111111111111111"
 system_reference: SYS-EXAMPLE-001
 project_root: /example/project
 repository_bases:
   - repository: example/project
     base_sha: "2222222222222222222222222222222222222222"
+target_resolution:
+  source_path: docs/planning/project-hrm-map.yaml
+  source_version: 1.0.0
+  source_status: accepted
+  current_target_hrm: HRM-2
+  method: derived_current
+  resolved_hrm_id: HRM-2
+  explicit_hrm_id: null
+session_lineage:
+  predecessor_session_id: null
+  capsule_sequence: 1
+  continuation_reason: initial
+  inherited_state_path: null
 hrm:
   id: HRM-2
   contract_path: docs/milestones/HRM-2.md
@@ -26,22 +39,47 @@ function_slice:
   non_goals: [provider_write, deployment, production_activation]
   allowed_paths: [src/example/**, tests/example/**]
   proof_obligations: [stable_identity, safe_validation_failure, restart_recovery]
+workflow_lease:
+  objective: advance_to_next_human_gate
+  permitted_routine_actions:
+    - inspect_read_only
+    - manage_task_branch_worktree
+    - implement_frozen_slice
+    - commit_in_scope_changes
+    - publish_or_update_review_pr
+    - run_declared_checks
+    - correct_within_budget
+    - wait_for_declared_checks
+    - post_authorized_merge_readback
+  continue_across_in_scope_change_units: true
+  merge_policy: exact_head_operator_release
+  operator_gate_classes:
+    - business_meaning
+    - operator_function_review
+    - exact_head_merge_release
+    - live_effect_authority
+    - hrm_closure
 authority:
-  planning_changes: true
-  routine_code_integration: true
-  provider_writes: false
-  deployment: false
-  activation: false
-  canary: false
-  production_observation: false
-  autonomy: false
-phase: closed
-current_change_unit:
-  id: CU-EX-02
-  deliverable_type: runtime_change
-  writer: builder-example
-  allowed_paths: [src/example/**, tests/example/**]
-  candidate_sha: "3333333333333333333333333333333333333333"
+  workflow:
+    inspect_read_only: true
+    manage_task_branch_worktree: true
+    implement_allowed_paths: true
+    commit_changes: true
+    publish_review_pr: true
+    bounded_ci_correction: true
+    run_declared_checks: true
+    wait_for_declared_checks: true
+    prepare_private_inputs: false
+    record_operational_evidence: false
+    post_authorized_merge_readback: true
+    merge_without_grant: false
+  operational:
+    provider_writes: false
+    deployment: false
+    activation: false
+    canary: false
+    production_observation: false
+    autonomy: false
 verification:
   profile: standard
   environment_id: local:ruby-2.6.10
@@ -55,23 +93,18 @@ budgets:
   no_material_progress_minutes: 45
   max_ci_minutes: 30
   max_context_redundancy_ratio: 0.15
+  max_mechanical_operator_prompts_before_review_ready: 0
+  max_context_compactions_before_first_value: 0
+  max_inline_raw_log_bytes: 2000
+  max_state_artifact_echo_bytes: 1000
   context_bytes_by_role:
     orchestrator: 32000
     builder: 20000
     checker: 12000
     reviewer: 20000
     operator: 8000
-progress:
-  last_material_event_sequence: 14
-  last_material_progress_at: "2026-08-25T00:45:00Z"
-  repository_state_hash: "3333333333333333333333333333333333333333"
-  consecutive_nonruntime_units: 0
-  correction_rounds: 0
-terminal:
-  state: closed
-  stop_reason: done_verified
-  evidence: [ACC-EX-01, "candidate:3333333333333333333333333333333333333333"]
 metrics:
   event_log_path: examples/hrm-run-events.example.jsonl
+  session_state_path: examples/hrm-session-state.example.yaml
   scorecard_path: examples/hrm-run-scorecard.example.yaml
   aftercare_window_days: 14

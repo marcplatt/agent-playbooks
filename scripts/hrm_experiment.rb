@@ -2,12 +2,71 @@
 # frozen_string_literal: true
 
 require "date"
+require "digest"
 require "json"
 require "time"
 require "yaml"
 
 module HrmExperiment
   class ValidationError < StandardError; end
+
+  STANDARD_OPERATOR_GATES = %w[
+    business_meaning
+    operator_function_review
+    exact_head_merge_release
+    live_effect_authority
+    hrm_closure
+  ].freeze
+
+  RUNTIME_BUILD_ACTIONS = %w[
+    inspect_read_only
+    manage_task_branch_worktree
+    implement_frozen_slice
+    commit_in_scope_changes
+    publish_or_update_review_pr
+    run_declared_checks
+    correct_within_budget
+    wait_for_declared_checks
+    post_authorized_merge_readback
+  ].freeze
+
+  PRODUCTION_OBSERVATION_ACTIONS = %w[
+    inspect_read_only
+    prepare_private_inputs
+    run_declared_checks
+    wait_for_declared_checks
+    record_operational_evidence
+  ].freeze
+
+  RUNTIME_WORKFLOW_AUTHORITY = {
+    "inspect_read_only" => true,
+    "manage_task_branch_worktree" => true,
+    "implement_allowed_paths" => true,
+    "commit_changes" => true,
+    "publish_review_pr" => true,
+    "bounded_ci_correction" => true,
+    "run_declared_checks" => true,
+    "wait_for_declared_checks" => true,
+    "prepare_private_inputs" => false,
+    "record_operational_evidence" => false,
+    "post_authorized_merge_readback" => true,
+    "merge_without_grant" => false
+  }.freeze
+
+  PRODUCTION_WORKFLOW_AUTHORITY = {
+    "inspect_read_only" => true,
+    "manage_task_branch_worktree" => false,
+    "implement_allowed_paths" => false,
+    "commit_changes" => false,
+    "publish_review_pr" => false,
+    "bounded_ci_correction" => false,
+    "run_declared_checks" => true,
+    "wait_for_declared_checks" => true,
+    "prepare_private_inputs" => true,
+    "record_operational_evidence" => true,
+    "post_authorized_merge_readback" => false,
+    "merge_without_grant" => false
+  }.freeze
 
   PROFILE_CONTRACTS = {
     "runtime_build_fast_feedback" => {
@@ -19,8 +78,15 @@ module HrmExperiment
         "max_correction_rounds" => 2,
         "no_material_progress_minutes" => 45,
         "max_ci_minutes" => 30,
-        "max_context_redundancy_ratio" => 0.15
-      }
+        "max_context_redundancy_ratio" => 0.15,
+        "max_mechanical_operator_prompts_before_review_ready" => 0,
+        "max_context_compactions_before_first_value" => 0,
+        "max_inline_raw_log_bytes" => 2000,
+        "max_state_artifact_echo_bytes" => 1000
+      },
+      "routine_actions" => RUNTIME_BUILD_ACTIONS,
+      "workflow_authority" => RUNTIME_WORKFLOW_AUTHORITY,
+      "aftercare_window_days" => 14
     },
     "production_observation_fail_closed" => {
       "execution_mode" => "production_observation",
@@ -31,8 +97,15 @@ module HrmExperiment
         "max_correction_rounds" => 1,
         "no_material_progress_minutes" => 30,
         "max_ci_minutes" => 20,
-        "max_context_redundancy_ratio" => 0.10
-      }
+        "max_context_redundancy_ratio" => 0.10,
+        "max_mechanical_operator_prompts_before_review_ready" => 0,
+        "max_context_compactions_before_first_value" => 0,
+        "max_inline_raw_log_bytes" => 2000,
+        "max_state_artifact_echo_bytes" => 1000
+      },
+      "routine_actions" => PRODUCTION_OBSERVATION_ACTIONS,
+      "workflow_authority" => PRODUCTION_WORKFLOW_AUTHORITY,
+      "aftercare_window_days" => 14
     }
   }.freeze
 
@@ -195,8 +268,80 @@ module HrmExperiment
     SchemaValidator.new(load_json(schema_path(name)))
   end
 
+  def canonical_value(value)
+    case value
+    when Hash
+      value.keys.sort.each_with_object({}) { |key, memo| memo[key] = canonical_value(value[key]) }
+    when Array
+      value.map { |item| canonical_value(item) }
+    else
+      value
+    end
+  end
+
+  def object_sha256(value)
+    Digest::SHA256.hexdigest(JSON.generate(canonical_value(value)))
+  end
+
   def validate_capsule!(capsule)
     validator("hrm-execution-capsule.schema.json").validate!(capsule)
+
+    resolution = capsule.fetch("target_resolution")
+    resolved_hrm = resolution.fetch("resolved_hrm_id")
+    target_errors = []
+    target_errors << "resolved_hrm_id must equal hrm.id" unless resolved_hrm == capsule.dig("hrm", "id")
+    if resolution["method"] == "derived_current"
+      target_errors << "derived_current must resolve current_target_hrm" unless resolved_hrm == resolution["current_target_hrm"]
+      target_errors << "derived_current cannot carry explicit_hrm_id" unless resolution["explicit_hrm_id"].nil?
+    else
+      target_errors << "explicit_exact_override must carry the exact resolved HRM ID" unless resolution["explicit_hrm_id"] == resolved_hrm
+      target_errors << "current HRM must use derived_current, not an override" if resolved_hrm == resolution["current_target_hrm"]
+    end
+    raise ValidationError, "target resolution invalid: #{target_errors.join(', ')}" unless target_errors.empty?
+
+    lineage = capsule.fetch("session_lineage")
+    lineage_errors = []
+    if lineage["continuation_reason"] == "initial"
+      lineage_errors << "initial capsule_sequence must be 1" unless lineage["capsule_sequence"] == 1
+      lineage_errors << "initial session cannot have a predecessor" unless lineage["predecessor_session_id"].nil?
+      lineage_errors << "initial session cannot inherit state" unless lineage["inherited_state_path"].nil?
+    else
+      lineage_errors << "continuation capsule_sequence must be greater than 1" unless lineage["capsule_sequence"] > 1
+      lineage_errors << "continuation requires predecessor_session_id" if lineage["predecessor_session_id"].nil?
+      lineage_errors << "continuation requires inherited_state_path" if lineage["inherited_state_path"].nil?
+    end
+    raise ValidationError, "session lineage invalid: #{lineage_errors.join(', ')}" unless lineage_errors.empty?
+
+    unless capsule.dig("function_slice", "accepted_scenarios") == capsule.dig("hrm", "accepted_scenarios")
+      raise ValidationError, "function_slice.accepted_scenarios must equal hrm.accepted_scenarios"
+    end
+
+    lease = capsule.fetch("workflow_lease")
+    unless lease["operator_gate_classes"].sort == STANDARD_OPERATOR_GATES.sort
+      raise ValidationError, "workflow_lease.operator_gate_classes must equal the five genuine human gates"
+    end
+
+    action_authority = {
+      "inspect_read_only" => "inspect_read_only",
+      "manage_task_branch_worktree" => "manage_task_branch_worktree",
+      "implement_frozen_slice" => "implement_allowed_paths",
+      "commit_in_scope_changes" => "commit_changes",
+      "publish_or_update_review_pr" => "publish_review_pr",
+      "run_declared_checks" => "run_declared_checks",
+      "correct_within_budget" => "bounded_ci_correction",
+      "wait_for_declared_checks" => "wait_for_declared_checks",
+      "prepare_private_inputs" => "prepare_private_inputs",
+      "record_operational_evidence" => "record_operational_evidence",
+      "post_authorized_merge_readback" => "post_authorized_merge_readback"
+    }
+    unauthorized_routine_actions = lease["permitted_routine_actions"].map do |action|
+      authority_key = action_authority[action]
+      action if authority_key && !capsule.dig("authority", "workflow", authority_key)
+    end.compact
+    unless unauthorized_routine_actions.empty?
+      raise ValidationError, "workflow lease exceeds workflow authority: #{unauthorized_routine_actions.join(', ')}"
+    end
+
     profile = capsule["experiment_profile"]
     contract = PROFILE_CONTRACTS[profile]
     return true unless contract
@@ -208,6 +353,11 @@ module HrmExperiment
     contract["budgets"].each do |key, expected|
       mismatches << "budgets.#{key}" unless capsule.dig("budgets", key) == expected
     end
+    mismatches << "workflow_lease.permitted_routine_actions" unless lease["permitted_routine_actions"].sort == contract["routine_actions"].sort
+    mismatches << "authority.workflow" unless capsule.dig("authority", "workflow") == contract["workflow_authority"]
+    operational_authority = capsule.dig("authority", "operational")
+    mismatches << "authority.operational" unless operational_authority.values.none?
+    mismatches << "metrics.aftercare_window_days" unless capsule.dig("metrics", "aftercare_window_days") == contract["aftercare_window_days"]
     mismatches << "verification.ci_plan_hash" if capsule.dig("verification", "ci_plan_hash").nil?
     mismatches << "verification.exact_checks" if capsule.dig("verification", "exact_checks").empty?
     unless mismatches.empty?
@@ -223,6 +373,33 @@ module HrmExperiment
     events.each_with_index do |event, index|
       event_validator.validate!(event)
       Time.iso8601(event.fetch("occurred_at"))
+      details = event.fetch("details", {})
+      case event["event_type"]
+      when "decision_requested"
+        missing = %w[decision_id decision_kind exact_effect].reject { |key| details.key?(key) }
+        raise ValidationError, "decision_requested missing #{missing.join(', ')}" unless missing.empty?
+      when "decision_received"
+        missing = %w[decision_id decision_kind exact_effect].reject { |key| details.key?(key) }
+        raise ValidationError, "decision_received missing #{missing.join(', ')}" unless missing.empty?
+      when "authority_granted", "authority_consumed"
+        missing = %w[grant_id decision_kind exact_effect].reject { |key| details.key?(key) }
+        raise ValidationError, "#{event['event_type']} missing #{missing.join(', ')}" unless missing.empty?
+        if details["decision_kind"] == "routine_workflow"
+          raise ValidationError, "routine workflow cannot require an authority grant"
+        end
+      when "check_completed"
+        if event.dig("check", "conclusive")
+          check = event.fetch("check")
+          missing = %w[summary raw_artifact_path raw_artifact_sha256 raw_artifact_bytes].reject { |key| check.key?(key) }
+          raise ValidationError, "conclusive check missing #{missing.join(', ')}" unless missing.empty?
+          if check["raw_artifact_bytes"].positive? && (check["raw_artifact_path"].nil? || check["raw_artifact_sha256"].nil?)
+            raise ValidationError, "conclusive check raw artifact requires path and digest"
+          end
+        end
+      when "integration_read_back"
+        raise ValidationError, "integration_read_back requires candidate_sha" if event["candidate_sha"].nil?
+        raise ValidationError, "integration_read_back requires integration_verified" unless details["integration_verified"] == true
+      end
     rescue ArgumentError => e
       raise ValidationError, "event #{index + 1}: invalid occurred_at: #{e.message}"
     rescue ValidationError => e
@@ -235,6 +412,162 @@ module HrmExperiment
     validator("hrm-run-scorecard.schema.json").validate!(scorecard)
   end
 
+  def validate_session_state!(state)
+    validator("hrm-session-state.schema.json").validate!(state)
+    expected_hash = object_sha256(state.reject { |key, _value| key == "state_hash" })
+    raise ValidationError, "session state hash mismatch" unless state["state_hash"] == expected_hash
+
+    true
+  end
+
+  def derive_session_state(capsule, events)
+    validate_capsule!(capsule)
+    validate_events!(events)
+    events.each do |event|
+      raise ValidationError, "session state event session_id mismatch" unless event["session_id"] == capsule["session_id"]
+      raise ValidationError, "session state event hrm_id mismatch" unless event["hrm_id"] == capsule.dig("hrm", "id")
+    end
+
+    phase = "planned"
+    events.each do |event|
+      case event["event_type"]
+      when "semantic_readiness_requested"
+        phase = "semantic_readiness"
+      when "semantic_ready", "integration_read_back"
+        phase = "ready"
+      when "change_unit_started", "first_value_artifact"
+        phase = capsule["execution_mode"] == "production_observation" ? "observing" : "building"
+      when "candidate_frozen"
+        phase = "candidate_frozen"
+      when "check_started", "check_completed"
+        phase = "checking"
+      when "review_ready", "operator_review_started", "operator_review_completed"
+        phase = "review_ready"
+      when "hrm_closed"
+        phase = event.dig("details", "closure_decision")
+      when "stop_reason"
+        stop_reason = event.dig("details", "stop_reason")
+        phase = "review_ready" if stop_reason == "review_ready"
+        phase = "ready" if stop_reason == "done_verified"
+        phase = "blocked" if %w[blocked_input blocked_external scope_divergence governance_loop no_progress budget_exhausted superseded].include?(stop_reason)
+      end
+    end
+
+    last_change_event = events.reverse.find { |event| event["change_unit_id"] }
+    change_unit_id = last_change_event && last_change_event["change_unit_id"]
+    change_unit_start = events.reverse.find do |event|
+      event["event_type"] == "change_unit_started" && event["change_unit_id"] == change_unit_id
+    end
+    last_candidate = events.reverse.find { |event| event["candidate_sha"] }
+    last_material = events.reverse.find { |event| event.dig("details", "material_progress") }
+    correction_rounds = Array(events.group_by { |event| event["change_unit_id"] }.values).map do |group|
+      [[group.count { |event| event["event_type"] == "candidate_frozen" } - 1, 0].max, 0].max
+    end.max || 0
+
+    granted_ids = events.select { |event| event["event_type"] == "authority_granted" }.map { |event| event.dig("details", "grant_id") }
+    consumed_ids = events.select { |event| event["event_type"] == "authority_consumed" }.map { |event| event.dig("details", "grant_id") }
+
+    terminal_event = events.reverse.find { |event| %w[hrm_closed stop_reason].include?(event["event_type"]) }
+    terminal_details = terminal_event ? terminal_event.fetch("details", {}) : {}
+    stop_reason = terminal_event && terminal_event["event_type"] == "stop_reason" ? terminal_details["stop_reason"] : nil
+    terminal_state = if terminal_event&.dig("event_type") == "hrm_closed"
+                       terminal_details["closure_decision"]
+                     elsif stop_reason == "superseded"
+                       "superseded"
+                     elsif %w[blocked_input blocked_external scope_divergence governance_loop no_progress budget_exhausted].include?(stop_reason)
+                       "blocked"
+                     else
+                       "active"
+                     end
+
+    state = {
+      "schema_version" => "agent_playbooks.hrm_session_state.v0.1",
+      "session_id" => capsule["session_id"],
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "capsule_sha256" => object_sha256(capsule),
+      "phase" => phase,
+      "current_change_unit" => {
+        "id" => change_unit_id,
+        "deliverable_type" => change_unit_start&.dig("details", "deliverable_type"),
+        "candidate_sha" => last_candidate && last_candidate["candidate_sha"]
+      },
+      "progress" => {
+        "last_material_event_sequence" => last_material ? last_material["sequence"] : 0,
+        "last_material_progress_at" => last_material && last_material["occurred_at"],
+        "correction_rounds" => correction_rounds
+      },
+      "terminal" => {
+        "state" => terminal_state,
+        "stop_reason" => stop_reason,
+        "evidence" => [terminal_details["note"]].compact
+      },
+      "active_grant_ids" => (granted_ids - consumed_ids).uniq,
+      "last_event_sequence" => events.empty? ? 0 : events.last["sequence"],
+      "last_event_at" => events.empty? ? nil : events.last["occurred_at"]
+    }
+    state["state_hash"] = object_sha256(state)
+    validate_session_state!(state)
+    state
+  end
+
+  def validate_authority_grant!(grant, capsule)
+    validator("hrm-authority-grant.schema.json").validate!(grant)
+    validate_capsule!(capsule)
+
+    errors = []
+    errors << "session_id mismatch" unless grant["session_id"] == capsule["session_id"]
+    errors << "hrm_id mismatch" unless grant["hrm_id"] == capsule.dig("hrm", "id")
+
+    issued_at = Time.iso8601(grant.fetch("issued_at"))
+    expires_at = grant["expires_at"] && Time.iso8601(grant["expires_at"])
+    errors << "expires_at must be later than issued_at" if expires_at && expires_at <= issued_at
+
+    expected_effects = {
+      "operator_function_acceptance" => ["operator_function_acceptance"],
+      "merge_release" => ["merge_exact_head"],
+      "hrm_closure" => ["hrm_closure"]
+    }
+    if expected_effects.key?(grant["grant_type"])
+      errors << "allowed_effects do not match grant_type" unless grant["allowed_effects"] == expected_effects[grant["grant_type"]]
+    end
+
+    case grant["grant_type"]
+    when "operator_function_acceptance", "merge_release", "hrm_closure"
+      errors << "candidate_sha is required" if grant["candidate_sha"].nil?
+    when "live_effect_authority"
+      live_effects = %w[provider_write deployment activation canary_execution production_observation autonomy]
+      errors << "live grant requires an expiry" if expires_at.nil?
+      errors << "live grant requires repository" if grant["repository"].nil?
+      errors << "live grant requires candidate_sha" if grant["candidate_sha"].nil?
+      errors << "live grant contains a non-operational effect" unless (grant["allowed_effects"] - live_effects).empty?
+    end
+    errors << "merge grant requires repository" if grant["grant_type"] == "merge_release" && grant["repository"].nil?
+
+    raise ValidationError, "authority grant invalid: #{errors.join(', ')}" unless errors.empty?
+
+    true
+  rescue ArgumentError => e
+    raise ValidationError, "authority grant time invalid: #{e.message}"
+  end
+
+  def append_event!(path, event)
+    prior_events = File.exist?(path) ? load_events(path) : []
+    expected_sequence = prior_events.length + 1
+    unless event["sequence"] == expected_sequence
+      raise ValidationError, "event sequence must be #{expected_sequence}, got #{event['sequence'].inspect}"
+    end
+
+    validate_events!(prior_events + [event])
+    File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
+      file.flock(File::LOCK_EX)
+      file.write(JSON.generate(event))
+      file.write("\n")
+      file.flush
+      file.fsync
+    end
+    "event appended: #{event['session_id']} sequence=#{event['sequence']} type=#{event['event_type']}"
+  end
+
   def evaluate(capsule, events)
     validate_capsule!(capsule)
     validate_events!(events)
@@ -243,6 +576,22 @@ module HrmExperiment
     events.each do |event|
       identity_errors << "session_id mismatch at event #{event['sequence']}" unless event["session_id"] == capsule["session_id"]
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
+    end
+
+    decision_requests_by_id = events.select { |event| event["event_type"] == "decision_requested" }.group_by do |event|
+      event.dig("details", "decision_id")
+    end
+    decision_requests_by_id.each do |decision_id, requests|
+      identity_errors << "duplicate decision request #{decision_id}" if requests.length > 1
+    end
+    events.select { |event| event["event_type"] == "decision_received" }.each do |response|
+      decision_id = response.dig("details", "decision_id")
+      request = Array(decision_requests_by_id[decision_id]).first
+      if request.nil? || request["sequence"] >= response["sequence"]
+        identity_errors << "unbound decision response #{decision_id} at event #{response['sequence']}"
+      elsif request.dig("details", "decision_kind") != response.dig("details", "decision_kind")
+        identity_errors << "decision kind mismatch #{decision_id} at event #{response['sequence']}"
+      end
     end
 
     parsed_times = events.map { |event| Time.iso8601(event.fetch("occurred_at")) }
@@ -317,6 +666,13 @@ module HrmExperiment
     artifact_bytes = context_events.sum { |event| event.dig("context", "artifact_bytes") }
     repeated_artifact_bytes = context_events.sum { |event| event.dig("context", "repeated_artifact_bytes") }
     context_redundancy_ratio = artifact_bytes.zero? ? 0.0 : (repeated_artifact_bytes.to_f / artifact_bytes).round(4)
+    inline_raw_log_bytes = context_events.sum { |event| event.dig("context", "inline_raw_log_bytes") }
+    state_artifact_echo_bytes = context_events.sum { |event| event.dig("context", "state_artifact_echo_bytes") }
+    context_compactions_before_first_value = context_events.sum do |event|
+      next 0 if first_value && event["sequence"] >= first_value["sequence"]
+
+      event.dig("context", "context_compactions")
+    end
     scope_escape_files = context_events.sum { |event| event.dig("context", "files_outside_declared_dependencies") }
     context_budget_violations = context_events.count do |event|
       role = event["role"]
@@ -344,7 +700,7 @@ module HrmExperiment
     end
     ci_minutes = (completed_checks.sum { |event| event.dig("check", "duration_seconds") }.to_f / 60).round(2)
 
-    final_candidate_sha = terminal_event&.dig("candidate_sha") || capsule.dig("current_change_unit", "candidate_sha")
+    final_candidate_sha = terminal_event&.dig("candidate_sha")
     final_ci_plan_hash = capsule.dig("verification", "ci_plan_hash")
     required_checks = capsule.dig("verification", "exact_checks")
     required_checks_passed = required_checks.all? do |check_name|
@@ -372,6 +728,17 @@ module HrmExperiment
     end
     late_s0_s1 = opened_findings.count do |event|
       %w[S0 S1].include?(event.dig("details", "interrupt_class")) && event.dig("details", "after_non_disposable_work")
+    end
+
+    decision_requests = Array(by_type["decision_requested"])
+    mechanical_operator_prompts = decision_requests.select do |event|
+      event.dig("details", "decision_kind") == "routine_workflow"
+    end
+    mechanical_prompts_before_review_ready = mechanical_operator_prompts.count do |event|
+      review_ready.nil? || event["sequence"] < review_ready["sequence"]
+    end
+    genuine_human_gate_requests = decision_requests.count do |event|
+      STANDARD_OPERATOR_GATES.include?(event.dig("details", "decision_kind"))
     end
 
     scenario_results = closure_details.fetch("scenario_results", {})
@@ -408,6 +775,18 @@ module HrmExperiment
     process_reasons << "context budget exceeded" if context_budget_violations.positive?
     if context_redundancy_ratio > capsule.dig("budgets", "max_context_redundancy_ratio")
       process_reasons << "context-redundancy budget exceeded"
+    end
+    if mechanical_prompts_before_review_ready > capsule.dig("budgets", "max_mechanical_operator_prompts_before_review_ready")
+      process_reasons << "mechanical operator prompt budget exceeded"
+    end
+    if context_compactions_before_first_value > capsule.dig("budgets", "max_context_compactions_before_first_value")
+      process_reasons << "pre-value context-compaction budget exceeded"
+    end
+    if inline_raw_log_bytes > capsule.dig("budgets", "max_inline_raw_log_bytes")
+      process_reasons << "inline raw-log budget exceeded"
+    end
+    if state_artifact_echo_bytes > capsule.dig("budgets", "max_state_artifact_echo_bytes")
+      process_reasons << "state-artifact echo budget exceeded"
     end
     process_reasons << "context scope escape" if scope_escape_files.positive?
     process_reasons << "undispositioned scope addition" if undispositioned_scope_additions.positive?
@@ -452,13 +831,15 @@ module HrmExperiment
               end
 
     scorecard = {
-      "schema_version" => "agent_playbooks.hrm_run_scorecard.v0.1",
+      "schema_version" => "agent_playbooks.hrm_run_scorecard.v0.2",
       "run_identity" => {
         "session_id" => capsule["session_id"],
         "hrm_id" => capsule.dig("hrm", "id"),
         "experiment_profile" => capsule["experiment_profile"],
         "execution_mode" => capsule["execution_mode"],
         "playbook_source_sha" => capsule.dig("playbook_pin", "source_sha"),
+        "capsule_sequence" => capsule.dig("session_lineage", "capsule_sequence"),
+        "continuation_reason" => capsule.dig("session_lineage", "continuation_reason"),
         "event_count" => events.length
       },
       "instrumentation" => {
@@ -487,13 +868,19 @@ module HrmExperiment
         "maximum_correction_rounds" => correction_rounds.max || 0
       },
       "decisions" => {
-        "decision_requests" => Array(by_type["decision_requested"]).length,
+        "decision_requests" => decision_requests.length,
+        "genuine_human_gate_requests" => genuine_human_gate_requests,
+        "mechanical_operator_prompts" => mechanical_operator_prompts.length,
+        "mechanical_operator_prompts_before_review_ready" => mechanical_prompts_before_review_ready,
         "late_s0_s1_findings" => late_s0_s1
       },
       "context" => {
         "active_context_bytes" => active_context_bytes,
         "repeated_artifact_bytes" => repeated_artifact_bytes,
         "context_redundancy_ratio" => context_redundancy_ratio,
+        "inline_raw_log_bytes" => inline_raw_log_bytes,
+        "state_artifact_echo_bytes" => state_artifact_echo_bytes,
+        "context_compactions_before_first_value" => context_compactions_before_first_value,
         "files_outside_declared_dependencies" => scope_escape_files,
         "budget_violations" => context_budget_violations
       },
@@ -532,6 +919,10 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-capsule CAPSULE.yaml
         ruby scripts/hrm_experiment.rb validate-events EVENTS.jsonl
         ruby scripts/hrm_experiment.rb validate-scorecard SCORECARD.yaml
+        ruby scripts/hrm_experiment.rb validate-state STATE.yaml
+        ruby scripts/hrm_experiment.rb derive-state CAPSULE.yaml EVENTS.jsonl
+        ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
+        ruby scripts/hrm_experiment.rb append-event EVENTS.jsonl < EVENT.json
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
     TEXT
   end
@@ -553,6 +944,30 @@ if $PROGRAM_NAME == __FILE__
       path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       HrmExperiment.validate_scorecard!(HrmExperiment.load_yaml(path))
       puts "scorecard valid: #{path}"
+    when "validate-state"
+      path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      HrmExperiment.validate_session_state!(HrmExperiment.load_yaml(path))
+      puts "session state valid: #{path}"
+    when "derive-state"
+      capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      state = HrmExperiment.derive_session_state(
+        HrmExperiment.load_yaml(capsule_path),
+        HrmExperiment.load_events(events_path)
+      )
+      puts YAML.dump(state)
+    when "validate-grant"
+      grant_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      HrmExperiment.validate_authority_grant!(
+        HrmExperiment.load_yaml(grant_path),
+        HrmExperiment.load_yaml(capsule_path)
+      )
+      puts "authority grant valid: #{grant_path}"
+    when "append-event"
+      events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      event = JSON.parse($stdin.read)
+      puts HrmExperiment.append_event!(events_path, event)
     when "evaluate"
       capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
@@ -564,7 +979,7 @@ if $PROGRAM_NAME == __FILE__
     else
       raise HrmExperiment::ValidationError, HrmExperiment.usage
     end
-  rescue HrmExperiment::ValidationError, Errno::ENOENT => e
+  rescue HrmExperiment::ValidationError, JSON::ParserError, Errno::ENOENT => e
     warn e.message
     exit 2
   end

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-session-state.schema.json",
+  "title": "Derived compact HRM session state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "hrm_id",
+    "capsule_sha256",
+    "phase",
+    "current_change_unit",
+    "progress",
+    "terminal",
+    "active_grant_ids",
+    "last_event_sequence",
+    "last_event_at",
+    "state_hash"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.hrm_session_state.v0.1"},
+    "session_id": {"$ref": "#/$defs/nonempty"},
+    "hrm_id": {"$ref": "#/$defs/nonempty"},
+    "capsule_sha256": {"$ref": "#/$defs/sha256"},
+    "phase": {
+      "enum": [
+        "planned",
+        "semantic_readiness",
+        "ready",
+        "building",
+        "observing",
+        "candidate_frozen",
+        "checking",
+        "review_ready",
+        "closed",
+        "deferred",
+        "blocked"
+      ]
+    },
+    "current_change_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "deliverable_type", "candidate_sha"],
+      "properties": {
+        "id": {"type": ["string", "null"], "minLength": 1},
+        "deliverable_type": {
+          "type": ["string", "null"],
+          "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract", null]
+        },
+        "candidate_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["last_material_event_sequence", "last_material_progress_at", "correction_rounds"],
+      "properties": {
+        "last_material_event_sequence": {"type": "integer", "minimum": 0},
+        "last_material_progress_at": {"type": ["string", "null"], "minLength": 1},
+        "correction_rounds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "stop_reason", "evidence"],
+      "properties": {
+        "state": {"enum": ["active", "closed", "deferred", "blocked", "superseded"]},
+        "stop_reason": {
+          "type": ["string", "null"],
+          "enum": [
+            "done_verified",
+            "review_ready",
+            "blocked_input",
+            "blocked_external",
+            "scope_divergence",
+            "governance_loop",
+            "no_progress",
+            "budget_exhausted",
+            "superseded",
+            null
+          ]
+        },
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "active_grant_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/nonempty"}},
+    "last_event_sequence": {"type": "integer", "minimum": 0},
+    "last_event_at": {"type": ["string", "null"], "minLength": 1},
+    "state_hash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

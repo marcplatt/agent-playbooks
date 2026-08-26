@@ -1,4 +1,4 @@
-schema_version: agent_playbooks.hrm_experiment_profiles.v0.1
+schema_version: agent_playbooks.hrm_experiment_profiles.v0.2
 profiles:
   runtime_build_fast_feedback:
     purpose: Prove an operator-visible runtime slice quickly without weakening outcome or safety gates.
@@ -11,7 +11,16 @@ profiles:
       no_material_progress_minutes: 45
       max_ci_minutes: 30
       max_context_redundancy_ratio: 0.15
-    authority_defaults:
+      max_mechanical_operator_prompts_before_review_ready: 0
+      max_context_compactions_before_first_value: 0
+      max_inline_raw_log_bytes: 2000
+      max_state_artifact_echo_bytes: 1000
+    workflow_lease:
+      objective: advance_to_next_human_gate
+      routine_implementation_and_publication: authorized
+      merge: exact_head_grant_or_repository_preauthorization
+      post_authorized_merge_readback: authorized
+    operational_authority_defaults:
       provider_writes: false
       deployment: false
       activation: false
@@ -19,11 +28,17 @@ profiles:
       production_observation: false
       autonomy: false
     primary_measures:
+      - run_identity.capsule_sequence
       - first_value_from_semantic_ready_seconds
       - review_ready_from_semantic_ready_seconds
       - maximum_no_progress_seconds
       - duplicate_conclusive_checks
       - context_redundancy_ratio
+      - mechanical_operator_prompts_before_review_ready
+      - genuine_human_gate_requests
+      - context_compactions_before_first_value
+      - inline_raw_log_bytes
+      - state_artifact_echo_bytes
       - nonblocking_additions_absorbed
       - operator.review_completed_unassisted
     pass_condition: All accepted scenarios pass; hard safety gates pass; the preregistered process envelope passes.
@@ -39,15 +54,25 @@ profiles:
       no_material_progress_minutes: 30
       max_ci_minutes: 20
       max_context_redundancy_ratio: 0.10
-    authority_defaults:
+      max_mechanical_operator_prompts_before_review_ready: 0
+      max_context_compactions_before_first_value: 0
+      max_inline_raw_log_bytes: 2000
+      max_state_artifact_echo_bytes: 1000
+    workflow_lease:
+      objective: advance_to_next_human_gate
+      routine_evidence_preparation: authorized
+      runtime_implementation: prohibited
+      operational_effects: exact_action_time_grant_only
+    operational_authority_defaults:
       provider_writes: false
       deployment: false
       activation: false
       canary: false
       production_observation: false
       autonomy: false
-    authority_note: Set only the exact action-time authority already granted; false is the fail-closed default.
+    authority_note: Keep capsule operational authority false; apply exact action-time effects only through a validated expiring grant.
     primary_measures:
+      - run_identity.capsule_sequence
       - accepted_scenarios_passed
       - unauthorized_external_effects
       - unresolved_ambiguous_mutations
@@ -55,4 +80,9 @@ profiles:
       - aftercare_complete
       - duplicate_conclusive_checks
       - files_outside_declared_dependencies
+      - mechanical_operator_prompts_before_review_ready
+      - genuine_human_gate_requests
+      - context_compactions_before_first_value
+      - inline_raw_log_bytes
+      - state_artifact_echo_bytes
     pass_condition: Exact production scenarios pass with no unauthorized or ambiguous effects, process budgets pass, and timestamp-verified aftercare completes.

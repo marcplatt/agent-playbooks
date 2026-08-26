@@ -1,0 +1,21 @@
+schema_version: agent_playbooks.hrm_session_state.v0.1
+session_id: "{{capsule_session_id}}"
+hrm_id: "{{exact_hrm_id}}"
+capsule_sha256: "{{derived_capsule_sha256}}"
+phase: planned
+current_change_unit:
+  id: null
+  deliverable_type: null
+  candidate_sha: null
+progress:
+  last_material_event_sequence: 0
+  last_material_progress_at: null
+  correction_rounds: 0
+terminal:
+  state: active
+  stop_reason: null
+  evidence: []
+active_grant_ids: []
+last_event_sequence: 0
+last_event_at: null
+state_hash: "{{derived_state_sha256}}"

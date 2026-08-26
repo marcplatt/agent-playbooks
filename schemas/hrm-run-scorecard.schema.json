@@ -18,11 +18,11 @@
     "verdict"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_run_scorecard.v0.1"},
+    "schema_version": {"const": "agent_playbooks.hrm_run_scorecard.v0.2"},
     "run_identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["session_id", "hrm_id", "experiment_profile", "execution_mode", "playbook_source_sha", "event_count"],
+      "required": ["session_id", "hrm_id", "experiment_profile", "execution_mode", "playbook_source_sha", "capsule_sequence", "continuation_reason", "event_count"],
       "properties": {
         "session_id": {"type": "string", "minLength": 1},
         "hrm_id": {"type": "string", "minLength": 1},
@@ -31,6 +31,10 @@
         },
         "execution_mode": {"enum": ["runtime_build", "production_observation", "discovery", "rollout"]},
         "playbook_source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "capsule_sequence": {"type": "integer", "minimum": 1},
+        "continuation_reason": {
+          "enum": ["initial", "playbook_changed", "target_changed", "contract_changed", "function_slice_changed", "execution_mode_changed"]
+        },
         "event_count": {"type": "integer", "minimum": 0}
       }
     },
@@ -106,9 +110,18 @@
     "decisions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decision_requests", "late_s0_s1_findings"],
+      "required": [
+        "decision_requests",
+        "genuine_human_gate_requests",
+        "mechanical_operator_prompts",
+        "mechanical_operator_prompts_before_review_ready",
+        "late_s0_s1_findings"
+      ],
       "properties": {
         "decision_requests": {"type": "integer", "minimum": 0},
+        "genuine_human_gate_requests": {"type": "integer", "minimum": 0},
+        "mechanical_operator_prompts": {"type": "integer", "minimum": 0},
+        "mechanical_operator_prompts_before_review_ready": {"type": "integer", "minimum": 0},
         "late_s0_s1_findings": {"type": "integer", "minimum": 0}
       }
     },
@@ -119,6 +132,9 @@
         "active_context_bytes",
         "repeated_artifact_bytes",
         "context_redundancy_ratio",
+        "inline_raw_log_bytes",
+        "state_artifact_echo_bytes",
+        "context_compactions_before_first_value",
         "files_outside_declared_dependencies",
         "budget_violations"
       ],
@@ -126,6 +142,9 @@
         "active_context_bytes": {"type": "integer", "minimum": 0},
         "repeated_artifact_bytes": {"type": "integer", "minimum": 0},
         "context_redundancy_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "inline_raw_log_bytes": {"type": "integer", "minimum": 0},
+        "state_artifact_echo_bytes": {"type": "integer", "minimum": 0},
+        "context_compactions_before_first_value": {"type": "integer", "minimum": 0},
         "files_outside_declared_dependencies": {"type": "integer", "minimum": 0},
         "budget_violations": {"type": "integer", "minimum": 0}
       }

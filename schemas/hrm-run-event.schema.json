@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "session_id", "hrm_id", "sequence", "event_type", "occurred_at"],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_run_event.v0.1"},
+    "schema_version": {"const": "agent_playbooks.hrm_run_event.v0.2"},
     "session_id": {"type": "string", "minLength": 1},
     "hrm_id": {"type": "string", "minLength": 1},
     "sequence": {"type": "integer", "minimum": 1},
@@ -25,6 +25,9 @@
         "review_ready",
         "operator_review_started",
         "operator_review_completed",
+        "authority_granted",
+        "authority_consumed",
+        "integration_read_back",
         "finding_opened",
         "finding_dispositioned",
         "escaped_defect_recorded",
@@ -51,6 +54,9 @@
         "repeated_artifact_bytes",
         "tool_output_bytes",
         "omitted_tool_output_bytes",
+        "inline_raw_log_bytes",
+        "state_artifact_echo_bytes",
+        "context_compactions",
         "files_loaded",
         "files_outside_declared_dependencies"
       ],
@@ -60,6 +66,9 @@
         "repeated_artifact_bytes": {"type": "integer", "minimum": 0},
         "tool_output_bytes": {"type": "integer", "minimum": 0},
         "omitted_tool_output_bytes": {"type": "integer", "minimum": 0},
+        "inline_raw_log_bytes": {"type": "integer", "minimum": 0},
+        "state_artifact_echo_bytes": {"type": "integer", "minimum": 0},
+        "context_compactions": {"type": "integer", "minimum": 0},
         "files_loaded": {"type": "integer", "minimum": 0},
         "files_outside_declared_dependencies": {"type": "integer", "minimum": 0}
       }
@@ -73,7 +82,11 @@
         "environment_id": {"type": "string", "minLength": 1},
         "conclusion": {"enum": ["passed", "failed", "skipped", "cancelled", "timed_out"]},
         "duration_seconds": {"type": "integer", "minimum": 0},
-        "conclusive": {"type": "boolean"}
+        "conclusive": {"type": "boolean"},
+        "summary": {"type": "string"},
+        "raw_artifact_path": {"type": ["string", "null"], "minLength": 1},
+        "raw_artifact_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "raw_artifact_bytes": {"type": "integer", "minimum": 0}
       }
     },
     "details": {
@@ -84,6 +97,20 @@
           "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract"]
         },
         "interrupt_class": {"enum": ["S0", "S1", "S2", "S3"]},
+        "decision_id": {"type": "string", "minLength": 1},
+        "decision_kind": {
+          "enum": [
+            "business_meaning",
+            "operator_function_review",
+            "exact_head_merge_release",
+            "live_effect_authority",
+            "hrm_closure",
+            "routine_workflow"
+          ]
+        },
+        "exact_effect": {"type": "string", "minLength": 1},
+        "grant_id": {"type": "string", "minLength": 1},
+        "integration_verified": {"type": "boolean"},
         "after_non_disposable_work": {"type": "boolean"},
         "finding_id": {"type": "string", "minLength": 1},
         "scope_addition": {"type": "boolean"},

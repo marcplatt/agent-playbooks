@@ -1,10 +1,12 @@
-schema_version: agent_playbooks.hrm_run_scorecard.v0.1
+schema_version: agent_playbooks.hrm_run_scorecard.v0.2
 run_identity:
   session_id: MS-EXAMPLE-2026-08-25-HRM-2
   hrm_id: HRM-2
   experiment_profile: runtime_build_fast_feedback
   execution_mode: runtime_build
   playbook_source_sha: "1111111111111111111111111111111111111111"
+  capsule_sequence: 1
+  continuation_reason: initial
   event_count: 15
 instrumentation:
   sequence_valid: true
@@ -30,11 +32,17 @@ flow:
   maximum_correction_rounds: 0
 decisions:
   decision_requests: 1
+  genuine_human_gate_requests: 1
+  mechanical_operator_prompts: 0
+  mechanical_operator_prompts_before_review_ready: 0
   late_s0_s1_findings: 0
 context:
   active_context_bytes: 23700
   repeated_artifact_bytes: 1000
   context_redundancy_ratio: 0.0606
+  inline_raw_log_bytes: 0
+  state_artifact_echo_bytes: 0
+  context_compactions_before_first_value: 0
   files_outside_declared_dependencies: 0
   budget_violations: 0
 validation:

@@ -1,0 +1,107 @@
+schema_version: agent_playbooks.hrm_execution_capsule.v0.2
+session_id: MS-EXAMPLE-2026-09-09-HRM-2-OBSERVATION
+playbook_pin:
+  kernel_id: AP-EXEC-001
+  kernel_version: 0.1.0-rc.2
+  source_sha: "1111111111111111111111111111111111111111"
+system_reference: SYS-EXAMPLE-001
+project_root: /example/project
+repository_bases:
+  - repository: example/project
+    base_sha: "3333333333333333333333333333333333333333"
+target_resolution:
+  source_path: docs/planning/project-hrm-map.yaml
+  source_version: 1.0.0
+  source_status: accepted
+  current_target_hrm: HRM-2
+  method: derived_current
+  resolved_hrm_id: HRM-2
+  explicit_hrm_id: null
+session_lineage:
+  predecessor_session_id: MS-EXAMPLE-2026-08-25-HRM-2
+  capsule_sequence: 2
+  continuation_reason: execution_mode_changed
+  inherited_state_path: examples/hrm-session-state.example.yaml
+hrm:
+  id: HRM-2
+  contract_path: docs/milestones/HRM-2.md
+  contract_version: 1.0.0
+  outcome: The operator can complete and correct the exact live workflow and understand failures.
+  operator_decision: Accept, defer, or block the exact bounded observation represented by this run.
+  accepted_scenarios: [ACC-EX-01]
+experiment_profile: production_observation_fail_closed
+execution_mode: production_observation
+deliverable_type: operational_evidence
+function_slice:
+  function_ids: [FUNC-EX-RFQ-REVIEW]
+  required_real_seams: [operator_review_surface, exact_provider_readback]
+  accepted_scenarios: [ACC-EX-01]
+  non_goals: [runtime_implementation, deployment_change, unattended_effect]
+  allowed_paths: [.codex/hrm-runs/**, private_operator_packet_outside_repository]
+  proof_obligations: [exact_identity, action_time_authority, no_replay, operator_receipt]
+workflow_lease:
+  objective: advance_to_next_human_gate
+  permitted_routine_actions:
+    - inspect_read_only
+    - prepare_private_inputs
+    - run_declared_checks
+    - wait_for_declared_checks
+    - record_operational_evidence
+  continue_across_in_scope_change_units: true
+  merge_policy: never
+  operator_gate_classes:
+    - business_meaning
+    - operator_function_review
+    - exact_head_merge_release
+    - live_effect_authority
+    - hrm_closure
+authority:
+  workflow:
+    inspect_read_only: true
+    manage_task_branch_worktree: false
+    implement_allowed_paths: false
+    commit_changes: false
+    publish_review_pr: false
+    bounded_ci_correction: false
+    run_declared_checks: true
+    wait_for_declared_checks: true
+    prepare_private_inputs: true
+    record_operational_evidence: true
+    post_authorized_merge_readback: false
+    merge_without_grant: false
+  operational:
+    provider_writes: false
+    deployment: false
+    activation: false
+    canary: false
+    production_observation: false
+    autonomy: false
+verification:
+  profile: standard
+  environment_id: production-canary:private-operator-runtime:preactivation
+  ci_plan_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  exact_checks: [ACC-EX-01-exact-observation, action-time-health-recovery-rollback-preflight]
+  full_suite_triggers:
+    - Any runtime change supersedes this observation capsule and requires a runtime-build capsule.
+reference_requests: []
+budgets:
+  max_consecutive_nonruntime_units: 1
+  max_correction_rounds: 1
+  no_material_progress_minutes: 30
+  max_ci_minutes: 20
+  max_context_redundancy_ratio: 0.10
+  max_mechanical_operator_prompts_before_review_ready: 0
+  max_context_compactions_before_first_value: 0
+  max_inline_raw_log_bytes: 2000
+  max_state_artifact_echo_bytes: 1000
+  context_bytes_by_role:
+    orchestrator: 32000
+    builder: 20000
+    checker: 12000
+    reviewer: 20000
+    operator: 8000
+metrics:
+  event_log_path: examples/hrm-production-observation-events.example.jsonl
+  session_state_path: examples/hrm-production-observation-state.example.yaml
+  scorecard_path: examples/hrm-production-observation-scorecard.example.yaml
+  aftercare_window_days: 14

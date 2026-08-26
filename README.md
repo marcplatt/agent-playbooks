@@ -65,8 +65,10 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.1` experiment. It preserves their non-negotiable safety constraints in
-one small kernel and requires a validated HRM execution capsule. Do not preload the replaced
+during the `0.1.0-rc.2` experiment. It derives the active HRM from the accepted project map
+instead of requiring the operator to restate it. A validated capsule grants routine workflow
+through the next genuine human gate, while exact merge and live-effect permission use bounded
+authority grants. The small kernel preserves non-negotiable safety constraints. Do not preload the replaced
 playbooks into an experimental task. They are heading-bounded, metered references available
 only through an approved question in the capsule.
 
@@ -75,9 +77,17 @@ commit in each capsule, keep the event log append-only, and derive the scorecard
 repository script. Compare the resulting flow, context, CI, scope, safety, and operator-review
 measures with the preregistered budgets; do not infer success from agent self-report.
 
+The operator invocation is deliberately short: “Run the current HRM under the
+repository-pinned AP-EXEC kernel.” The repository dispatcher derives the target, contract,
+capsule, and event path; do not paste the kernel or require the operator to restate those inputs.
+
 ```sh
 ruby scripts/hrm_experiment.rb validate-capsule path/to/hrm-execution-capsule.yaml
 ruby scripts/hrm_experiment.rb validate-events path/to/hrm-run-events.jsonl
+ruby scripts/hrm_experiment.rb validate-grant \
+  path/to/hrm-authority-grant.yaml path/to/hrm-execution-capsule.yaml
+ruby scripts/hrm_experiment.rb derive-state \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ruby scripts/hrm_experiment.rb evaluate \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ```
@@ -114,10 +124,15 @@ Project planning and review:
 - [Activation and production record](templates/activation-production-record.yaml)
 - [Codex global working agreements](templates/codex-global-agents.md)
 - [Compact HRM execution capsule](templates/hrm-execution-capsule.yaml)
+- [Exact HRM authority grant](templates/hrm-authority-grant.yaml)
+- [Derived compact HRM session state](templates/hrm-session-state.yaml)
 - [Compact HRM experiment profiles](templates/hrm-experiment-profiles.yaml)
 - [Derived HRM run scorecard shape](templates/hrm-run-scorecard.yaml)
 - [Fictional HRM-directed session](examples/hrm-directed-session.example.yaml)
 - [Fictional compact execution capsule](examples/hrm-execution-capsule.example.yaml)
+- [Fictional production-observation continuation capsule](examples/hrm-production-observation-capsule.example.yaml)
+- [Fictional exact-head authority grant](examples/hrm-authority-grant.example.yaml)
+- [Fictional derived compact session state](examples/hrm-session-state.example.yaml)
 - [Fictional compact run events](examples/hrm-run-events.example.jsonl)
 - [Fictional derived run scorecard](examples/hrm-run-scorecard.example.yaml)
 
