@@ -10,7 +10,7 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.5"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.6"
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -47,6 +47,7 @@ module HrmExperiment
     "correct_within_budget" => "builder",
     "run_declared_checks" => "checker",
     "inspect_provider_read_only" => "provider_observer",
+    "discover_project_api_skills" => "provider_observer",
     "prepare_private_inputs" => "provider_observer",
     "record_operational_evidence" => "provider_observer"
   }.freeze
@@ -54,6 +55,7 @@ module HrmExperiment
   RUNTIME_BUILD_ACTIONS = %w[
     inspect_read_only
     inspect_provider_read_only
+    discover_project_api_skills
     manage_task_branch_worktree
     implement_frozen_slice
     commit_in_scope_changes
@@ -67,6 +69,7 @@ module HrmExperiment
   PRODUCTION_OBSERVATION_ACTIONS = %w[
     inspect_read_only
     inspect_provider_read_only
+    discover_project_api_skills
     prepare_private_inputs
     run_declared_checks
     wait_for_declared_checks
@@ -358,6 +361,13 @@ module HrmExperiment
       raise ValidationError, "function_slice.accepted_scenarios must equal hrm.accepted_scenarios"
     end
 
+    required_skill_ids = capsule.dig("project_api_skills", "required_skills").map do |skill|
+      skill.fetch("skill_id")
+    end
+    unless required_skill_ids.uniq.length == required_skill_ids.length
+      raise ValidationError, "project_api_skills.required_skills must contain unique skill_id values"
+    end
+
     lease = capsule.fetch("workflow_lease")
     unless lease["operator_gate_classes"].sort == STANDARD_OPERATOR_GATES.sort
       raise ValidationError, "workflow_lease.operator_gate_classes must equal the five genuine human gates"
@@ -384,6 +394,7 @@ module HrmExperiment
     action_authority = {
       "inspect_read_only" => "inspect_read_only",
       "inspect_provider_read_only" => "inspect_provider_read_only",
+      "discover_project_api_skills" => "inspect_provider_read_only",
       "manage_task_branch_worktree" => "manage_task_branch_worktree",
       "implement_frozen_slice" => "implement_allowed_paths",
       "commit_in_scope_changes" => "commit_changes",
@@ -1210,7 +1221,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.5 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, or supersede.
+      rc.6 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, or supersede.
     TEXT
   end
 

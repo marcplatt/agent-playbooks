@@ -12,6 +12,7 @@
     "ledger_cursor",
     "state_hash",
     "scorecard_event_count",
+    "project_api_skills",
     "phase",
     "terminal_state",
     "attention",
@@ -19,13 +20,37 @@
     "projection_hash"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.1"},
+    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.2"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "capsule_sha256": {"$ref": "#/$defs/sha256"},
     "ledger_cursor": {"type": "integer", "minimum": 0},
     "state_hash": {"$ref": "#/$defs/sha256"},
     "scorecard_event_count": {"type": "integer", "minimum": 0},
+    "project_api_skills": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry_hash",
+        "required_count",
+        "reusable_skill_ids",
+        "missing_skill_ids"
+      ],
+      "properties": {
+        "registry_hash": {"$ref": "#/$defs/sha256"},
+        "required_count": {"type": "integer", "minimum": 0},
+        "reusable_skill_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonempty"}
+        },
+        "missing_skill_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonempty"}
+        }
+      }
+    },
     "phase": {
       "enum": [
         "planned",
@@ -64,6 +89,7 @@
         "await_operator_decision",
         "route_blocking_finding",
         "await_operator_review",
+        "discover_missing_project_api_skills",
         "continue_routine_workflow"
       ]
     },

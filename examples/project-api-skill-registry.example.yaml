@@ -1,0 +1,51 @@
+schema_version: agent_playbooks.project_api_skill_registry.v0.1
+registry_id: EXAMPLE-ORGANIZATION-API-SKILLS
+registry_scope: cross_repository
+registry_version: 1
+updated_at: '2026-08-26T00:00:00Z'
+skills:
+  - record_id: API-SKILL-EXAMPLE-PRODUCT-MASTER-READ-001
+    skill_id: product-master.catalog-price.read
+    provider_system: Example Product Master
+    skill_kind: api_read_skill
+    summary: Read canonical product configuration and current catalog price without mutation.
+    contract_version: public-config-v2
+    contract_fingerprint: f36a6ae9832e2c091e26ca064d8f96df9ee96100b5da51fe4a2ad67015b4973d
+    calls:
+      - call_id: product-master.configuration.get
+        operation: read canonical product configuration
+        effect_class: read_only
+        contract_ref: contracts/product-master/public-config-v2
+      - call_id: product-master.catalog-price.get
+        operation: read current catalog price
+        effect_class: read_only
+        contract_ref: contracts/product-master/public-config-v2
+    status: active
+    supersedes_record_id: null
+    provenance:
+      source_session_id: MS-EXAMPLE-2026-08-25-HRM-1
+      source_hrm_id: HRM-1
+      source_project_id: SYS-EXAMPLE-001
+      source_repository: example/project
+      source_kernel_id: AP-EXEC-001
+      source_kernel_version: 0.1.0-rc.5
+      evidence_event_sequence: 17
+      evidence_event_sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      observed_at: '2026-08-26T00:00:00Z'
+    validity:
+      stable_across_hrms: true
+      stable_across_kernel_versions: true
+      expires_at: null
+      invalidated_by:
+        - product-master contract version changes
+        - product-master adapter binding changes
+    portability:
+      cross_repository: true
+      canonical_scope: software_master_plan
+      transfer_status: project_verified
+      master_plan_intake_id: null
+    privacy:
+      contains_secrets: false
+      contains_customer_data: false
+      contains_live_provider_state: false
+registry_hash: 52622c7a106bf24981f40e7ed31ab4e3b433fe613ebab3cc1fb9e940c1324771

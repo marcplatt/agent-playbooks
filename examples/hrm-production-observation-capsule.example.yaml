@@ -1,8 +1,8 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.3
+schema_version: agent_playbooks.hrm_execution_capsule.v0.4
 session_id: MS-EXAMPLE-2026-09-09-HRM-2-OBSERVATION
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.5
+  kernel_version: 0.1.0-rc.6
   source_sha: "1111111111111111111111111111111111111111"
 system_reference: SYS-EXAMPLE-001
 project_root: /example/project
@@ -42,11 +42,22 @@ function_slice:
   non_goals: [runtime_implementation, deployment_change, unattended_effect]
   allowed_paths: [.codex/hrm-runs/**, private_operator_packet_outside_repository]
   proof_obligations: [exact_identity, action_time_authority, no_replay, operator_receipt]
+project_api_skills:
+  registry_id: EXAMPLE-ORGANIZATION-API-SKILLS
+  registry_path: examples/project-api-skill-registry.example.yaml
+  required_skills:
+    - skill_id: product-master.catalog-price.read
+      contract_fingerprint: f36a6ae9832e2c091e26ca064d8f96df9ee96100b5da51fe4a2ad67015b4973d
+  reuse_policy:
+    across_hrms: true
+    across_kernel_versions: true
+    volatile_runtime_state: action_time_only
 workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:
     - inspect_read_only
     - inspect_provider_read_only
+    - discover_project_api_skills
     - prepare_private_inputs
     - run_declared_checks
     - wait_for_declared_checks
@@ -74,6 +85,7 @@ role_topology:
     correct_within_budget: builder
     run_declared_checks: checker
     inspect_provider_read_only: provider_observer
+    discover_project_api_skills: provider_observer
     prepare_private_inputs: provider_observer
     record_operational_evidence: provider_observer
 authority:

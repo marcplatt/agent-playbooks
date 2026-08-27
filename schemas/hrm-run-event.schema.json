@@ -145,6 +145,7 @@
           "enum": [
             "inspect_read_only",
             "inspect_provider_read_only",
+            "discover_project_api_skills",
             "manage_task_branch_worktree",
             "implement_frozen_slice",
             "commit_in_scope_changes",

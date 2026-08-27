@@ -8,6 +8,7 @@ require "set"
 require "time"
 require "yaml"
 require_relative "hrm_experiment"
+require_relative "project_api_skill_registry"
 
 module HrmSupervisor
   MAX_PROJECTION_BYTES = 4096
@@ -31,7 +32,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
-      refresh(capsule, events, events_path, "resume")
+      refresh(capsule, events, events_path, "resume", capsule_path)
     end
   end
 
@@ -44,7 +45,7 @@ module HrmSupervisor
         raise HrmExperiment::ValidationError,
               "use the supervisor supersede command so the stop is bound to a validated successor"
       end
-      append_prepared(capsule, events, events_path, prepared, "append")
+      append_prepared(capsule, events, events_path, prepared, "append", capsule_path)
     end
   end
 
@@ -52,8 +53,15 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
+      if action == "discover_project_api_skills"
+        coverage = ProjectApiSkillRegistry.coverage_for_capsule(capsule, capsule_path)
+        if coverage["missing_skill_ids"].empty?
+          raise HrmExperiment::ValidationError,
+                "all required project API skills are reusable; do not repeat API discovery"
+        end
+      end
       event = HrmExperiment.guard_action(capsule, events, action, role, now)
-      append_prepared(capsule, events, events_path, event, "guard")
+      append_prepared(capsule, events, events_path, event, "guard", capsule_path)
     end
   end
 
@@ -67,7 +75,7 @@ module HrmSupervisor
         HrmExperiment.load_yaml(successor_path),
         now
       )
-      append_prepared(predecessor, events, events_path, event, "supersede")
+      append_prepared(predecessor, events, events_path, event, "supersede", predecessor_path)
     end
   end
 
@@ -150,7 +158,7 @@ module HrmSupervisor
     prepared
   end
 
-  def append_prepared(capsule, events, events_path, event, action)
+  def append_prepared(capsule, events, events_path, event, action, capsule_path)
     prepared = prepare_event(capsule, events, event)
     updated_events = events + [prepared]
     validate_run_identity!(capsule, updated_events)
@@ -163,15 +171,16 @@ module HrmSupervisor
     end
     File.chmod(0o600, events_path)
 
-    refresh(capsule, updated_events, events_path, action).merge(
+    refresh(capsule, updated_events, events_path, action, capsule_path).merge(
       "event_sequence" => prepared["sequence"],
       "event_type" => prepared["event_type"]
     )
   end
 
-  def refresh(capsule, events, events_path, action)
+  def refresh(capsule, events, events_path, action, capsule_path)
     paths = artifact_paths(capsule, events_path)
-    before = stored_projection_status(paths, capsule)
+    api_skill_coverage = ProjectApiSkillRegistry.coverage_for_capsule(capsule, capsule_path)
+    before = stored_projection_status(paths, capsule, api_skill_coverage)
     ledger_cursor = events.length
     if before && before["max_cursor"] > ledger_cursor
       raise HrmExperiment::ValidationError,
@@ -180,7 +189,7 @@ module HrmSupervisor
 
     state = HrmExperiment.derive_session_state(capsule, events)
     scorecard = HrmExperiment.evaluate(capsule, events)
-    projection = derive_projection(capsule, events, state, scorecard)
+    projection = derive_projection(capsule, events, state, scorecard, api_skill_coverage)
     write_projection_set(paths, state, scorecard, projection)
 
     {
@@ -192,13 +201,15 @@ module HrmSupervisor
       "projection_repaired" => before.nil? || !before["coherent"] || before["cursor"] != ledger_cursor,
       "projection_bytes" => JSON.generate(projection).bytesize,
       "attention_count" => projection["attention"].length,
+      "reusable_api_skill_count" => api_skill_coverage["reusable_skill_ids"].length,
+      "missing_api_skill_count" => api_skill_coverage["missing_skill_ids"].length,
       "next_action" => projection["next_action"],
       "state_hash" => state["state_hash"],
       "projection_hash" => projection["projection_hash"]
     }
   end
 
-  def derive_projection(capsule, events, state, scorecard)
+  def derive_projection(capsule, events, state, scorecard, api_skill_coverage)
     attention = derive_attention(events, state)
     if attention.length > MAX_ATTENTION_ITEMS
       raise HrmExperiment::ValidationError,
@@ -207,25 +218,28 @@ module HrmSupervisor
 
     next_action = if state.dig("terminal", "state") != "active"
                     "terminal"
-                  elsif attention.empty?
-                    "continue_routine_workflow"
-                  else
+                  elsif !attention.empty?
                     {
                       "operator_action" => "await_operator_action",
                       "decision" => "await_operator_decision",
                       "blocking_finding" => "route_blocking_finding",
                       "operator_review" => "await_operator_review"
                     }.fetch(attention.first["kind"])
+                  elsif !api_skill_coverage["missing_skill_ids"].empty?
+                    "discover_missing_project_api_skills"
+                  else
+                    "continue_routine_workflow"
                   end
 
     projection = {
-      "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.1",
+      "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.2",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "capsule_sha256" => HrmExperiment.object_sha256(capsule),
       "ledger_cursor" => events.length,
       "state_hash" => state["state_hash"],
       "scorecard_event_count" => scorecard.dig("run_identity", "event_count"),
+      "project_api_skills" => api_skill_coverage,
       "phase" => state["phase"],
       "terminal_state" => state.dig("terminal", "state"),
       "attention" => attention,
@@ -300,7 +314,7 @@ module HrmSupervisor
     }
   end
 
-  def stored_projection_status(paths, capsule)
+  def stored_projection_status(paths, capsule, api_skill_coverage)
     required = %w[state scorecard projection]
     return nil unless required.all? { |name| File.exist?(paths[name]) }
 
@@ -316,7 +330,8 @@ module HrmSupervisor
                        state["capsule_sha256"] == capsule_sha &&
                        scorecard.dig("run_identity", "session_id") == capsule["session_id"] &&
                        projection["session_id"] == capsule["session_id"] &&
-                       projection["capsule_sha256"] == capsule_sha
+                       projection["capsule_sha256"] == capsule_sha &&
+                       projection["project_api_skills"] == api_skill_coverage
     return nil unless identities_match
 
     cursors = [

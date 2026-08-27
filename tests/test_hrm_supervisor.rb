@@ -138,6 +138,52 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
+  def test_resume_projects_reusable_api_skills_without_rediscovery
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    session_started = HrmExperiment.load_events(EVENTS).first
+
+    with_run(capsule, [session_started]) do |events_path, paths|
+      receipt = HrmSupervisor.resume(CAPSULE, events_path)
+      projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
+
+      assert_equal 1, receipt["reusable_api_skill_count"]
+      assert_equal 0, receipt["missing_api_skill_count"]
+      assert_equal ["product-master.catalog-price.read"],
+                   projection.dig("project_api_skills", "reusable_skill_ids")
+      assert_equal "continue_routine_workflow", projection["next_action"]
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.guard(
+          CAPSULE,
+          events_path,
+          "discover_project_api_skills",
+          "provider_observer",
+          Time.iso8601("2026-08-25T00:01:00Z")
+        )
+      end
+      assert_includes error.message, "do not repeat API discovery"
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_changed_skill_fingerprint_routes_only_missing_discovery
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule.dig("project_api_skills", "required_skills", 0)["contract_fingerprint"] = "c" * 64
+    session_started = HrmExperiment.load_events(EVENTS).first
+
+    Dir.mktmpdir("hrm-supervisor", ROOT) do |directory|
+      capsule_path = File.join(directory, "capsule.yaml")
+      File.write(capsule_path, YAML.dump(capsule), mode: "w", perm: 0o600)
+      events_path = File.join(directory, File.basename(capsule.dig("metrics", "event_log_path")))
+      File.write(events_path, "#{JSON.generate(session_started)}\n", mode: "w", perm: 0o600)
+
+      receipt = HrmSupervisor.resume(capsule_path, events_path)
+      assert_equal 0, receipt["reusable_api_skill_count"]
+      assert_equal 1, receipt["missing_api_skill_count"]
+      assert_equal "discover_missing_project_api_skills", receipt["next_action"]
+    end
+  end
+
   private
 
   def append_event(events_path, event_type, occurred_at, details)

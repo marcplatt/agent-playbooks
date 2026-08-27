@@ -1,8 +1,8 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.3
+schema_version: agent_playbooks.hrm_execution_capsule.v0.4
 session_id: "{{stable_session_id}}"
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.5
+  kernel_version: 0.1.0-rc.6
   source_sha: "{{40_character_agent_playbooks_sha}}"
 system_reference: "{{system_reference}}"
 project_root: "{{absolute_project_root}}"
@@ -42,11 +42,22 @@ function_slice:
   non_goals: []
   allowed_paths: []
   proof_obligations: []
+project_api_skills:
+  registry_id: "{{organization_api_skill_registry_id}}"
+  registry_path: "{{project_registry_mirror_path}}"
+  required_skills:
+    - skill_id: "{{stable_api_skill_id}}"
+      contract_fingerprint: "{{sha256}}"
+  reuse_policy:
+    across_hrms: true
+    across_kernel_versions: true
+    volatile_runtime_state: action_time_only
 workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:
     - inspect_read_only
     - inspect_provider_read_only
+    - discover_project_api_skills
     - manage_task_branch_worktree
     - implement_frozen_slice
     - commit_in_scope_changes
@@ -93,6 +104,7 @@ role_topology:
     correct_within_budget: builder
     run_declared_checks: checker
     inspect_provider_read_only: provider_observer
+    discover_project_api_skills: provider_observer
     prepare_private_inputs: provider_observer
     record_operational_evidence: provider_observer
 authority:

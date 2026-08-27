@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.5"
+version: "0.1.0-rc.6"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -31,6 +31,9 @@ controls:
   - non-llm-supervisor-single-writer
   - cursor-bound-projection-commit
   - operator-attention-firewall
+  - cross-hrm-api-skill-reuse
+  - cross-kernel-api-skill-reuse
+  - master-plan-api-skill-portability
   - frozen-function-slice
   - one-writer-per-overlapping-change-unit
   - declared-deliverable-liveness
@@ -98,6 +101,36 @@ merge and its automatic read-back; external-effect grants remain separately expi
 fail-closed. A read-only observation never consumes such a grant. A grant never broadens the
 frozen function slice or silently changes the mode.
 
+## Project API skills and cross-repository transfer
+
+Stable callable knowledge discovered by one HRM belongs to the project API skill registry,
+not to that HRM's transient provider diagnostic. An API skill names its provider, stable call
+IDs, operations, effect classes, contract references, contract version and fingerprint,
+source-bound conclusive evidence, and exact invalidators. APM configuration/product/price
+reads, GHL reads and workflows, QBO estimate operations, VoIP.ms notifications, Website
+intake, and future integrations use the same skill abstraction.
+The fingerprint is the canonical SHA-256 of provider system, skill kind, contract version,
+and the exact call table, so a consumer can reproduce it without private source evidence.
+
+Every capsule declares only the API skill IDs and contract fingerprints required by its frozen
+function slice. The supervisor validates the registry and projects reusable and missing skill
+IDs. A matching stable skill remains reusable across HRMs and kernel versions. Guard
+`discover_project_api_skills` only for genuinely missing fingerprints; when all requirements
+are covered, the guard fails closed against rediscovery. Changed contracts or adapter bindings
+supersede the prior skill instead of silently overwriting it.
+
+API skills are portable across repositories, but transfer is authority-bound. The source
+project may reuse its own `project_verified` skill. Another repository may reuse it only after
+the Software Master Plan accepts the source-bound intake and the record becomes
+`master_plan_accepted`. Transfer carries the callable contract and provenance, never
+credentials, account or destination identifiers, customer data, private evidence, live
+provider state, or external-effect authority. Volatile health, authentication, current data,
+and action identity remain action-time checks.
+
+Publish a newly verified stable skill with `scripts/project_api_skill_registry.rb` only from a
+conclusive passed `project-api-skill:<skill_id>` check. The registry is tracked project contract
+state; the session ledger remains supervisor-owned and append-only.
+
 ## Compact state and raw artifacts
 
 Use the event appender so a state update returns only event ID, sequence, and type; never echo
@@ -123,7 +156,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.5 experiment adds one state-owning process below the LLM orchestrator. The supervisor
+The rc.6 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -137,7 +170,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.5 append, guarded action, and supersession goes through
+the ledger before continuation. Every rc.6 append, guarded action, and supersession goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
 
 The attention projection includes only unresolved operator actions, genuine decision requests,
@@ -200,7 +233,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.5.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.6.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -370,6 +403,12 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.6 — 2026-08-27:** Adds cross-HRM and cross-kernel API skills. Capsules declare
+  required skill fingerprints; the supervisor reuses matching stable contracts and dispatches
+  discovery only for missing skills. Source projects may reuse verified skills immediately;
+  cross-repository reuse requires Software Master Plan acceptance. APM calls use the same
+  skill model as GHL, QBO, VoIP.ms, Website, and future integrations. Volatile and private
+  provider state remains excluded and action-time only.
 - **0.1.0-rc.5 — 2026-08-27:** Adds the smallest state-owning supervisor slice: one lock and
   append path, crash-repairing resume, cursor-bound state/scorecard/attention projection, and a
   compact continuation signal. It does not add worker management, new authority, business

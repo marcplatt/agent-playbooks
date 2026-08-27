@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/project-api-skill-registry.schema.json",
+  "title": "Project API skill registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "registry_scope",
+    "registry_version",
+    "updated_at",
+    "skills",
+    "registry_hash"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.project_api_skill_registry.v0.1"},
+    "registry_id": {"$ref": "#/$defs/nonempty"},
+    "registry_scope": {"const": "cross_repository"},
+    "registry_version": {"type": "integer", "minimum": 1},
+    "updated_at": {"$ref": "#/$defs/nonempty"},
+    "skills": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/skill"}
+    },
+    "registry_hash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "skill_id",
+        "provider_system",
+        "skill_kind",
+        "summary",
+        "contract_version",
+        "contract_fingerprint",
+        "calls",
+        "status",
+        "supersedes_record_id",
+        "provenance",
+        "validity",
+        "portability",
+        "privacy"
+      ],
+      "properties": {
+        "record_id": {"$ref": "#/$defs/nonempty"},
+        "skill_id": {"$ref": "#/$defs/nonempty"},
+        "provider_system": {"$ref": "#/$defs/nonempty"},
+        "skill_kind": {
+          "enum": ["api_read_skill", "api_effect_skill", "integration_constraint"]
+        },
+        "summary": {"$ref": "#/$defs/nonempty"},
+        "contract_version": {"$ref": "#/$defs/nonempty"},
+        "contract_fingerprint": {"$ref": "#/$defs/sha256"},
+        "calls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["call_id", "operation", "effect_class", "contract_ref"],
+            "properties": {
+              "call_id": {"$ref": "#/$defs/nonempty"},
+              "operation": {"$ref": "#/$defs/nonempty"},
+              "effect_class": {
+                "enum": [
+                  "read_only",
+                  "provider_mutation",
+                  "customer_transmission",
+                  "money_movement"
+                ]
+              },
+              "contract_ref": {"$ref": "#/$defs/nonempty"}
+            }
+          }
+        },
+        "status": {"enum": ["active", "superseded"]},
+        "supersedes_record_id": {"type": ["string", "null"], "minLength": 1},
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_session_id",
+            "source_hrm_id",
+            "source_project_id",
+            "source_repository",
+            "source_kernel_id",
+            "source_kernel_version",
+            "evidence_event_sequence",
+            "evidence_event_sha256",
+            "observed_at"
+          ],
+          "properties": {
+            "source_session_id": {"$ref": "#/$defs/nonempty"},
+            "source_hrm_id": {"$ref": "#/$defs/nonempty"},
+            "source_project_id": {"$ref": "#/$defs/nonempty"},
+            "source_repository": {"$ref": "#/$defs/nonempty"},
+            "source_kernel_id": {"const": "AP-EXEC-001"},
+            "source_kernel_version": {"$ref": "#/$defs/nonempty"},
+            "evidence_event_sequence": {"type": "integer", "minimum": 1},
+            "evidence_event_sha256": {"$ref": "#/$defs/sha256"},
+            "observed_at": {"$ref": "#/$defs/nonempty"}
+          }
+        },
+        "validity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stable_across_hrms",
+            "stable_across_kernel_versions",
+            "expires_at",
+            "invalidated_by"
+          ],
+          "properties": {
+            "stable_across_hrms": {"const": true},
+            "stable_across_kernel_versions": {"const": true},
+            "expires_at": {"const": null},
+            "invalidated_by": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"$ref": "#/$defs/nonempty"}
+            }
+          }
+        },
+        "portability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cross_repository",
+            "canonical_scope",
+            "transfer_status",
+            "master_plan_intake_id"
+          ],
+          "properties": {
+            "cross_repository": {"const": true},
+            "canonical_scope": {"const": "software_master_plan"},
+            "transfer_status": {"enum": ["project_verified", "master_plan_accepted"]},
+            "master_plan_intake_id": {"type": ["string", "null"], "minLength": 1}
+          }
+        },
+        "privacy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["contains_secrets", "contains_customer_data", "contains_live_provider_state"],
+          "properties": {
+            "contains_secrets": {"const": false},
+            "contains_customer_data": {"const": false},
+            "contains_live_provider_state": {"const": false}
+          }
+        }
+      }
+    }
+  }
+}

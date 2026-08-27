@@ -38,6 +38,18 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "operator_decision"
   end
 
+  def test_rejects_duplicate_required_api_skill_ids
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    duplicate = Marshal.load(Marshal.dump(capsule.dig("project_api_skills", "required_skills").first))
+    duplicate["contract_fingerprint"] = "f" * 64
+    capsule.dig("project_api_skills", "required_skills") << duplicate
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "unique skill_id values"
+  end
+
   def test_validates_production_observation_continuation_profile
     capsule = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
 
@@ -209,7 +221,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.5"
+      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.6"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -235,7 +247,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.5"
+      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.6"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -258,7 +270,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.5"
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.6"
       assert_equal ledger_before, File.binread(events_path)
     end
   end

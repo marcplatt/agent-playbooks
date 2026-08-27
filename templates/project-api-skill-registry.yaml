@@ -1,0 +1,45 @@
+schema_version: agent_playbooks.project_api_skill_registry.v0.1
+registry_id: "{{organization_api_skill_registry_id}}"
+registry_scope: cross_repository
+registry_version: 1
+updated_at: "{{iso8601}}"
+skills:
+  - record_id: "{{api_skill_record_id}}"
+    skill_id: "{{stable_api_skill_id}}"
+    provider_system: "{{provider_system}}"
+    skill_kind: "api_read_skill|api_effect_skill|integration_constraint"
+    summary: "{{stable_callable_contract_without_private_or_live_state}}"
+    contract_version: "{{contract_version}}"
+    contract_fingerprint: "{{sha256}}"
+    calls:
+      - call_id: "{{stable_call_id}}"
+        operation: "{{operation}}"
+        effect_class: "read_only|provider_mutation|customer_transmission|money_movement"
+        contract_ref: "{{contract_reference}}"
+    status: active
+    supersedes_record_id: null
+    provenance:
+      source_session_id: "{{session_id}}"
+      source_hrm_id: "{{hrm_id}}"
+      source_project_id: "{{system_reference}}"
+      source_repository: "{{owner_repo}}"
+      source_kernel_id: AP-EXEC-001
+      source_kernel_version: "{{kernel_version}}"
+      evidence_event_sequence: 1
+      evidence_event_sha256: "{{sha256}}"
+      observed_at: "{{iso8601}}"
+    validity:
+      stable_across_hrms: true
+      stable_across_kernel_versions: true
+      expires_at: null
+      invalidated_by: ["{{contract_or_adapter_change}}"]
+    portability:
+      cross_repository: true
+      canonical_scope: software_master_plan
+      transfer_status: project_verified
+      master_plan_intake_id: null
+    privacy:
+      contains_secrets: false
+      contains_customer_data: false
+      contains_live_provider_state: false
+registry_hash: "{{derived_sha256}}"
