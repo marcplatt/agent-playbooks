@@ -186,7 +186,7 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "newly missing deliverable"
   end
 
-  def test_supersede_with_successor_cli_appends_the_atomic_transition
+  def test_legacy_supersede_cli_fails_closed_for_rc5_without_advancing_the_ledger
     predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
     successor = runtime_successor_for(predecessor)
 
@@ -195,6 +195,7 @@ class HrmExperimentTest < Minitest::Test
       successor_path = File.join(directory, "successor.yaml")
       HrmExperiment.append_event!(events_path, session_started_event_for(predecessor))
       File.write(successor_path, YAML.dump(successor), mode: "w", perm: 0o600)
+      ledger_before = File.binread(events_path)
 
       stdout, stderr, status = Open3.capture3(
         "ruby",
@@ -206,10 +207,59 @@ class HrmExperimentTest < Minitest::Test
         "2026-09-09T01:00:00Z"
       )
 
-      assert status.success?, stderr
-      assert_includes stdout, "sequence=2 type=stop_reason"
-      terminal = HrmExperiment.load_events(events_path).last
-      assert_equal successor["session_id"], terminal.dig("details", "successor_session_id")
+      assert_equal 2, status.exitstatus
+      assert_empty stdout
+      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.5"
+      assert_equal ledger_before, File.binread(events_path)
+    end
+  end
+
+  def test_legacy_guard_cli_fails_closed_for_rc5_without_advancing_the_ledger
+    events = HrmExperiment.load_events(EVENTS).first(2)
+
+    Dir.mktmpdir do |directory|
+      events_path = File.join(directory, "events.jsonl")
+      write_events(events_path, events)
+      ledger_before = File.binread(events_path)
+
+      stdout, stderr, status = Open3.capture3(
+        "ruby",
+        File.join(ROOT, "scripts/hrm_experiment.rb"),
+        "guard-action",
+        CAPSULE,
+        events_path,
+        "inspect_read_only",
+        "orchestrator",
+        "2026-08-25T00:01:00Z"
+      )
+
+      assert_equal 2, status.exitstatus
+      assert_empty stdout
+      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.5"
+      assert_equal ledger_before, File.binread(events_path)
+    end
+  end
+
+  def test_legacy_append_cli_fails_closed_without_advancing_the_ledger
+    events = HrmExperiment.load_events(EVENTS).first(2)
+
+    Dir.mktmpdir do |directory|
+      events_path = File.join(directory, "events.jsonl")
+      write_events(events_path, events.first(1))
+      ledger_before = File.binread(events_path)
+
+      stdout, stderr, status = Open3.capture3(
+        "ruby",
+        File.join(ROOT, "scripts/hrm_experiment.rb"),
+        "append-event",
+        events_path,
+        stdin_data: JSON.generate(events.last)
+      )
+
+      assert_equal 2, status.exitstatus
+      assert_empty stdout
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.5"
+      assert_equal ledger_before, File.binread(events_path)
     end
   end
 
@@ -523,6 +573,15 @@ class HrmExperimentTest < Minitest::Test
   end
 
   private
+
+  def write_events(path, events)
+    File.write(
+      path,
+      events.map { |event| JSON.generate(event) }.join("\n") + "\n",
+      mode: "w",
+      perm: 0o600
+    )
+  end
 
   def session_started_event_for(capsule)
     {
