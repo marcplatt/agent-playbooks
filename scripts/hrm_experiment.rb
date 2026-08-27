@@ -4,13 +4,15 @@
 require "date"
 require "digest"
 require "json"
+require "pathname"
 require "time"
 require "yaml"
 
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.6"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.7"
+  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7].freeze
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -328,6 +330,11 @@ module HrmExperiment
     Digest::SHA256.hexdigest(JSON.generate(canonical_value(value)))
   end
 
+  def clean_relative_path?(path)
+    path.is_a?(String) && !path.empty? && !Pathname.new(path).absolute? &&
+      path.split(/[\\\/]+/).none? { |segment| segment == ".." }
+  end
+
   def validate_capsule!(capsule)
     validator("hrm-execution-capsule.schema.json").validate!(capsule)
 
@@ -350,12 +357,44 @@ module HrmExperiment
       lineage_errors << "initial capsule_sequence must be 1" unless lineage["capsule_sequence"] == 1
       lineage_errors << "initial session cannot have a predecessor" unless lineage["predecessor_session_id"].nil?
       lineage_errors << "initial session cannot inherit state" unless lineage["inherited_state_path"].nil?
+      lineage_errors << "initial session cannot carry a predecessor event log" unless lineage["predecessor_event_log_path"].nil?
+      lineage_errors << "initial session cannot carry a predecessor event hash" unless lineage["predecessor_event_log_sha256"].nil?
+      lineage_errors << "initial session cannot carry inherited decision receipts" unless lineage["decision_receipts"].empty?
     else
       lineage_errors << "continuation capsule_sequence must be greater than 1" unless lineage["capsule_sequence"] > 1
       lineage_errors << "continuation requires predecessor_session_id" if lineage["predecessor_session_id"].nil?
       lineage_errors << "continuation requires inherited_state_path" if lineage["inherited_state_path"].nil?
+      receipts = lineage["decision_receipts"]
+      if receipts.empty?
+        unless lineage["predecessor_event_log_path"].nil? == lineage["predecessor_event_log_sha256"].nil?
+          lineage_errors << "predecessor event path and hash must be supplied together"
+        end
+      else
+        lineage_errors << "inherited decisions require predecessor_event_log_path" if lineage["predecessor_event_log_path"].nil?
+        lineage_errors << "inherited decisions require predecessor_event_log_sha256" if lineage["predecessor_event_log_sha256"].nil?
+        receipt_ids = receipts.map { |receipt| receipt["decision_id"] }
+        lineage_errors << "inherited decision_id values must be unique" unless receipt_ids.uniq.length == receipt_ids.length
+        unless receipts.all? { |receipt| receipt["request_session_id"] == lineage["predecessor_session_id"] }
+          lineage_errors << "inherited decision receipts must bind to predecessor_session_id"
+        end
+      end
     end
     raise ValidationError, "session lineage invalid: #{lineage_errors.join(', ')}" unless lineage_errors.empty?
+
+    path_fields = %w[event_log_path session_state_path scorecard_path]
+    path_fields.each do |field|
+      path = capsule.dig("metrics", field)
+      raise ValidationError, "metrics.#{field} must be a clean project-root-relative path" unless clean_relative_path?(path)
+    end
+    unless path_fields.map { |field| capsule.dig("metrics", field) }.uniq.length == path_fields.length
+      raise ValidationError, "metrics artifact paths must be distinct"
+    end
+    %w[inherited_state_path predecessor_event_log_path].each do |field|
+      path = lineage[field]
+      next if path.nil? || clean_relative_path?(path)
+
+      raise ValidationError, "session_lineage.#{field} must be a clean project-root-relative path"
+    end
 
     unless capsule.dig("function_slice", "accepted_scenarios") == capsule.dig("hrm", "accepted_scenarios")
       raise ValidationError, "function_slice.accepted_scenarios must equal hrm.accepted_scenarios"
@@ -750,7 +789,7 @@ module HrmExperiment
     raise ValidationError, "supersede-with-successor requires a session_started event" if events.empty?
 
     {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.4",
       "session_id" => predecessor["session_id"],
       "hrm_id" => predecessor.dig("hrm", "id"),
       "sequence" => events.length + 1,
@@ -839,7 +878,7 @@ module HrmExperiment
                 {"action" => action, "guarded_role" => role, "material_progress" => false}
               end
     {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.4",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "sequence" => events.length + 1,
@@ -867,10 +906,20 @@ module HrmExperiment
     decision_requests_by_id.each do |decision_id, requests|
       identity_errors << "duplicate decision request #{decision_id}" if requests.length > 1
     end
+    inherited_receipts = capsule.dig("session_lineage", "decision_receipts").to_h do |receipt|
+      [object_sha256(receipt), receipt]
+    end
     events.select { |event| event["event_type"] == "decision_received" }.each do |response|
       decision_id = response.dig("details", "decision_id")
       request = Array(decision_requests_by_id[decision_id]).first
-      if request.nil? || request["sequence"] >= response["sequence"]
+      receipt = inherited_receipts[response.dig("details", "request_receipt_sha256")]
+      if request.nil? && receipt
+        unless receipt["decision_id"] == decision_id &&
+               receipt["decision_kind"] == response.dig("details", "decision_kind") &&
+               receipt["effect_class"] == response.dig("details", "effect_class")
+          identity_errors << "inherited decision receipt mismatch #{decision_id} at event #{response['sequence']}"
+        end
+      elsif request.nil? || request["sequence"] >= response["sequence"]
         identity_errors << "unbound decision response #{decision_id} at event #{response['sequence']}"
       elsif request.dig("details", "decision_kind") != response.dig("details", "decision_kind")
         identity_errors << "decision kind mismatch #{decision_id} at event #{response['sequence']}"
@@ -1104,7 +1153,11 @@ module HrmExperiment
 
     required_events_present = missing_required_events.empty?
     run_valid = sequence_valid && required_events_present && identity_errors.empty?
-    process_envelope = terminal_event.nil? ? "pending" : (process_reasons.empty? ? "pass" : "fail")
+    process_envelope = if process_reasons.empty?
+                         terminal_event.nil? ? "pending" : "pass"
+                       else
+                         "fail"
+                       end
     reasons = identity_errors + missing_required_events.map { |item| "missing #{item}" } + process_reasons
     reasons << "outcome or safety gate failed" if outcome_and_safety == "fail"
     reasons << "aftercare pending" if outcome_and_safety == "pending" && explicit_terminal
@@ -1221,13 +1274,13 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, or supersede.
+      rc.7 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, or supersede.
     TEXT
   end
 
   def reject_legacy_mutation_cli!(command, capsule = nil)
     kernel_version = capsule&.dig("playbook_pin", "kernel_version")
-    return if capsule && kernel_version != SUPERVISOR_OWNED_KERNEL_VERSION
+    return if capsule && !SUPERVISOR_OWNED_KERNEL_VERSIONS.include?(kernel_version)
 
     version = kernel_version || SUPERVISOR_OWNED_KERNEL_VERSION
     supervisor_command = {

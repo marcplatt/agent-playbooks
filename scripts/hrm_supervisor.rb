@@ -40,6 +40,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
+      ensure_run_writable!(capsule, events) unless events.empty?
       prepared = prepare_event(capsule, events, event)
       if prepared["event_type"] == "stop_reason" && prepared.dig("details", "stop_reason") == "superseded"
         raise HrmExperiment::ValidationError,
@@ -53,6 +54,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
+      ensure_run_writable!(capsule, events)
       if action == "discover_project_api_skills"
         coverage = ProjectApiSkillRegistry.coverage_for_capsule(capsule, capsule_path)
         if coverage["missing_skill_ids"].empty?
@@ -69,6 +71,7 @@ module HrmSupervisor
     predecessor = HrmExperiment.load_yaml(predecessor_path)
     with_run_lock(events_path, predecessor) do
       events = load_and_validate_run(predecessor, events_path)
+      ensure_run_writable!(predecessor, events)
       event = HrmExperiment.supersession_event(
         predecessor,
         events,
@@ -84,19 +87,42 @@ module HrmSupervisor
     File.join(File.dirname(File.expand_path(events_path)), "#{safe_session}.supervisor.json")
   end
 
-  def artifact_paths(capsule, events_path)
-    expanded_events = File.expand_path(events_path)
-    expected_events = File.basename(capsule.dig("metrics", "event_log_path"))
-    unless File.basename(expanded_events) == expected_events
-      raise HrmExperiment::ValidationError,
-            "events path basename must match capsule metrics.event_log_path #{expected_events.inspect}"
+  def project_relative_path(capsule, relative_path, field)
+    unless HrmExperiment.clean_relative_path?(relative_path)
+      raise HrmExperiment::ValidationError, "#{field} must be a clean project-root-relative path"
     end
 
-    directory = File.dirname(expanded_events)
+    configured_root = File.expand_path(capsule.fetch("project_root"))
+    unless Dir.exist?(configured_root)
+      raise HrmExperiment::ValidationError, "capsule project_root does not exist: #{configured_root}"
+    end
+    root = File.realpath(configured_root)
+    expanded = File.expand_path(relative_path, root)
+    unless expanded.start_with?("#{root}#{File::SEPARATOR}")
+      raise HrmExperiment::ValidationError, "#{field} must remain under capsule project_root"
+    end
+
+    existing_parent = File.dirname(expanded)
+    existing_parent = File.dirname(existing_parent) until File.exist?(existing_parent)
+    resolved_parent = File.realpath(existing_parent)
+    unless resolved_parent == root || resolved_parent.start_with?("#{root}#{File::SEPARATOR}")
+      raise HrmExperiment::ValidationError, "#{field} resolves through a path outside capsule project_root"
+    end
+    expanded
+  end
+
+  def artifact_paths(capsule, events_path)
+    expanded_events = File.expand_path(events_path)
+    expected_events = project_relative_path(capsule, capsule.dig("metrics", "event_log_path"), "metrics.event_log_path")
+    unless expanded_events == expected_events
+      raise HrmExperiment::ValidationError,
+            "events path must equal project-root-bound metrics.event_log_path #{expected_events.inspect}"
+    end
+
     {
       "events" => expanded_events,
-      "state" => File.join(directory, File.basename(capsule.dig("metrics", "session_state_path"))),
-      "scorecard" => File.join(directory, File.basename(capsule.dig("metrics", "scorecard_path"))),
+      "state" => project_relative_path(capsule, capsule.dig("metrics", "session_state_path"), "metrics.session_state_path"),
+      "scorecard" => project_relative_path(capsule, capsule.dig("metrics", "scorecard_path"), "metrics.scorecard_path"),
       "projection" => projection_path(capsule, expanded_events)
     }
   end
@@ -106,7 +132,71 @@ module HrmSupervisor
     paths = artifact_paths(capsule, events_path)
     events = File.exist?(paths["events"]) ? HrmExperiment.load_events(paths["events"]) : []
     validate_run_identity!(capsule, events)
+    validate_lineage_receipts!(capsule)
     events
+  end
+
+  def validate_lineage_receipts!(capsule)
+    lineage = capsule.fetch("session_lineage")
+    receipts = lineage.fetch("decision_receipts")
+    return true if receipts.empty?
+
+    predecessor_path = project_relative_path(
+      capsule,
+      lineage.fetch("predecessor_event_log_path"),
+      "session_lineage.predecessor_event_log_path"
+    )
+    unless File.file?(predecessor_path)
+      raise HrmExperiment::ValidationError, "predecessor event log is missing: #{predecessor_path}"
+    end
+    actual_sha = Digest::SHA256.file(predecessor_path).hexdigest
+    unless actual_sha == lineage.fetch("predecessor_event_log_sha256")
+      raise HrmExperiment::ValidationError, "predecessor event log hash mismatch"
+    end
+
+    predecessor_events = HrmExperiment.load_events(predecessor_path)
+    HrmExperiment.validate_events!(predecessor_events)
+    expected_sequences = (1..predecessor_events.length).to_a
+    unless predecessor_events.map { |event| event["sequence"] } == expected_sequences
+      raise HrmExperiment::ValidationError, "predecessor event ledger sequence is not contiguous"
+    end
+    predecessor_times = predecessor_events.map { |event| Time.iso8601(event.fetch("occurred_at")) }
+    unless predecessor_times.each_cons(2).all? { |earlier, later| later >= earlier }
+      raise HrmExperiment::ValidationError, "predecessor event ledger time is not monotonic"
+    end
+    unless predecessor_events.all? { |event| event["session_id"] == lineage["predecessor_session_id"] }
+      raise HrmExperiment::ValidationError, "predecessor event ledger session_id mismatch"
+    end
+    receipts.each do |receipt|
+      request = predecessor_events.find do |event|
+        event["session_id"] == receipt["request_session_id"] &&
+          event["sequence"] == receipt["request_sequence"] &&
+          event["event_type"] == "decision_requested" &&
+          event.dig("details", "decision_id") == receipt["decision_id"]
+      end
+      unless request && request["hrm_id"] == capsule.dig("hrm", "id") &&
+             HrmExperiment.object_sha256(request) == receipt["request_event_sha256"]
+        raise HrmExperiment::ValidationError,
+              "inherited decision receipt #{receipt['decision_id']} does not match the predecessor ledger"
+      end
+      unless request.dig("details", "decision_kind") == receipt["decision_kind"] &&
+             request.dig("details", "effect_class") == receipt["effect_class"]
+        raise HrmExperiment::ValidationError,
+              "inherited decision receipt #{receipt['decision_id']} changes the requested authority"
+      end
+    end
+    true
+  end
+
+  def ensure_run_writable!(capsule, events)
+    verdict = HrmExperiment.evaluate(capsule, events).fetch("verdict")
+    unless verdict["run_valid"]
+      raise HrmExperiment::ValidationError, "supervisor refuses to advance a run-invalid ledger"
+    end
+    if verdict["process_envelope"] == "fail"
+      raise HrmExperiment::ValidationError, "supervisor refuses to advance a failed process envelope"
+    end
+    true
   end
 
   def validate_run_identity!(capsule, events)
@@ -146,6 +236,10 @@ module HrmSupervisor
     end
 
     prepared = Marshal.load(Marshal.dump(event))
+    prepared["schema_version"] ||= "agent_playbooks.hrm_run_event.v0.4"
+    unless prepared["schema_version"] == "agent_playbooks.hrm_run_event.v0.4"
+      raise HrmExperiment::ValidationError, "rc.7 supervisor writes require hrm_run_event.v0.4"
+    end
     expected_sequence = events.length + 1
     if prepared.key?("sequence") && prepared["sequence"] != expected_sequence
       raise HrmExperiment::ValidationError,
@@ -162,6 +256,10 @@ module HrmSupervisor
     prepared = prepare_event(capsule, events, event)
     updated_events = events + [prepared]
     validate_run_identity!(capsule, updated_events)
+    prospective_verdict = HrmExperiment.evaluate(capsule, updated_events).fetch("verdict")
+    unless prospective_verdict["run_valid"]
+      raise HrmExperiment::ValidationError, "supervisor refuses an event that makes the ledger run-invalid"
+    end
 
     File.open(events_path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
       file.write(JSON.generate(prepared))
@@ -216,7 +314,12 @@ module HrmSupervisor
             "attention projection has #{attention.length} items; consolidate before supervisor continuation"
     end
 
-    next_action = if state.dig("terminal", "state") != "active"
+    verdict = scorecard.fetch("verdict")
+    next_action = if !verdict["run_valid"]
+                    "stop_run_invalid"
+                  elsif verdict["process_envelope"] == "fail"
+                    "stop_process_envelope"
+                  elsif state.dig("terminal", "state") != "active"
                     "terminal"
                   elsif !attention.empty?
                     {
@@ -232,13 +335,19 @@ module HrmSupervisor
                   end
 
     projection = {
-      "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.2",
+      "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.3",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "capsule_sha256" => HrmExperiment.object_sha256(capsule),
       "ledger_cursor" => events.length,
       "state_hash" => state["state_hash"],
       "scorecard_event_count" => scorecard.dig("run_identity", "event_count"),
+      "scorecard_verdict" => {
+        "run_valid" => verdict.fetch("run_valid"),
+        "process_envelope" => verdict.fetch("process_envelope"),
+        "overall" => verdict.fetch("overall"),
+        "reason_count" => verdict.fetch("reasons").length
+      },
       "project_api_skills" => api_skill_coverage,
       "phase" => state["phase"],
       "terminal_state" => state.dig("terminal", "state"),

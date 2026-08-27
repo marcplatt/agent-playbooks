@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.6` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.7` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -110,11 +110,14 @@ ruby scripts/hrm_supervisor.rb supersede \
   path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl path/to/successor-capsule.yaml
 ```
 
-During rc.6, use the non-LLM supervisor for run writes and continuation reads. It serializes
+During rc.7, use the non-LLM supervisor for run writes and continuation reads. It serializes
 event appends and commits a cursor-bound state, scorecard, and compact attention projection;
 the LLM orchestrator consumes that projection instead of replaying startup validation output.
-The legacy `hrm_experiment.rb` append, guard, and supersede commands fail closed for rc.6 so
+The legacy `hrm_experiment.rb` append, guard, and supersede commands fail closed for rc.6 and rc.7 so
 they cannot advance the authoritative ledger without committing the matching projection.
+Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
+projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
+must carry a request receipt verified against the exact immutable predecessor event log.
 Stable API skills are registered once and reused across HRMs and kernel versions. Each skill
 contains callable contracts—including APM reads—and privacy-safe provenance. A different
 repository may consume a skill only after Software Master Plan intake acceptance; volatile

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.6"
+version: "0.1.0-rc.7"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -156,7 +156,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.6 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.7 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -170,8 +170,14 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.6 append, guarded action, and supersession goes through
+the ledger before continuation. Every rc.7 append, guarded action, and supersession goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
+
+All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
+same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
+on `run_invalid` or a failed process envelope before any later routine action can be guarded.
+A successor may consume an earlier decision only through a capsule receipt that binds the
+decision ID, kind, effect class, request event digest, and immutable predecessor ledger digest.
 
 The attention projection includes only unresolved operator actions, genuine decision requests,
 blocking or S0/S1 findings, and an active `review_ready` stop. Routine workflow is represented
@@ -233,7 +239,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.6.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.7.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -383,7 +389,8 @@ The evaluator reports three independent conclusions:
 - `process_envelope`: liveness, context, CI, correction, and scope budgets pass.
 
 The event validator rejects a routine or read-only operation serialized as an operator
-decision. The process envelope also fails on a root compaction before the expected executable
+decision. The process envelope fails immediately when a measurable budget violation exists,
+including a root compaction before the expected executable
 or operational value, or raw-log/state-ledger echo beyond budget. Report genuine decision
 requests separately from non-decision operator actions; a safe run can still fail the autonomy
 experiment.
@@ -403,6 +410,11 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.7 — 2026-08-27:** Fails the state-owning supervisor closed on semantic integrity.
+  Project-root-bound artifact paths prevent cross-worktree projection writes. Compact projections
+  carry the scorecard verdict and stop on run-invalid or failed process state; later writes are
+  refused. Cross-session decisions require an exact predecessor-request receipt verified against
+  the immutable predecessor ledger, while rc.6 event ledgers remain readable as history.
 - **0.1.0-rc.6 — 2026-08-27:** Adds cross-HRM and cross-kernel API skills. Capsules declare
   required skill fingerprints; the supervisor reuses matching stable contracts and dispatches
   discovery only for missing skills. Source projects may reuse verified skills immediately;

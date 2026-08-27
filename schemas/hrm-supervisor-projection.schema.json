@@ -12,6 +12,7 @@
     "ledger_cursor",
     "state_hash",
     "scorecard_event_count",
+    "scorecard_verdict",
     "project_api_skills",
     "phase",
     "terminal_state",
@@ -20,13 +21,24 @@
     "projection_hash"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.2"},
+    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.3"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "capsule_sha256": {"$ref": "#/$defs/sha256"},
     "ledger_cursor": {"type": "integer", "minimum": 0},
     "state_hash": {"$ref": "#/$defs/sha256"},
     "scorecard_event_count": {"type": "integer", "minimum": 0},
+    "scorecard_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_valid", "process_envelope", "overall", "reason_count"],
+      "properties": {
+        "run_valid": {"type": "boolean"},
+        "process_envelope": {"enum": ["pass", "fail", "pending"]},
+        "overall": {"enum": ["pass", "fail", "pending", "blocked", "deferred", "run_invalid"]},
+        "reason_count": {"type": "integer", "minimum": 0}
+      }
+    },
     "project_api_skills": {
       "type": "object",
       "additionalProperties": false,
@@ -84,6 +96,8 @@
     },
     "next_action": {
       "enum": [
+        "stop_run_invalid",
+        "stop_process_envelope",
         "terminal",
         "await_operator_action",
         "await_operator_decision",
