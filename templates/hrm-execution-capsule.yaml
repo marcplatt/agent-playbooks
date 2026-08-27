@@ -1,4 +1,4 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.5
+schema_version: agent_playbooks.hrm_execution_capsule.v0.6
 session_id: "{{stable_session_id}}"
 playbook_pin:
   kernel_id: AP-EXEC-001
@@ -55,6 +55,11 @@ project_api_skills:
     across_hrms: true
     across_kernel_versions: true
     volatile_runtime_state: action_time_only
+context_dependencies:
+  - dependency_id: "{{stable_dependency_id}}"
+    kind: "repository_dispatcher|execution_capsule|accepted_target_contract|project_api_skill_registry|playbook_kernel|playbook_runtime|run_state|implementation_source|declared_check"
+    source_path: "{{path_or_stable_source_locator}}"
+    binding: "{{version_commit_digest_or_capsule_binding}}"
 workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:

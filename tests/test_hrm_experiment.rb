@@ -50,6 +50,18 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "unique skill_id values"
   end
 
+  def test_rejects_duplicate_context_dependency_ids
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    duplicate = Marshal.load(Marshal.dump(capsule.fetch("context_dependencies").first))
+    duplicate["source_path"] = "examples/duplicate-capsule.yaml"
+    capsule.fetch("context_dependencies") << duplicate
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "unique dependency_id values"
+  end
+
   def test_validates_production_observation_continuation_profile
     capsule = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
 
@@ -438,6 +450,58 @@ class HrmExperimentTest < Minitest::Test
     assert_equal 0.0385, scorecard.dig("context", "context_redundancy_ratio")
     assert_equal "fail", scorecard.dig("verdict", "process_envelope")
     assert_includes scorecard.dig("verdict", "reasons"), "context-redundancy budget exceeded"
+  end
+
+  def test_declared_external_kernel_dependency_does_not_escape_context_scope
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = HrmExperiment.load_events(EVENTS).first(2)
+    events[1]["schema_version"] = "agent_playbooks.hrm_run_event.v0.4"
+    events[1].fetch("context").merge!(
+      "loaded_dependency_ids" => ["example.execution-capsule", "ap.exec.kernel"],
+      "outside_declared_dependency_ids" => [],
+      "files_outside_declared_dependencies" => 0
+    )
+
+    scorecard = HrmExperiment.evaluate(capsule, events)
+
+    assert scorecard.dig("verdict", "run_valid")
+    assert_equal "pending", scorecard.dig("verdict", "process_envelope")
+    refute_includes scorecard.dig("verdict", "reasons"), "context scope escape"
+  end
+
+  def test_context_dependency_evidence_must_match_declared_ids_and_count
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = HrmExperiment.load_events(EVENTS).first(2)
+    events[1]["schema_version"] = "agent_playbooks.hrm_run_event.v0.4"
+    events[1].fetch("context").merge!(
+      "loaded_dependency_ids" => ["example.execution-capsule", "undeclared.file"],
+      "outside_declared_dependency_ids" => ["undeclared.file"],
+      "files_outside_declared_dependencies" => 0
+    )
+
+    scorecard = HrmExperiment.evaluate(capsule, events)
+
+    refute scorecard.dig("verdict", "run_valid")
+    assert_equal "run_invalid", scorecard.dig("verdict", "overall")
+    assert_includes scorecard.dig("verdict", "reasons"), "context dependency count mismatch at event 2"
+  end
+
+  def test_auditable_context_scope_escape_fails_process_and_overall
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = HrmExperiment.load_events(EVENTS).first(2)
+    events[1]["schema_version"] = "agent_playbooks.hrm_run_event.v0.4"
+    events[1].fetch("context").merge!(
+      "loaded_dependency_ids" => ["example.execution-capsule", "undeclared.file"],
+      "outside_declared_dependency_ids" => ["undeclared.file"],
+      "files_outside_declared_dependencies" => 1
+    )
+
+    scorecard = HrmExperiment.evaluate(capsule, events)
+
+    assert scorecard.dig("verdict", "run_valid")
+    assert_equal "fail", scorecard.dig("verdict", "process_envelope")
+    assert_equal "fail", scorecard.dig("verdict", "overall")
+    assert_includes scorecard.dig("verdict", "reasons"), "context scope escape"
   end
 
   def test_routine_workflow_cannot_be_serialized_as_an_operator_decision

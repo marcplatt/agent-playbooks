@@ -255,6 +255,31 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
+  def test_declared_external_kernel_context_reaches_routine_projection
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    started = HrmExperiment.load_events(EVENTS).first
+    context = Marshal.load(Marshal.dump(HrmExperiment.load_events(EVENTS)[1]))
+    context["schema_version"] = "agent_playbooks.hrm_run_event.v0.4"
+    context.delete("sequence")
+    context.delete("session_id")
+    context.delete("hrm_id")
+    context.delete("caused_by_sequence")
+    context.fetch("context").merge!(
+      "loaded_dependency_ids" => ["example.execution-capsule", "ap.exec.kernel"],
+      "outside_declared_dependency_ids" => [],
+      "files_outside_declared_dependencies" => 0
+    )
+
+    with_run(capsule, [started]) do |capsule_path, events_path, paths|
+      receipt = HrmSupervisor.append(capsule_path, events_path, context)
+      projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
+
+      assert_equal "continue_routine_workflow", receipt["next_action"]
+      assert_equal "pending", projection.dig("scorecard_verdict", "process_envelope")
+      assert_equal 2, projection["ledger_cursor"]
+    end
+  end
+
   def test_inherited_decision_receipt_is_bound_to_immutable_predecessor_event
     capsule = HrmExperiment.load_yaml(CAPSULE)
     predecessor_events = HrmExperiment.load_events(EVENTS).first(4)

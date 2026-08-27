@@ -5,6 +5,7 @@ require "date"
 require "digest"
 require "json"
 require "pathname"
+require "set"
 require "time"
 require "yaml"
 
@@ -405,6 +406,11 @@ module HrmExperiment
     end
     unless required_skill_ids.uniq.length == required_skill_ids.length
       raise ValidationError, "project_api_skills.required_skills must contain unique skill_id values"
+    end
+
+    dependency_ids = capsule.fetch("context_dependencies").map { |dependency| dependency.fetch("dependency_id") }
+    unless dependency_ids.uniq.length == dependency_ids.length
+      raise ValidationError, "context_dependencies must contain unique dependency_id values"
     end
 
     lease = capsule.fetch("workflow_lease")
@@ -1011,6 +1017,27 @@ module HrmExperiment
     end.values.map { |items| [items.length - 1, 0].max }
 
     context_events = events.select { |event| event["event_type"] == "context_snapshot" }
+    declared_dependency_ids = capsule.fetch("context_dependencies").map do |dependency|
+      dependency.fetch("dependency_id")
+    end.to_set
+    context_events.each do |event|
+      next unless event["schema_version"] == "agent_playbooks.hrm_run_event.v0.4"
+
+      context = event.fetch("context")
+      unless context.key?("loaded_dependency_ids") && context.key?("outside_declared_dependency_ids")
+        identity_errors << "context dependency evidence missing at event #{event['sequence']}"
+        next
+      end
+      loaded_ids = context.fetch("loaded_dependency_ids").to_set
+      outside_ids = context.fetch("outside_declared_dependency_ids").to_set
+      unknown_ids = loaded_ids - declared_dependency_ids
+      unless unknown_ids == outside_ids
+        identity_errors << "context dependency evidence mismatch at event #{event['sequence']}"
+      end
+      unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
+        identity_errors << "context dependency count mismatch at event #{event['sequence']}"
+      end
+    end
     peak_active_context_bytes = context_events.map { |event| event.dig("context", "active_context_bytes") }.max || 0
     orchestrator_peak_context_bytes = context_events.select { |event| event["role"] == "orchestrator" }
                                                     .map { |event| event.dig("context", "active_context_bytes") }.max || 0
@@ -1021,7 +1048,15 @@ module HrmExperiment
     state_artifact_echo_bytes = context_events.sum { |event| event.dig("context", "state_artifact_echo_bytes") }
     context_compactions_before_executable = compactions_before(events, first_executable && first_executable["sequence"], role: "orchestrator")
     context_compactions_before_operational = compactions_before(events, first_operational && first_operational["sequence"], role: "orchestrator")
-    scope_escape_files = context_events.sum { |event| event.dig("context", "files_outside_declared_dependencies") }
+    scope_escape_files = context_events.sum do |event|
+      context = event.fetch("context")
+      if event["schema_version"] == "agent_playbooks.hrm_run_event.v0.4" &&
+         context.key?("outside_declared_dependency_ids")
+        context.fetch("outside_declared_dependency_ids").length
+      else
+        context.fetch("files_outside_declared_dependencies")
+      end
+    end
     context_budget_violations = context_events.count do |event|
       role = event["role"]
       budget = capsule.dig("budgets", "context_bytes_by_role", role)
@@ -1164,6 +1199,8 @@ module HrmExperiment
 
     overall = if !run_valid
                 "run_invalid"
+              elsif process_envelope == "fail"
+                "fail"
               elsif outcome_and_safety == "blocked"
                 "blocked"
               elsif outcome_and_safety == "deferred"

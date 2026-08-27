@@ -20,6 +20,7 @@
     "deliverable_type",
     "function_slice",
     "project_api_skills",
+    "context_dependencies",
     "workflow_lease",
     "role_topology",
     "authority",
@@ -30,7 +31,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "agent_playbooks.hrm_execution_capsule.v0.5"
+      "const": "agent_playbooks.hrm_execution_capsule.v0.6"
     },
     "session_id": {
       "type": "string",
@@ -257,6 +258,34 @@
             "across_kernel_versions": {"const": true},
             "volatile_runtime_state": {"const": "action_time_only"}
           }
+        }
+      }
+    },
+    "context_dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dependency_id", "kind", "source_path", "binding"],
+        "properties": {
+          "dependency_id": {"$ref": "#/$defs/nonempty"},
+          "kind": {
+            "enum": [
+              "repository_dispatcher",
+              "execution_capsule",
+              "accepted_target_contract",
+              "project_api_skill_registry",
+              "playbook_kernel",
+              "playbook_runtime",
+              "run_state",
+              "implementation_source",
+              "declared_check"
+            ]
+          },
+          "source_path": {"$ref": "#/$defs/nonempty"},
+          "binding": {"$ref": "#/$defs/nonempty"}
         }
       }
     },

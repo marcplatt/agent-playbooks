@@ -1,4 +1,4 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.5
+schema_version: agent_playbooks.hrm_execution_capsule.v0.6
 session_id: MS-EXAMPLE-2026-08-25-HRM-2
 playbook_pin:
   kernel_id: AP-EXEC-001
@@ -55,6 +55,23 @@ project_api_skills:
     across_hrms: true
     across_kernel_versions: true
     volatile_runtime_state: action_time_only
+context_dependencies:
+  - dependency_id: example.execution-capsule
+    kind: execution_capsule
+    source_path: examples/hrm-execution-capsule.example.yaml
+    binding: capsule_sha256
+  - dependency_id: example.target-contract
+    kind: accepted_target_contract
+    source_path: docs/planning/project-hrm-map.yaml#HRM-2
+    binding: 1.0.0
+  - dependency_id: example.api-skill-registry
+    kind: project_api_skill_registry
+    source_path: examples/project-api-skill-registry.example.yaml
+    binding: f36a6ae9832e2c091e26ca064d8f96df9ee96100b5da51fe4a2ad67015b4973d
+  - dependency_id: ap.exec.kernel
+    kind: playbook_kernel
+    source_path: playbooks/hrm-execution-kernel.md
+    binding: AP-EXEC-001/0.1.0-rc.7@1111111111111111111111111111111111111111
 workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:

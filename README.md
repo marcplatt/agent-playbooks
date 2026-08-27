@@ -118,6 +118,9 @@ they cannot advance the authoritative ledger without committing the matching pro
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
 must carry a request receipt verified against the exact immutable predecessor event log.
+Context snapshots use capsule-declared dependency IDs and matching loaded/outside ID sets; an
+opaque positive file count is invalid evidence, while the exact pinned external kernel is a
+declared dependency rather than a scope escape.
 Stable API skills are registered once and reused across HRMs and kernel versions. Each skill
 contains callable contracts—including APM reads—and privacy-safe provenance. A different
 repository may consume a skill only after Software Master Plan intake acceptance; volatile

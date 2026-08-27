@@ -88,7 +88,17 @@
         "state_artifact_echo_bytes": {"type": "integer", "minimum": 0},
         "context_compactions": {"type": "integer", "minimum": 0},
         "files_loaded": {"type": "integer", "minimum": 0},
-        "files_outside_declared_dependencies": {"type": "integer", "minimum": 0}
+        "files_outside_declared_dependencies": {"type": "integer", "minimum": 0},
+        "loaded_dependency_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "outside_declared_dependency_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
       }
     },
     "check": {

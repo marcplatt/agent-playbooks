@@ -143,6 +143,14 @@ guarded actions. A root-orchestrator compaction before `first_executable_delta` 
 capsule budget rather than treated as free. A governance record, state projection, capsule,
 or receipt never counts as executable or operational value.
 
+Every context snapshot names the stable IDs it loaded from the capsule's
+`context_dependencies`. Any loaded ID absent from that declaration must also appear in
+`outside_declared_dependency_ids`, and its count must match
+`files_outside_declared_dependencies`. The pinned kernel, capsule, dispatcher, accepted target
+contract, API-skill registry, run state, implementation sources, and declared checks are not
+scope escapes when explicitly bound there. An unidentifiable positive count is invalid
+instrumentation rather than a terminal assumption.
+
 The root context is coordination-only. It resolves meaning, owns the decision frontier, emits
 bounded worker projections, and receives compact results. A fresh builder owns implementation
 and correction, a fresh checker owns declared checks, and a fresh provider observer owns the
@@ -414,7 +422,10 @@ unbounded vocabulary.
   Project-root-bound artifact paths prevent cross-worktree projection writes. Compact projections
   carry the scorecard verdict and stop on run-invalid or failed process state; later writes are
   refused. Cross-session decisions require an exact predecessor-request receipt verified against
-  the immutable predecessor ledger, while rc.6 event ledgers remain readable as history.
+  the immutable predecessor ledger, while rc.6 event ledgers remain readable as history. The
+  bounded context-dependency correction adds capsule-bound dependency IDs and matching event
+  evidence so a required external pinned kernel cannot be misclassified by an opaque count; a
+  failed process envelope also makes the aggregate verdict fail.
 - **0.1.0-rc.6 — 2026-08-27:** Adds cross-HRM and cross-kernel API skills. Capsules declare
   required skill fingerprints; the supervisor reuses matching stable contracts and dispatches
   discovery only for missing skills. Source projects may reuse verified skills immediately;
