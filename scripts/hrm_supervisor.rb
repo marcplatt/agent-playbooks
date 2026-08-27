@@ -43,11 +43,19 @@ module HrmSupervisor
     true
   end
 
-  def resume(capsule_path, events_path)
+  def resume(capsule_path, events_path, now = Time.now.utc)
     capsule = HrmExperiment.load_yaml(capsule_path)
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
-      refresh(capsule, events, events_path, "resume", capsule_path)
+      if events.empty?
+        append_prepared(capsule, events, events_path, {
+          "event_type" => "session_started",
+          "occurred_at" => now.iso8601,
+          "role" => "orchestrator"
+        }, "start", capsule_path)
+      else
+        refresh(capsule, events, events_path, "resume", capsule_path)
+      end
     end
   end
 

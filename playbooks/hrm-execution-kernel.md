@@ -289,7 +289,9 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    before the predecessor may become terminal. A manually copied capsule or free-text
    `superseded` event is invalid during routine mode transition.
 
-2. Start or resume through `scripts/hrm_supervisor.rb`. Use its cursor-bound compact projection
+2. Start or resume through `scripts/hrm_supervisor.rb`. On an empty bound ledger, `resume`
+   atomically writes `session_started` before compiling the first assignment. Use its
+   cursor-bound compact projection
    and compiled dispatch envelope as active model state. Validate hashes mechanically; do not
    reread the complete kernel, project map, capsule, or ledger when their cache keys are unchanged.
    The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not

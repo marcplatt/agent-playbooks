@@ -116,8 +116,10 @@ ruby scripts/hrm_supervisor.rb transition \
 During rc.8, use the non-LLM supervisor for run writes and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
-envelope instead of rereading full startup sources. `transition` mechanically derives and binds
-runtime-build/production-observation successors. The legacy `hrm_experiment.rb` append, guard,
+envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
+when the bound ledger is empty, then emits the first worker assignment. `transition`
+mechanically derives and binds runtime-build/production-observation successors. The legacy
+`hrm_experiment.rb` append, guard,
 and supersede commands fail closed for rc.6 through rc.8 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope

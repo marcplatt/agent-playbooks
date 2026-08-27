@@ -9,6 +9,28 @@ class HrmSupervisorTest < Minitest::Test
   CAPSULE = File.join(ROOT, "examples/hrm-execution-capsule.example.yaml")
   EVENTS = File.join(ROOT, "examples/hrm-run-events.example.jsonl")
 
+  def test_resume_atomically_starts_an_empty_ledger_and_dispatches_first_worker
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      receipt = HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      events = HrmExperiment.load_events(events_path)
+      projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
+      dispatch = JSON.parse(File.read(paths["dispatch"], encoding: "UTF-8"))
+
+      assert_equal "start", receipt["action"]
+      assert_equal 1, receipt["ledger_cursor"]
+      assert_equal "session_started", receipt["event_type"]
+      assert_equal "inventory_runtime_bindings", receipt["next_action"]
+      assert_equal 1, events.length
+      assert_equal "2026-08-27T22:00:00Z", events.first["occurred_at"]
+      assert projection.dig("scorecard_verdict", "run_valid")
+      assert_equal "silent", projection.dig("operator_projection", "visibility")
+      assert_equal "inventory_runtime_bindings", dispatch.dig("assignment", "action")
+      assert_equal "provider_observer", dispatch.dig("assignment", "role")
+    end
+  end
+
   def test_resume_repairs_stale_projections_at_the_exact_ledger_cursor
     capsule = HrmExperiment.load_yaml(CAPSULE)
     all_events = HrmExperiment.load_events(EVENTS).first(7)
