@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.7` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.8` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -108,12 +108,17 @@ ruby scripts/hrm_supervisor.rb guard \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl ACTION ROLE
 ruby scripts/hrm_supervisor.rb supersede \
   path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl path/to/successor-capsule.yaml
+ruby scripts/hrm_supervisor.rb transition \
+  path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl \
+  path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.7, use the non-LLM supervisor for run writes and continuation reads. It serializes
-event appends and commits a cursor-bound state, scorecard, and compact attention projection;
-the LLM orchestrator consumes that projection instead of replaying startup validation output.
-The legacy `hrm_experiment.rb` append, guard, and supersede commands fail closed for rc.6 and rc.7 so
+During rc.8, use the non-LLM supervisor for run writes and continuation reads. It serializes
+event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
+operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
+envelope instead of rereading full startup sources. `transition` mechanically derives and binds
+runtime-build/production-observation successors. The legacy `hrm_experiment.rb` append, guard,
+and supersede commands fail closed for rc.6 through rc.8 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
@@ -121,6 +126,10 @@ must carry a request receipt verified against the exact immutable predecessor ev
 Context snapshots use capsule-declared dependency IDs and matching loaded/outside ID sets; an
 opaque positive file count is invalid evidence, while the exact pinned external kernel is a
 declared dependency rather than a scope escape.
+Runtime-build dispatch begins with a zero-effect binding inventory. A runtime delta is not
+executable until every frozen real seam is bound and construction is proven without effects.
+Routine technical choices remain silent; only unavoidable environment/private-value actions,
+genuine decisions, prepared review, and terminal state reach the operator projection.
 Stable API skills are registered once and reused across HRMs and kernel versions. Each skill
 contains callable contracts—including APM reads—and privacy-safe provenance. A different
 repository may consume a skill only after Software Master Plan intake acceptance; volatile

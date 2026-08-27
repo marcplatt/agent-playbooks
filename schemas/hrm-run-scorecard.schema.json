@@ -90,6 +90,7 @@
       "additionalProperties": false,
       "required": [
         "semantic_readiness_seconds",
+        "startup_to_first_worker_handoff_seconds",
         "first_executable_delta_from_semantic_ready_seconds",
         "first_operational_evidence_from_semantic_ready_seconds",
         "review_ready_from_semantic_ready_seconds",
@@ -100,6 +101,7 @@
       ],
       "properties": {
         "semantic_readiness_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "startup_to_first_worker_handoff_seconds": {"$ref": "#/$defs/nullable_integer"},
         "first_executable_delta_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
         "first_operational_evidence_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
         "review_ready_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},

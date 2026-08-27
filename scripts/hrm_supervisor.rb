@@ -12,6 +12,7 @@ require_relative "project_api_skill_registry"
 
 module HrmSupervisor
   MAX_PROJECTION_BYTES = 4096
+  MAX_DISPATCH_BYTES = 12_288
   MAX_ATTENTION_ITEMS = 12
 
   module_function
@@ -25,6 +26,20 @@ module HrmSupervisor
       raise HrmExperiment::ValidationError, "supervisor projection hash mismatch"
     end
 
+    true
+  end
+
+  def validate_dispatch!(dispatch)
+    HrmExperiment.validator("hrm-dispatch-envelope.schema.json").validate!(dispatch)
+    expected_hash = HrmExperiment.object_sha256(
+      dispatch.reject { |key, _value| key == "dispatch_hash" }
+    )
+    unless dispatch["dispatch_hash"] == expected_hash
+      raise HrmExperiment::ValidationError, "dispatch envelope hash mismatch"
+    end
+    if JSON.generate(dispatch).bytesize > MAX_DISPATCH_BYTES
+      raise HrmExperiment::ValidationError, "dispatch envelope exceeds #{MAX_DISPATCH_BYTES} bytes"
+    end
     true
   end
 
@@ -82,9 +97,138 @@ module HrmSupervisor
     end
   end
 
+  def transition(predecessor_path, events_path, successor_path, session_id, execution_mode, now = Time.now.utc)
+    predecessor = HrmExperiment.load_yaml(predecessor_path)
+    with_run_lock(events_path, predecessor) do
+      events = load_and_validate_run(predecessor, events_path)
+      ensure_run_writable!(predecessor, events)
+      successor = derive_successor_capsule(predecessor, successor_path, session_id, execution_mode)
+      HrmExperiment.validate_successor!(predecessor, events, successor)
+      write_new_capsule!(predecessor, successor_path, successor)
+      event = HrmExperiment.supersession_event(predecessor, events, successor, now)
+      append_prepared(predecessor, events, events_path, event, "transition", predecessor_path).merge(
+        "successor_session_id" => successor["session_id"],
+        "successor_capsule_path" => File.expand_path(successor_path),
+        "successor_capsule_sha256" => HrmExperiment.object_sha256(successor)
+      )
+    end
+  end
+
+  def derive_successor_capsule(predecessor, successor_path, session_id, execution_mode)
+    profiles = {
+      "runtime_build" => "runtime_build_fast_feedback",
+      "production_observation" => "production_observation_fail_closed"
+    }
+    profile_name = profiles[execution_mode]
+    unless profile_name
+      raise HrmExperiment::ValidationError,
+            "automatic transition supports runtime_build or production_observation"
+    end
+    if execution_mode == predecessor["execution_mode"]
+      raise HrmExperiment::ValidationError, "automatic transition requires an execution-mode change"
+    end
+
+    successor = Marshal.load(Marshal.dump(predecessor))
+    profile = HrmExperiment::PROFILE_CONTRACTS.fetch(profile_name)
+    successor["schema_version"] = "agent_playbooks.hrm_execution_capsule.v0.7"
+    successor["session_id"] = session_id
+    successor["session_lineage"] = {
+      "predecessor_session_id" => predecessor["session_id"],
+      "capsule_sequence" => predecessor.dig("session_lineage", "capsule_sequence") + 1,
+      "continuation_reason" => "execution_mode_changed",
+      "inherited_state_path" => predecessor.dig("metrics", "session_state_path"),
+      "predecessor_event_log_path" => nil,
+      "predecessor_event_log_sha256" => nil,
+      "decision_receipts" => []
+    }
+    successor["entry_condition"] = {
+      "known_missing_deliverable_types" => [profile.fetch("deliverable_type")],
+      "on_mode_mismatch" => "start_successor_capsule_or_stop_blocked_input"
+    }
+    successor["experiment_profile"] = profile_name
+    successor["execution_mode"] = execution_mode
+    successor["deliverable_type"] = profile.fetch("deliverable_type")
+    successor.dig("workflow_lease")["permitted_routine_actions"] = profile.fetch("routine_actions")
+    successor.dig("workflow_lease", "read_only_diagnostic_scope")["scope_id"] =
+      "#{successor.dig('hrm', 'id')}-#{session_id}-READONLY".gsub(/[^A-Za-z0-9_.:-]/, "-")
+    successor.dig("authority")["workflow"] = profile.fetch("workflow_authority")
+    successor.dig("authority")["operational"].keys.each do |key|
+      successor.dig("authority", "operational")[key] = false
+    end
+    profile.fetch("budgets").each { |key, value| successor.dig("budgets")[key] = value }
+    successor.dig("verification")["profile"] = profile.fetch("verification_profile")
+    successor.dig("metrics")["aftercare_window_days"] = profile.fetch("aftercare_window_days")
+
+    root = File.realpath(File.expand_path(predecessor.fetch("project_root")))
+    expanded_successor = File.expand_path(successor_path)
+    unless expanded_successor.start_with?("#{root}#{File::SEPARATOR}")
+      raise HrmExperiment::ValidationError, "successor capsule must remain under capsule project_root"
+    end
+    successor_relative = expanded_successor.delete_prefix("#{root}#{File::SEPARATOR}")
+    capsule_dependency = successor.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "execution_capsule"
+    end
+    raise HrmExperiment::ValidationError, "execution capsule context dependency is missing" unless capsule_dependency
+    capsule_dependency["source_path"] = successor_relative
+    capsule_dependency["binding"] = "capsule_sha256"
+
+    inherited_source = predecessor.dig("session_lineage", "inherited_state_path")
+    predecessor_state_dependency = successor.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "run_state" &&
+        (dependency["source_path"] == inherited_source || dependency["dependency_id"].include?("predecessor"))
+    end
+    unless predecessor_state_dependency
+      dependency_id = "ap.predecessor-run-state"
+      used_ids = successor.fetch("context_dependencies").map { |dependency| dependency["dependency_id"] }
+      dependency_id = "#{dependency_id}-#{successor.dig('session_lineage', 'capsule_sequence')}" if used_ids.include?(dependency_id)
+      predecessor_state_dependency = {
+        "dependency_id" => dependency_id,
+        "kind" => "run_state",
+        "source_path" => predecessor.dig("metrics", "session_state_path"),
+        "binding" => "supervisor_validated_execution_mode_transition"
+      }
+      successor.fetch("context_dependencies") << predecessor_state_dependency
+    end
+    predecessor_state_dependency["source_path"] = predecessor.dig("metrics", "session_state_path")
+    predecessor_state_dependency["binding"] = "supervisor_validated_execution_mode_transition"
+
+    metrics_directory = File.dirname(predecessor.dig("metrics", "event_log_path"))
+    safe_session = session_id.gsub(/[^A-Za-z0-9_.-]/, "_")
+    artifact = lambda do |suffix|
+      name = "#{safe_session}.#{suffix}"
+      metrics_directory == "." ? name : File.join(metrics_directory, name)
+    end
+    successor.dig("metrics")["event_log_path"] = artifact.call("events.jsonl")
+    successor.dig("metrics")["session_state_path"] = artifact.call("state.yaml")
+    successor.dig("metrics")["scorecard_path"] = artifact.call("scorecard.yaml")
+    HrmExperiment.validate_capsule!(successor)
+    successor
+  end
+
+  def write_new_capsule!(predecessor, successor_path, successor)
+    expanded = File.expand_path(successor_path)
+    project_relative_artifact_path(predecessor, expanded, "successor capsule")
+    raise HrmExperiment::ValidationError, "successor capsule already exists: #{expanded}" if File.exist?(expanded)
+    unless File.directory?(File.dirname(expanded))
+      raise HrmExperiment::ValidationError, "successor capsule directory does not exist: #{File.dirname(expanded)}"
+    end
+    File.open(expanded, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
+      file.write(YAML.dump(successor))
+      file.flush
+      file.fsync
+    end
+    File.chmod(0o600, expanded)
+    fsync_directory(File.dirname(expanded))
+  end
+
   def projection_path(capsule, events_path)
     safe_session = capsule.fetch("session_id").gsub(/[^A-Za-z0-9_.-]/, "_")
     File.join(File.dirname(File.expand_path(events_path)), "#{safe_session}.supervisor.json")
+  end
+
+  def dispatch_path(capsule, events_path)
+    safe_session = capsule.fetch("session_id").gsub(/[^A-Za-z0-9_.-]/, "_")
+    File.join(File.dirname(File.expand_path(events_path)), "#{safe_session}.dispatch.json")
   end
 
   def project_relative_path(capsule, relative_path, field)
@@ -123,7 +267,8 @@ module HrmSupervisor
       "events" => expanded_events,
       "state" => project_relative_path(capsule, capsule.dig("metrics", "session_state_path"), "metrics.session_state_path"),
       "scorecard" => project_relative_path(capsule, capsule.dig("metrics", "scorecard_path"), "metrics.scorecard_path"),
-      "projection" => projection_path(capsule, expanded_events)
+      "projection" => projection_path(capsule, expanded_events),
+      "dispatch" => dispatch_path(capsule, expanded_events)
     }
   end
 
@@ -236,9 +381,11 @@ module HrmSupervisor
     end
 
     prepared = Marshal.load(Marshal.dump(event))
-    prepared["schema_version"] ||= "agent_playbooks.hrm_run_event.v0.4"
-    unless prepared["schema_version"] == "agent_playbooks.hrm_run_event.v0.4"
-      raise HrmExperiment::ValidationError, "rc.7 supervisor writes require hrm_run_event.v0.4"
+    required_schema = HrmExperiment.event_schema_version(capsule)
+    prepared["schema_version"] ||= required_schema
+    unless prepared["schema_version"] == required_schema
+      raise HrmExperiment::ValidationError,
+            "#{capsule.dig('playbook_pin', 'kernel_version')} supervisor writes require #{required_schema}"
     end
     expected_sequence = events.length + 1
     if prepared.key?("sequence") && prepared["sequence"] != expected_sequence
@@ -287,8 +434,15 @@ module HrmSupervisor
 
     state = HrmExperiment.derive_session_state(capsule, events)
     scorecard = HrmExperiment.evaluate(capsule, events)
-    projection = derive_projection(capsule, events, state, scorecard, api_skill_coverage)
-    write_projection_set(paths, state, scorecard, projection)
+    projection, dispatch = derive_projection_set(
+      capsule,
+      events,
+      state,
+      scorecard,
+      api_skill_coverage,
+      paths
+    )
+    write_projection_set(paths, state, scorecard, projection, dispatch)
 
     {
       "action" => action,
@@ -298,6 +452,7 @@ module HrmSupervisor
       "projection_lag_events_after" => 0,
       "projection_repaired" => before.nil? || !before["coherent"] || before["cursor"] != ledger_cursor,
       "projection_bytes" => JSON.generate(projection).bytesize,
+      "dispatch_bytes" => JSON.generate(dispatch).bytesize,
       "attention_count" => projection["attention"].length,
       "reusable_api_skill_count" => api_skill_coverage["reusable_skill_ids"].length,
       "missing_api_skill_count" => api_skill_coverage["missing_skill_ids"].length,
@@ -307,7 +462,7 @@ module HrmSupervisor
     }
   end
 
-  def derive_projection(capsule, events, state, scorecard, api_skill_coverage)
+  def derive_projection_set(capsule, events, state, scorecard, api_skill_coverage, paths)
     attention = derive_attention(events, state)
     if attention.length > MAX_ATTENTION_ITEMS
       raise HrmExperiment::ValidationError,
@@ -331,11 +486,15 @@ module HrmSupervisor
                   elsif !api_skill_coverage["missing_skill_ids"].empty?
                     "discover_missing_project_api_skills"
                   else
-                    "continue_routine_workflow"
+                    derive_routine_next_action(capsule, events)
                   end
 
+    dispatch = derive_dispatch_envelope(capsule, events, next_action, api_skill_coverage)
+    relative_dispatch = project_relative_artifact_path(capsule, paths.fetch("dispatch"), "dispatch")
+    operator_projection = derive_operator_projection(capsule, state, attention)
+
     projection = {
-      "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.3",
+      "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.4",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "capsule_sha256" => HrmExperiment.object_sha256(capsule),
@@ -352,7 +511,13 @@ module HrmSupervisor
       "phase" => state["phase"],
       "terminal_state" => state.dig("terminal", "state"),
       "attention" => attention,
-      "next_action" => next_action
+      "next_action" => next_action,
+      "operator_projection" => operator_projection,
+      "dispatch_ref" => {
+        "path" => relative_dispatch,
+        "sha256" => dispatch["dispatch_hash"],
+        "cache_key" => dispatch.dig("cache", "cache_key")
+      }
     }
     projection["projection_hash"] = HrmExperiment.object_sha256(projection)
     validate_projection!(projection)
@@ -362,7 +527,132 @@ module HrmSupervisor
       raise HrmExperiment::ValidationError,
             "supervisor projection is #{bytes} bytes; maximum is #{MAX_PROJECTION_BYTES}"
     end
-    projection
+    [projection, dispatch]
+  end
+
+  def derive_routine_next_action(capsule, events)
+    latest_guard = events.reverse.find { |event| event["event_type"] == "action_guard_passed" }
+    latest_worker_result = events.reverse.find { |event| event["event_type"] == "worker_result_received" }
+    if latest_guard && (!latest_worker_result || latest_worker_result["sequence"] < latest_guard["sequence"])
+      return "await_worker_result"
+    end
+
+    if capsule["execution_mode"] == "production_observation"
+      guarded_actions = events.select { |event| event["event_type"] == "action_guard_passed" }
+                              .map { |event| event.dig("details", "action") }
+      return "prepare_private_inputs" unless guarded_actions.include?("prepare_private_inputs")
+      return "inspect_provider_read_only" unless guarded_actions.include?("inspect_provider_read_only")
+      return "record_operational_evidence" unless events.any? { |event| event["event_type"] == "first_operational_evidence" }
+
+      return "prepare_review"
+    end
+    return "continue_routine_workflow" unless capsule["execution_mode"] == "runtime_build"
+
+    inventory = events.reverse.find { |event| event["event_type"] == "runtime_binding_inventory" }
+    first_executable = events.find { |event| event["event_type"] == "first_executable_delta" }
+    candidate = events.reverse.find { |event| event["event_type"] == "candidate_frozen" }
+    checks = events.select { |event| event["event_type"] == "check_completed" }
+    return "inventory_runtime_bindings" unless inventory
+    return "implement_frozen_slice" unless first_executable
+    return "freeze_candidate" unless candidate
+
+    required = capsule.dig("verification", "exact_checks")
+    completed = checks.select do |event|
+      event.dig("check", "conclusive") &&
+        event.dig("check", "conclusion") == "passed" &&
+        event["candidate_sha"] == candidate["candidate_sha"] &&
+        event["ci_plan_hash"] == capsule.dig("verification", "ci_plan_hash") &&
+        event.dig("check", "environment_id") == capsule.dig("verification", "environment_id")
+    end.map { |event| event.dig("check", "name") }.compact
+    return "run_declared_checks" unless (required - completed).empty?
+
+    "prepare_review"
+  end
+
+  def derive_dispatch_envelope(capsule, events, next_action, api_skill_coverage)
+    action_roles = {
+      "discover_missing_project_api_skills" => ["discover_project_api_skills", "provider_observer"],
+      "inventory_runtime_bindings" => ["inventory_runtime_bindings", "provider_observer"],
+      "prepare_private_inputs" => ["prepare_private_inputs", "provider_observer"],
+      "inspect_provider_read_only" => ["inspect_provider_read_only", "provider_observer"],
+      "record_operational_evidence" => ["record_operational_evidence", "provider_observer"],
+      "implement_frozen_slice" => ["implement_frozen_slice", "builder"],
+      "freeze_candidate" => [nil, "orchestrator"],
+      "run_declared_checks" => ["run_declared_checks", "checker"],
+      "prepare_review" => [nil, "reviewer"]
+    }
+    action, role = action_roles.fetch(next_action, [nil, nil])
+    latest_inventory = events.reverse.find { |event| event["event_type"] == "runtime_binding_inventory" }
+    required_seams = capsule.dig("function_slice", "required_real_seams")
+    bound_seams = Array(latest_inventory&.dig("details", "runtime_readiness", "bound_real_seams"))
+    enabled_effects = capsule.dig("authority", "operational").select { |_key, enabled| enabled }.keys.sort
+    kernel_key = HrmExperiment.object_sha256(capsule.fetch("playbook_pin"))
+    target_key = HrmExperiment.object_sha256(
+      capsule.fetch("target_resolution").merge("hrm" => capsule.fetch("hrm"))
+    )
+    cache_key = HrmExperiment.object_sha256(
+      "kernel_key" => kernel_key,
+      "target_contract_key" => target_key,
+      "capsule_sha256" => HrmExperiment.object_sha256(capsule)
+    )
+    dispatch = {
+      "schema_version" => "agent_playbooks.hrm_dispatch_envelope.v0.1",
+      "session_id" => capsule["session_id"],
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "capsule_sha256" => HrmExperiment.object_sha256(capsule),
+      "ledger_cursor" => events.length,
+      "cache" => {
+        "cache_key" => cache_key,
+        "kernel_key" => kernel_key,
+        "target_contract_key" => target_key,
+        "load_policy" => "hashes_only_unless_changed"
+      },
+      "assignment" => {"next_action" => next_action, "action" => action, "role" => role},
+      "scope" => {
+        "execution_mode" => capsule["execution_mode"],
+        "deliverable_type" => capsule["deliverable_type"],
+        "required_dependency_ids" => capsule.fetch("context_dependencies").map { |item| item["dependency_id"] },
+        "required_skill_ids" => capsule.dig("project_api_skills", "required_skills").map { |item| item["skill_id"] },
+        "missing_skill_ids" => api_skill_coverage["missing_skill_ids"],
+        "required_real_seams" => required_seams,
+        "missing_runtime_bindings" => required_seams - bound_seams,
+        "allowed_paths" => capsule.dig("function_slice", "allowed_paths"),
+        "proof_obligations" => capsule.dig("function_slice", "proof_obligations"),
+        "exact_checks" => capsule.dig("verification", "exact_checks")
+      },
+      "authority" => {
+        "routine_action_authorized" => action.nil? || capsule.dig("workflow_lease", "permitted_routine_actions").include?(action),
+        "enabled_operational_effects" => enabled_effects
+      }
+    }
+    dispatch["dispatch_hash"] = HrmExperiment.object_sha256(dispatch)
+    validate_dispatch!(dispatch)
+    dispatch
+  end
+
+  def derive_operator_projection(capsule, state, attention)
+    terminal = state.dig("terminal", "state") != "active"
+    visibility = if terminal
+                   "terminal"
+                 elsif attention.any? { |item| item["kind"] == "operator_review" }
+                   "review"
+                 elsif !attention.empty?
+                   "attention"
+                 else
+                   "silent"
+                 end
+    summary = capsule.dig("hrm", "outcome").to_s.gsub(/\s+/, " ").strip
+    summary = "#{summary[0, 237]}..." if summary.length > 240
+    {"visibility" => visibility, "status" => state["phase"], "summary" => summary}
+  end
+
+  def project_relative_artifact_path(capsule, path, field)
+    root = File.realpath(File.expand_path(capsule.fetch("project_root")))
+    expanded = File.expand_path(path)
+    unless expanded.start_with?("#{root}#{File::SEPARATOR}")
+      raise HrmExperiment::ValidationError, "#{field} must remain under capsule project_root"
+    end
+    expanded.delete_prefix("#{root}#{File::SEPARATOR}")
   end
 
   def derive_attention(events, state)
@@ -389,7 +679,7 @@ module HrmSupervisor
         attention_item(event, "decision", details["decision_id"], details["exact_effect"])
       when "finding_opened"
         next if dispositioned_findings.include?(details["finding_id"])
-        next unless details["blocking"] || %w[S0 S1].include?(details["interrupt_class"])
+        next unless details["blocking"] && %w[S0 S1].include?(details["interrupt_class"])
 
         attention_item(event, "blocking_finding", details["finding_id"], details["note"])
       end
@@ -424,7 +714,7 @@ module HrmSupervisor
   end
 
   def stored_projection_status(paths, capsule, api_skill_coverage)
-    required = %w[state scorecard projection]
+    required = %w[state scorecard projection dispatch]
     return nil unless required.all? { |name| File.exist?(paths[name]) }
 
     state = HrmExperiment.load_yaml(paths["state"])
@@ -433,6 +723,8 @@ module HrmSupervisor
     HrmExperiment.validate_scorecard!(scorecard)
     projection = HrmExperiment.load_json(paths["projection"])
     validate_projection!(projection)
+    dispatch = HrmExperiment.load_json(paths["dispatch"])
+    validate_dispatch!(dispatch)
 
     capsule_sha = HrmExperiment.object_sha256(capsule)
     identities_match = state["session_id"] == capsule["session_id"] &&
@@ -440,27 +732,31 @@ module HrmSupervisor
                        scorecard.dig("run_identity", "session_id") == capsule["session_id"] &&
                        projection["session_id"] == capsule["session_id"] &&
                        projection["capsule_sha256"] == capsule_sha &&
-                       projection["project_api_skills"] == api_skill_coverage
+                       projection["project_api_skills"] == api_skill_coverage &&
+                       dispatch["capsule_sha256"] == capsule_sha
     return nil unless identities_match
 
     cursors = [
       state["last_event_sequence"],
       scorecard.dig("run_identity", "event_count"),
-      projection["ledger_cursor"]
+      projection["ledger_cursor"],
+      dispatch["ledger_cursor"]
     ]
     coherent = cursors.uniq.length == 1 &&
                projection["state_hash"] == state["state_hash"] &&
-               projection["scorecard_event_count"] == scorecard.dig("run_identity", "event_count")
+               projection["scorecard_event_count"] == scorecard.dig("run_identity", "event_count") &&
+               projection.dig("dispatch_ref", "sha256") == dispatch["dispatch_hash"]
     {"cursor" => cursors.min, "max_cursor" => cursors.max, "coherent" => coherent}
   rescue HrmExperiment::ValidationError, JSON::ParserError
     nil
   end
 
-  def write_projection_set(paths, state, scorecard, projection)
+  def write_projection_set(paths, state, scorecard, projection, dispatch)
     payloads = {
       paths["state"] => YAML.dump(state),
       paths["scorecard"] => YAML.dump(scorecard),
-      paths["projection"] => "#{JSON.generate(projection)}\n"
+      paths["projection"] => "#{JSON.generate(projection)}\n",
+      paths["dispatch"] => "#{JSON.generate(dispatch)}\n"
     }
     temporary_paths = []
     payloads.each do |path, payload|
@@ -511,6 +807,7 @@ module HrmSupervisor
         ruby scripts/hrm_supervisor.rb append CAPSULE.yaml EVENTS.jsonl < EVENT.json
         ruby scripts/hrm_supervisor.rb guard CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
         ruby scripts/hrm_supervisor.rb supersede PREDECESSOR.yaml EVENTS.jsonl SUCCESSOR.yaml [ISO8601_NOW]
+        ruby scripts/hrm_supervisor.rb transition PREDECESSOR.yaml EVENTS.jsonl SUCCESSOR.yaml SESSION_ID EXECUTION_MODE [ISO8601_NOW]
     TEXT
   end
 end
@@ -549,6 +846,21 @@ if $PROGRAM_NAME == __FILE__
                   predecessor_path,
                   events_path,
                   successor_path,
+                  now_arg ? Time.iso8601(now_arg) : Time.now.utc
+                )
+              when "transition"
+                predecessor_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                successor_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                session_id = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                execution_mode = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                now_arg = ARGV.shift
+                HrmSupervisor.transition(
+                  predecessor_path,
+                  events_path,
+                  successor_path,
+                  session_id,
+                  execution_mode,
                   now_arg ? Time.iso8601(now_arg) : Time.now.utc
                 )
               else

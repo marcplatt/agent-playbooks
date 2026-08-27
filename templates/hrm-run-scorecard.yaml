@@ -24,6 +24,7 @@ hard_gates:
   escaped_p0_p1_defects: 0
 flow:
   semantic_readiness_seconds: null
+  startup_to_first_worker_handoff_seconds: null
   first_executable_delta_from_semantic_ready_seconds: null
   first_operational_evidence_from_semantic_ready_seconds: null
   review_ready_from_semantic_ready_seconds: null

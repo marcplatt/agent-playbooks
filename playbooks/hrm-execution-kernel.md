@@ -1,14 +1,14 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.7"
+version: "0.1.0-rc.8"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
 human_readable: true
 machine_readable: true
 required_inputs: [repository_policy, accepted_project_hrm_map]
-derived_inputs: [target_hrm_contract, execution_capsule, event_log, session_state]
+derived_inputs: [target_hrm_contract, execution_capsule, event_log, session_state, dispatch_envelope, operator_projection]
 optional_inputs: [scorecard, authority_grants, approved_reference_requests]
 replaces_as_startup_context_during_experiment:
   - AP-SYSBUILD-001
@@ -30,11 +30,16 @@ controls:
   - durable-state-not-chat-state
   - non-llm-supervisor-single-writer
   - cursor-bound-projection-commit
+  - compiled-hash-bound-dispatch
+  - automatic-mode-successor-generation
+  - fast-dispatch-budget
   - operator-attention-firewall
   - cross-hrm-api-skill-reuse
   - cross-kernel-api-skill-reuse
   - master-plan-api-skill-portability
   - frozen-function-slice
+  - pre-build-runtime-binding-inventory
+  - zero-effect-runnable-candidate-proof
   - one-writer-per-overlapping-change-unit
   - declared-deliverable-liveness
   - no-progress-termination
@@ -54,7 +59,9 @@ Use this experimental kernel as the complete active AP execution playbook for on
 Do not preload the legacy system-build, lane-coordination, checker-controller, or rollout
 playbooks. They remain historical and explanatory references, not required startup context.
 The kernel, validated capsule, repository policy, and target HRM contract contain the
-normative execution state for this experiment.
+normative execution state for this experiment. The non-LLM supervisor compiles those sources
+into a hash-bound dispatch envelope. On an unchanged pin and contract the orchestrator reads
+that envelope, not the complete kernel or project map, and delegates in its first turn.
 
 ## Current-HRM target resolution
 
@@ -83,10 +90,13 @@ routine lease actions, not approval gates. Each request names a decision ID and 
 never ask merely “approve” or “proceed.” A generic reply accepts only the last prepared
 decision's complete envelope, then execution continues.
 
-Sign-in, MFA, credential unlock, private-value entry, and required physical presence are
+Sign-in, MFA, credential unlock, genuinely owner-private value entry, and required physical presence are
 `operator_action_required` handoffs. They are not decisions, authority grants, or evidence of
 acceptance. Resume the same diagnostic tree after the action without asking for another
-approval; stop only when a declared diagnostic stop condition is reached.
+approval; stop only when a declared diagnostic stop condition is reached. A private value must
+be a credential, destination, customer case, or private identity that software cannot safely
+derive. A reversible local path, filename, environment-variable name, adapter selection, or
+other technical choice is routine implementation and cannot be serialized as operator attention.
 
 ## Stable capsule and authority overlay
 
@@ -136,8 +146,10 @@ state; the session ledger remains supervisor-owned and append-only.
 Use the event appender so a state update returns only event ID, sequence, and type; never echo
 the growing JSONL ledger into active context. Keep raw CI output outside chat, PR prose, review
 packets, and events. Record only the check summary, raw-artifact path, byte count, and digest.
-Do not paste this kernel into the task prompt when the pinned repository dispatcher can load
-it. Emit cumulative per-turn `context_snapshot` events at startup, worker handoff, and before
+Do not paste this kernel into the task prompt. The supervisor dispatch envelope carries a
+kernel cache key and target-contract cache key; reload full source only when the corresponding
+hash changes or the compact contract is internally ambiguous. Emit cumulative per-turn
+`context_snapshot` events at startup, worker handoff, and before
 guarded actions. A root-orchestrator compaction before `first_executable_delta` or
 `first_operational_evidence`, raw-log replay, or state-artifact echo is measured against the
 capsule budget rather than treated as free. A governance record, state projection, capsule,
@@ -164,7 +176,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.7 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.8 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -172,14 +184,18 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 2. reread and validate the capsule and complete ledger under that lock;
 3. assign the next event sequence and append/fsync the event;
 4. derive session state and scorecard from that exact in-memory ledger; and
-5. atomically replace those artifacts, then publish the compact supervisor projection last as
-   the cursor-bound commit marker.
+5. compile the next worker assignment from the resolved HRM slice, skill coverage, runtime
+   binding inventory, authority, and checks; and
+6. atomically replace state, scorecard, dispatch, and projection, publishing the compact
+   supervisor projection last as the cursor-bound commit marker.
 
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.7 append, guarded action, and supersession goes through
+the ledger before continuation. Every rc.8 append, guarded action, and transition goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
+`transition` derives the execution-mode successor mechanically, writes it once, validates it,
+and only then binds the predecessor's terminal supersession event.
 
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
@@ -187,13 +203,14 @@ on `run_invalid` or a failed process envelope before any later routine action ca
 A successor may consume an earlier decision only through a capsule receipt that binds the
 decision ID, kind, effect class, request event digest, and immutable predecessor ledger digest.
 
-The attention projection includes only unresolved operator actions, genuine decision requests,
+The attention projection includes only unavoidable environment/owner-private actions, genuine decision requests,
 blocking or S0/S1 findings, and an active `review_ready` stop. Routine workflow is represented
-as `continue_routine_workflow`, not rendered as an operator-facing validation transcript or a
-request to approve a micro-transition. The projection is capped at 4,096 bytes and carries the
-ledger cursor, state hash, scorecard event count, next action, and its own digest. An LLM may
-explain or act on that projection, but may not silently reinterpret it or use conversation
-memory as a newer state.
+by a silent operator projection, not rendered as an operator-facing validation transcript or a
+request to approve a micro-transition. Cursor, hash, worker, scope, check, and retry detail stays
+in the dispatch/ledger. The projection is capped at 4,096 bytes and carries the ledger cursor,
+state hash, scorecard event count, dispatch digest, next action, and its own digest. An LLM may
+render only the operator projection unless attention, review, or terminal state requires a
+message; it may not silently reinterpret it or use conversation memory as newer state.
 
 ## Non-negotiable safety kernel
 
@@ -236,7 +253,8 @@ memory as a newer state.
 - one append-only JSONL event log; and
 - one compact session-state projection derived from the capsule and event log; and
 - one scorecard derived from the capsule and event log; and
-- one compact supervisor projection committed at the same event cursor.
+- one compact supervisor projection committed at the same event cursor; and
+- one compiled dispatch envelope committed at the same event cursor.
 
 Later gated effects require a grant validated against `hrm-authority-grant.schema.json` and
 the active capsule.
@@ -247,7 +265,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.7.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.8.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -266,27 +284,29 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    If the capsule's execution mode cannot produce a known missing deliverable, derive and
    validate the declared successor capsule immediately when its inputs are complete; otherwise
    stop `blocked_input` before discovery, branch creation, or evidence preparation. If a new
-   incompatible deliverable is discovered during execution, create the successor first and use
-   `scripts/hrm_supervisor.rb supersede` to validate its HRM, target, lineage, state path, mode
-   change, and newly missing deliverable before the predecessor may become terminal. A free-text
-   `superseded` event is invalid.
+   incompatible deliverable is discovered during execution, use
+   `scripts/hrm_supervisor.rb transition` to derive, write, validate, and bind the mode successor
+   before the predecessor may become terminal. A manually copied capsule or free-text
+   `superseded` event is invalid during routine mode transition.
 
-2. Start or resume through `scripts/hrm_supervisor.rb`. Use its cursor-bound compact projection,
-   stable capsule, append-only events, and validated grants as active state. Conversation is not
+2. Start or resume through `scripts/hrm_supervisor.rb`. Use its cursor-bound compact projection
+   and compiled dispatch envelope as active model state. Validate hashes mechanically; do not
+   reread the complete kernel, project map, capsule, or ledger when their cache keys are unchanged.
+   The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not
    authoritative state. A generic reply can accept only the last prepared exact decision. Emit
    an event for every lifecycle transition, material decision, candidate freeze, conclusive
    check, operator-review boundary, finding disposition, and terminal reason; append it through
    the supervisor without replaying the ledger or derived artifacts into context.
 
-3. Load only the role projection and execute worker-owned work in fresh contexts:
+3. Load only the compiled assignment and role projection and execute worker-owned work in fresh contexts:
    - orchestrator: outcome, decision frontier, phase, active units, blockers, budgets, next
      transition;
    - builder: function slice, scenarios, allowed paths, non-goals, dependencies, exact checks,
      stop conditions;
    - checker/reviewer: policy and contract pins, candidate/base, changed paths, diff, declared
      checks, results, limitations;
-   - operator: capabilities ready and remaining, blockers, prepared decisions, exact review
-     surface, findings requiring disposition, closure effect.
+   - operator: only the supervisor's operator projection—capability state, a genuine blocker or
+     decision, prepared review, or terminal outcome.
    Do not give builders organization-level derivation or reviewers the builder conversation.
    The root may not implement, correct, run checks, perform provider diagnosis, prepare private
    inputs, or collect operational evidence. Record every handoff and cumulative per-turn context
@@ -298,7 +318,10 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    Apply the safety kernel at every transition. Later operational states remain separately
    authorized even during `production_observation`.
 
-5. Before non-disposable work, freeze the function slice. Type each discovery as
+5. Before non-disposable work, freeze the function slice. In runtime-build mode, dispatch a
+   fresh provider observer to emit `runtime_binding_inventory` for every required real seam
+   before the builder. Missing adapters and clients become builder inputs, not a later
+   production-observation discovery or an operator task. Type each discovery as
    `current_claim_blocker`, `defer`, `separate_proposal`, or `accepted_current_scope`.
    Only the orchestrator may accept current scope, and material semantic expansion retains
    its human or contract gate.
@@ -333,8 +356,9 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
     correction budget stops for disposition.
 
 11. Mark `review_ready` only when the declared deliverable and evidence exist. Emit
-    `first_executable_delta` only for a material runtime change and
-    `first_operational_evidence` only for verified operational proof. Runtime-build
+    `first_executable_delta` only after its runtime-readiness proof names every frozen real seam,
+    shows every seam bound, and proves zero-effect construction. A created file or module digest
+    alone is not executable value. Emit `first_operational_evidence` only for verified operational proof. Runtime-build
     runs cannot close with documentation alone. Production-observation runs do not invent
     code when operational evidence is the deliverable. Stop for operator review; do not
     cross later authority boundaries.
@@ -372,6 +396,7 @@ the disposition. Do not retain unrelated reference prose in subsequent role proj
 | Repository dispatcher | 8,000 bytes |
 | Execution capsule | 8,000 bytes |
 | Derived session state | 4,000 bytes |
+| Compiled dispatch envelope | 12,288 bytes |
 | Orchestrator projection | 32,000 bytes |
 | Builder projection | 20,000 bytes |
 | Checker projection | 12,000 bytes |
@@ -399,7 +424,8 @@ The evaluator reports three independent conclusions:
 The event validator rejects a routine or read-only operation serialized as an operator
 decision. The process envelope fails immediately when a measurable budget violation exists,
 including a root compaction before the expected executable
-or operational value, or raw-log/state-ledger echo beyond budget. Report genuine decision
+or operational value, uninterrupted semantic readiness or first worker handoff beyond 30
+seconds, or raw-log/state-ledger echo beyond budget. Report genuine decision
 requests separately from non-decision operator actions; a safe run can still fail the autonomy
 experiment.
 
@@ -418,6 +444,12 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.8 — 2026-08-27:** Compiles a hash-bound worker dispatch envelope and separate quiet
+  operator projection so unchanged kernel/HRM sources do not need full LLM rereads. Enforces
+  30-second uninterrupted semantic/handoff budgets, derives execution-mode successors through
+  one supervisor transition, inventories runtime bindings before build, and requires all frozen
+  real seams plus zero-effect construction proof before `first_executable_delta`. Reversible
+  technical choices cannot be encoded as private-value operator interruptions.
 - **0.1.0-rc.7 — 2026-08-27:** Fails the state-owning supervisor closed on semantic integrity.
   Project-root-bound artifact paths prevent cross-worktree projection writes. Compact projections
   carry the scorecard verdict and stop on run-invalid or failed process state; later writes are

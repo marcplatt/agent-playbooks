@@ -9,7 +9,8 @@
     "schema_version": {
       "enum": [
         "agent_playbooks.hrm_run_event.v0.3",
-        "agent_playbooks.hrm_run_event.v0.4"
+        "agent_playbooks.hrm_run_event.v0.4",
+        "agent_playbooks.hrm_run_event.v0.5"
       ]
     },
     "session_id": {"type": "string", "minLength": 1},
@@ -29,6 +30,7 @@
         "worker_result_received",
         "context_snapshot",
         "action_guard_passed",
+        "runtime_binding_inventory",
         "first_executable_delta",
         "first_operational_evidence",
         "candidate_frozen",
@@ -156,11 +158,18 @@
         "operator_action_kind": {
           "enum": ["sign_in", "mfa", "credential_unlock", "private_value_entry", "physical_presence"]
         },
+        "operator_interrupt_reason": {
+          "enum": ["environment_boundary", "owner_private_value"]
+        },
+        "owner_private_value_kind": {
+          "enum": ["credential", "destination", "customer_case", "private_identity"]
+        },
         "exact_action": {"type": "string", "minLength": 1},
         "action": {
           "enum": [
             "inspect_read_only",
             "inspect_provider_read_only",
+            "inventory_runtime_bindings",
             "discover_project_api_skills",
             "manage_task_branch_worktree",
             "implement_frozen_slice",
@@ -213,6 +222,30 @@
         },
         "severity": {"enum": ["P0", "P1", "P2", "P3"]},
         "material_progress": {"type": "boolean"},
+        "runtime_readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "required_real_seams",
+            "bound_real_seams",
+            "zero_effect_construction_verified",
+            "evidence_sha256"
+          ],
+          "properties": {
+            "required_real_seams": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            },
+            "bound_real_seams": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            },
+            "zero_effect_construction_verified": {"type": "boolean"},
+            "evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
         "note": {"type": "string"},
         "successor_session_id": {"type": "string", "minLength": 1},
         "successor_capsule_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},

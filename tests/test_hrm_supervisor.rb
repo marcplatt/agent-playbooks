@@ -46,6 +46,7 @@ class HrmSupervisorTest < Minitest::Test
       append_event(capsule_path, events_path, "operator_action_required", "2026-08-25T00:01:00Z", {
         "action_id" => "ACTION-UNLOCK-001",
         "operator_action_kind" => "credential_unlock",
+        "operator_interrupt_reason" => "environment_boundary",
         "exact_action" => "Unlock the local credential store."
       })
       append_event(capsule_path, events_path, "decision_requested", "2026-08-25T00:02:00Z", {
@@ -68,6 +69,7 @@ class HrmSupervisorTest < Minitest::Test
       append_event(capsule_path, events_path, "operator_action_completed", "2026-08-25T00:04:00Z", {
         "action_id" => "ACTION-UNLOCK-001",
         "operator_action_kind" => "credential_unlock",
+        "operator_interrupt_reason" => "environment_boundary",
         "exact_action" => "Unlock the local credential store."
       })
       append_event(capsule_path, events_path, "decision_received", "2026-08-25T00:05:00Z", {
@@ -83,7 +85,7 @@ class HrmSupervisorTest < Minitest::Test
 
       projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
       assert_empty projection["attention"]
-      assert_equal "continue_routine_workflow", projection["next_action"]
+      assert_equal "inventory_runtime_bindings", projection["next_action"]
     end
   end
 
@@ -96,7 +98,7 @@ class HrmSupervisorTest < Minitest::Test
       threads = 2.times.map do |index|
         Thread.new do
           event = {
-            "schema_version" => "agent_playbooks.hrm_run_event.v0.4",
+            "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
             "event_type" => "finding_opened",
             "occurred_at" => "2026-08-25T00:01:00Z",
             "role" => "orchestrator",
@@ -150,7 +152,7 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal 0, receipt["missing_api_skill_count"]
       assert_equal ["product-master.catalog-price.read"],
                    projection.dig("project_api_skills", "reusable_skill_ids")
-      assert_equal "continue_routine_workflow", projection["next_action"]
+      assert_equal "inventory_runtime_bindings", projection["next_action"]
 
       error = assert_raises(HrmExperiment::ValidationError) do
         HrmSupervisor.guard(
@@ -163,6 +165,137 @@ class HrmSupervisorTest < Minitest::Test
       end
       assert_includes error.message, "do not repeat API discovery"
       assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_resume_emits_compiled_dispatch_and_quiet_operator_projection
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    session_started = HrmExperiment.load_events(EVENTS).first
+
+    with_run(capsule, [session_started]) do |capsule_path, events_path, paths|
+      receipt = HrmSupervisor.resume(capsule_path, events_path)
+      projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
+      dispatch = JSON.parse(File.read(paths["dispatch"], encoding: "UTF-8"))
+
+      assert_equal "inventory_runtime_bindings", receipt["next_action"]
+      assert_equal "silent", projection.dig("operator_projection", "visibility")
+      assert_equal "inventory_runtime_bindings", dispatch.dig("assignment", "action")
+      assert_equal "provider_observer", dispatch.dig("assignment", "role")
+      assert_equal "hashes_only_unless_changed", dispatch.dig("cache", "load_policy")
+      assert_equal dispatch["dispatch_hash"], projection.dig("dispatch_ref", "sha256")
+      assert_operator receipt["dispatch_bytes"], :<=, HrmSupervisor::MAX_DISPATCH_BYTES
+      assert HrmSupervisor.validate_dispatch!(dispatch)
+    end
+  end
+
+  def test_local_private_path_choice_cannot_be_serialized_as_operator_attention
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    session_started = HrmExperiment.load_events(EVENTS).first
+
+    with_run(capsule, [session_started]) do |capsule_path, events_path, _paths|
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.append(capsule_path, events_path, {
+          "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+          "event_type" => "operator_action_required",
+          "occurred_at" => "2026-08-25T00:01:00Z",
+          "role" => "operator",
+          "details" => {
+            "action_id" => "ACTION-LOCAL-PATH-001",
+            "operator_action_kind" => "private_value_entry",
+            "operator_interrupt_reason" => "owner_private_value",
+            "exact_action" => "Choose a reversible local module path."
+          }
+        })
+      end
+      assert_includes error.message, "credential, destination, customer_case, or private_identity"
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_first_executable_requires_prebuild_runtime_inventory
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    session_started = HrmExperiment.load_events(EVENTS).first
+    seams = capsule.dig("function_slice", "required_real_seams")
+
+    with_run(capsule, [session_started]) do |capsule_path, events_path, _paths|
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.append(capsule_path, events_path, {
+          "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+          "event_type" => "first_executable_delta",
+          "occurred_at" => "2026-08-25T00:01:00Z",
+          "role" => "builder",
+          "candidate_sha" => "3" * 40,
+          "details" => {
+            "deliverable_type" => "runtime_change",
+            "material_progress" => true,
+            "runtime_readiness" => {
+              "required_real_seams" => seams,
+              "bound_real_seams" => seams,
+              "zero_effect_construction_verified" => true,
+              "evidence_sha256" => "4" * 64
+            }
+          }
+        })
+      end
+      assert_includes error.message, "run-invalid"
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_transition_generates_and_binds_the_mode_successor
+    capsule = HrmExperiment.load_yaml(File.join(ROOT, "examples/hrm-production-observation-capsule.example.yaml"))
+    session_started = {
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+      "session_id" => capsule["session_id"],
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "sequence" => 1,
+      "event_type" => "session_started",
+      "occurred_at" => "2026-08-25T00:00:00Z",
+      "role" => "orchestrator"
+    }
+
+    with_run(capsule, [session_started]) do |capsule_path, events_path, _paths|
+      successor_path = File.join(File.dirname(capsule_path), "generated-successor.capsule.yaml")
+      receipt = HrmSupervisor.transition(
+        capsule_path,
+        events_path,
+        successor_path,
+        "MS-EXAMPLE-2026-08-25-HRM-2-BUILD-2",
+        "runtime_build",
+        Time.iso8601("2026-08-25T00:01:00Z")
+      )
+      successor = HrmExperiment.load_yaml(successor_path)
+      events = HrmExperiment.load_events(events_path)
+
+      assert_equal "runtime_build", successor["execution_mode"]
+      assert_equal "agent_playbooks.hrm_execution_capsule.v0.7", successor["schema_version"]
+      assert_equal capsule["session_id"], successor.dig("session_lineage", "predecessor_session_id")
+      assert_equal "superseded", events.last.dig("details", "stop_reason")
+      assert_equal successor["session_id"], receipt["successor_session_id"]
+      assert HrmExperiment.validate_capsule!(successor)
+    end
+  end
+
+  def test_production_observation_dispatches_private_preparation_without_kernel_reread
+    capsule = HrmExperiment.load_yaml(File.join(ROOT, "examples/hrm-production-observation-capsule.example.yaml"))
+    session_started = {
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+      "session_id" => capsule["session_id"],
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "sequence" => 1,
+      "event_type" => "session_started",
+      "occurred_at" => "2026-08-25T00:00:00Z",
+      "role" => "orchestrator"
+    }
+
+    with_run(capsule, [session_started]) do |capsule_path, events_path, paths|
+      receipt = HrmSupervisor.resume(capsule_path, events_path)
+      dispatch = HrmExperiment.load_json(paths["dispatch"])
+
+      assert_equal "prepare_private_inputs", receipt["next_action"]
+      assert_equal "prepare_private_inputs", dispatch.dig("assignment", "action")
+      assert_equal "provider_observer", dispatch.dig("assignment", "role")
+      assert_equal "hashes_only_unless_changed", dispatch.dig("cache", "load_policy")
     end
   end
 
@@ -259,7 +392,7 @@ class HrmSupervisorTest < Minitest::Test
     capsule = HrmExperiment.load_yaml(CAPSULE)
     started = HrmExperiment.load_events(EVENTS).first
     context = Marshal.load(Marshal.dump(HrmExperiment.load_events(EVENTS)[1]))
-    context["schema_version"] = "agent_playbooks.hrm_run_event.v0.4"
+    context["schema_version"] = "agent_playbooks.hrm_run_event.v0.5"
     context.delete("sequence")
     context.delete("session_id")
     context.delete("hrm_id")
@@ -274,7 +407,7 @@ class HrmSupervisorTest < Minitest::Test
       receipt = HrmSupervisor.append(capsule_path, events_path, context)
       projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
 
-      assert_equal "continue_routine_workflow", receipt["next_action"]
+      assert_equal "inventory_runtime_bindings", receipt["next_action"]
       assert_equal "pending", projection.dig("scorecard_verdict", "process_envelope")
       assert_equal 2, projection["ledger_cursor"]
     end
@@ -346,7 +479,7 @@ class HrmSupervisorTest < Minitest::Test
       File.write(events_path, successor_events.map { |event| JSON.generate(event) }.join("\n") + "\n", mode: "w", perm: 0o600)
 
       result = HrmSupervisor.resume(capsule_path, events_path)
-      assert_equal "continue_routine_workflow", result["next_action"]
+      assert_equal "inventory_runtime_bindings", result["next_action"]
 
       File.write(predecessor_path, "\n", mode: "a")
       error = assert_raises(HrmExperiment::ValidationError) do
@@ -360,7 +493,7 @@ class HrmSupervisorTest < Minitest::Test
 
   def append_event(capsule_path, events_path, event_type, occurred_at, details)
     HrmSupervisor.append(capsule_path, events_path, {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.4",
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
       "event_type" => event_type,
       "occurred_at" => occurred_at,
       "role" => "orchestrator",

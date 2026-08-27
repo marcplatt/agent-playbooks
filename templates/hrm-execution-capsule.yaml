@@ -1,8 +1,8 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.6
+schema_version: agent_playbooks.hrm_execution_capsule.v0.7
 session_id: "{{stable_session_id}}"
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.7
+  kernel_version: 0.1.0-rc.8
   source_sha: "{{40_character_agent_playbooks_sha}}"
 system_reference: "{{system_reference}}"
 project_root: "{{absolute_project_root}}"
@@ -65,6 +65,7 @@ workflow_lease:
   permitted_routine_actions:
     - inspect_read_only
     - inspect_provider_read_only
+    - inventory_runtime_bindings
     - discover_project_api_skills
     - manage_task_branch_worktree
     - implement_frozen_slice
@@ -112,6 +113,7 @@ role_topology:
     correct_within_budget: builder
     run_declared_checks: checker
     inspect_provider_read_only: provider_observer
+    inventory_runtime_bindings: provider_observer
     discover_project_api_skills: provider_observer
     prepare_private_inputs: provider_observer
     record_operational_evidence: provider_observer
@@ -155,6 +157,8 @@ budgets:
   max_ci_minutes: 30
   max_context_redundancy_ratio: 0.15
   max_context_compactions_before_expected_value: 0
+  max_semantic_readiness_seconds: 30
+  max_startup_to_worker_handoff_seconds: 30
   max_inline_raw_log_bytes: 2000
   max_state_artifact_echo_bytes: 1000
   context_bytes_by_role:

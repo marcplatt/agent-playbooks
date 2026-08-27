@@ -12,8 +12,8 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.7"
-  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7].freeze
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.8"
+  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7 0.1.0-rc.8].freeze
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -49,6 +49,7 @@ module HrmExperiment
     "commit_in_scope_changes" => "builder",
     "correct_within_budget" => "builder",
     "run_declared_checks" => "checker",
+    "inventory_runtime_bindings" => "provider_observer",
     "inspect_provider_read_only" => "provider_observer",
     "discover_project_api_skills" => "provider_observer",
     "prepare_private_inputs" => "provider_observer",
@@ -58,6 +59,7 @@ module HrmExperiment
   RUNTIME_BUILD_ACTIONS = %w[
     inspect_read_only
     inspect_provider_read_only
+    inventory_runtime_bindings
     discover_project_api_skills
     manage_task_branch_worktree
     implement_frozen_slice
@@ -123,6 +125,8 @@ module HrmExperiment
         "max_ci_minutes" => 30,
         "max_context_redundancy_ratio" => 0.15,
         "max_context_compactions_before_expected_value" => 0,
+        "max_semantic_readiness_seconds" => 30,
+        "max_startup_to_worker_handoff_seconds" => 30,
         "max_inline_raw_log_bytes" => 2000,
         "max_state_artifact_echo_bytes" => 1000
       },
@@ -141,6 +145,8 @@ module HrmExperiment
         "max_ci_minutes" => 20,
         "max_context_redundancy_ratio" => 0.10,
         "max_context_compactions_before_expected_value" => 0,
+        "max_semantic_readiness_seconds" => 30,
+        "max_startup_to_worker_handoff_seconds" => 30,
         "max_inline_raw_log_bytes" => 2000,
         "max_state_artifact_echo_bytes" => 1000
       },
@@ -439,6 +445,7 @@ module HrmExperiment
     action_authority = {
       "inspect_read_only" => "inspect_read_only",
       "inspect_provider_read_only" => "inspect_provider_read_only",
+      "inventory_runtime_bindings" => "inspect_provider_read_only",
       "discover_project_api_skills" => "inspect_provider_read_only",
       "manage_task_branch_worktree" => "manage_task_branch_worktree",
       "implement_frozen_slice" => "implement_allowed_paths",
@@ -515,6 +522,23 @@ module HrmExperiment
         unless OPERATOR_ACTION_KINDS.include?(details["operator_action_kind"])
           raise ValidationError, "unsupported operator action kind #{details['operator_action_kind'].inspect}"
         end
+        if event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
+          reason = details["operator_interrupt_reason"]
+          unless %w[environment_boundary owner_private_value].include?(reason)
+            raise ValidationError, "#{event['event_type']} requires an unavoidable operator_interrupt_reason"
+          end
+          if details["operator_action_kind"] == "private_value_entry" && reason != "owner_private_value"
+            raise ValidationError, "private_value_entry must be an owner_private_value, not a local technical choice"
+          end
+          if details["operator_action_kind"] == "private_value_entry" &&
+             !%w[credential destination customer_case private_identity].include?(details["owner_private_value_kind"])
+            raise ValidationError,
+                  "private_value_entry requires a credential, destination, customer_case, or private_identity"
+          end
+          if details["operator_action_kind"] != "private_value_entry" && reason != "environment_boundary"
+            raise ValidationError, "sign-in, MFA, unlock, and physical presence are environment boundaries"
+          end
+        end
       when "context_snapshot"
         raise ValidationError, "context_snapshot requires context" unless event["context"]
         raise ValidationError, "context_snapshot requires a role" if event["role"].nil?
@@ -526,11 +550,17 @@ module HrmExperiment
         if required_role && event["role"] != required_role
           raise ValidationError, "#{details['action']} guard requires role #{required_role}"
         end
+      when "runtime_binding_inventory"
+        raise ValidationError, "runtime_binding_inventory requires provider_observer role" unless event["role"] == "provider_observer"
+        validate_runtime_readiness_details!(details, require_constructed: false)
       when "first_executable_delta"
         unless details["deliverable_type"] == "runtime_change" && details["material_progress"] == true
           raise ValidationError, "first_executable_delta must record a material runtime_change"
         end
         raise ValidationError, "first_executable_delta requires builder role" unless event["role"] == "builder"
+        if event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
+          validate_runtime_readiness_details!(details, require_constructed: true)
+        end
       when "first_operational_evidence"
         unless details["deliverable_type"] == "operational_evidence" && details["material_progress"] == true
           raise ValidationError, "first_operational_evidence must record material operational_evidence"
@@ -570,6 +600,24 @@ module HrmExperiment
       raise ValidationError, "event #{index + 1}: invalid occurred_at: #{e.message}"
     rescue ValidationError => e
       raise ValidationError, "event #{index + 1}: #{e.message}"
+    end
+    true
+  end
+
+  def validate_runtime_readiness_details!(details, require_constructed:)
+    readiness = details["runtime_readiness"]
+    raise ValidationError, "runtime readiness proof is required" unless readiness.is_a?(Hash)
+
+    required = Array(readiness["required_real_seams"])
+    bound = Array(readiness["bound_real_seams"])
+    raise ValidationError, "runtime readiness required_real_seams must be unique" unless required.uniq.length == required.length
+    raise ValidationError, "runtime readiness bound_real_seams must be unique" unless bound.uniq.length == bound.length
+    if require_constructed
+      missing = required - bound
+      raise ValidationError, "first_executable_delta has unbound real seams: #{missing.join(', ')}" unless missing.empty?
+      unless readiness["zero_effect_construction_verified"] == true
+        raise ValidationError, "first_executable_delta requires zero-effect construction verification"
+      end
     end
     true
   end
@@ -795,7 +843,7 @@ module HrmExperiment
     raise ValidationError, "supersede-with-successor requires a session_started event" if events.empty?
 
     {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.4",
+      "schema_version" => event_schema_version(predecessor),
       "session_id" => predecessor["session_id"],
       "hrm_id" => predecessor.dig("hrm", "id"),
       "sequence" => events.length + 1,
@@ -812,6 +860,11 @@ module HrmExperiment
         "note" => "Superseded by validated successor #{successor['session_id']}."
       }
     }
+  end
+
+  def event_schema_version(capsule)
+    capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.8" ?
+      "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
   def compactions_before(events, boundary_sequence, role: nil)
@@ -884,7 +937,7 @@ module HrmExperiment
                 {"action" => action, "guarded_role" => role, "material_progress" => false}
               end
     {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.4",
+      "schema_version" => event_schema_version(capsule),
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "sequence" => events.length + 1,
@@ -904,6 +957,32 @@ module HrmExperiment
     events.each do |event|
       identity_errors << "session_id mismatch at event #{event['sequence']}" unless event["session_id"] == capsule["session_id"]
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
+    end
+
+    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.8"
+      required_seams = capsule.dig("function_slice", "required_real_seams").sort
+      inventories = events.select do |event|
+        event["event_type"] == "runtime_binding_inventory" &&
+          event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
+      end
+      inventories.each do |event|
+        observed = Array(event.dig("details", "runtime_readiness", "required_real_seams")).sort
+        identity_errors << "runtime binding inventory seam mismatch at event #{event['sequence']}" unless observed == required_seams
+      end
+      events.select do |event|
+        event["event_type"] == "first_executable_delta" &&
+          event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
+      end.each do |event|
+        readiness = event.dig("details", "runtime_readiness") || {}
+        observed = Array(readiness["required_real_seams"]).sort
+        bound = Array(readiness["bound_real_seams"])
+        identity_errors << "first executable seam mismatch at event #{event['sequence']}" unless observed == required_seams
+        missing = required_seams - bound
+        identity_errors << "first executable has unbound seams at event #{event['sequence']}: #{missing.join(', ')}" unless missing.empty?
+        unless inventories.any? { |inventory| inventory["sequence"] < event["sequence"] }
+          identity_errors << "first executable lacks pre-build runtime binding inventory at event #{event['sequence']}"
+        end
+      end
     end
 
     decision_requests_by_id = events.select { |event| event["event_type"] == "decision_requested" }.group_by do |event|
@@ -946,6 +1025,10 @@ module HrmExperiment
         identity_errors << "unbound operator action completion #{action_id} at event #{completion['sequence']}"
       elsif request.dig("details", "operator_action_kind") != completion.dig("details", "operator_action_kind")
         identity_errors << "operator action kind mismatch #{action_id} at event #{completion['sequence']}"
+      elsif request.dig("details", "operator_interrupt_reason") != completion.dig("details", "operator_interrupt_reason")
+        identity_errors << "operator interrupt reason mismatch #{action_id} at event #{completion['sequence']}"
+      elsif request.dig("details", "owner_private_value_kind") != completion.dig("details", "owner_private_value_kind")
+        identity_errors << "operator private value kind mismatch #{action_id} at event #{completion['sequence']}"
       end
     end
 
@@ -985,6 +1068,7 @@ module HrmExperiment
 
     session_started = first.call("session_started")
     semantic_ready = first.call("semantic_ready")
+    first_worker_handoff = first.call("worker_handoff_started")
     first_executable = first.call("first_executable_delta")
     first_operational = first.call("first_operational_evidence")
     expected_value = capsule["deliverable_type"] == "runtime_change" ? first_executable : first_operational
@@ -1021,7 +1105,7 @@ module HrmExperiment
       dependency.fetch("dependency_id")
     end.to_set
     context_events.each do |event|
-      next unless event["schema_version"] == "agent_playbooks.hrm_run_event.v0.4"
+      next unless %w[agent_playbooks.hrm_run_event.v0.4 agent_playbooks.hrm_run_event.v0.5].include?(event["schema_version"])
 
       context = event.fetch("context")
       unless context.key?("loaded_dependency_ids") && context.key?("outside_declared_dependency_ids")
@@ -1050,7 +1134,7 @@ module HrmExperiment
     context_compactions_before_operational = compactions_before(events, first_operational && first_operational["sequence"], role: "orchestrator")
     scope_escape_files = context_events.sum do |event|
       context = event.fetch("context")
-      if event["schema_version"] == "agent_playbooks.hrm_run_event.v0.4" &&
+      if %w[agent_playbooks.hrm_run_event.v0.4 agent_playbooks.hrm_run_event.v0.5].include?(event["schema_version"]) &&
          context.key?("outside_declared_dependency_ids")
         context.fetch("outside_declared_dependency_ids").length
       else
@@ -1139,6 +1223,20 @@ module HrmExperiment
     capability_regressions = closure_details.fetch("capability_regressions_without_approval", 0)
 
     process_reasons = []
+    semantic_readiness_seconds = duration.call(session_started, semantic_ready)
+    startup_to_handoff_seconds = duration.call(session_started, first_worker_handoff)
+    operator_interrupt_sequences = Array(by_type["decision_requested"]).map { |event| event["sequence"] } +
+                                   Array(by_type["operator_action_required"]).map { |event| event["sequence"] }
+    semantic_interrupted = semantic_ready && operator_interrupt_sequences.any? { |sequence| sequence < semantic_ready["sequence"] }
+    handoff_interrupted = first_worker_handoff && operator_interrupt_sequences.any? { |sequence| sequence < first_worker_handoff["sequence"] }
+    if semantic_readiness_seconds && !semantic_interrupted &&
+       semantic_readiness_seconds > capsule.dig("budgets", "max_semantic_readiness_seconds")
+      process_reasons << "semantic-readiness startup budget exceeded"
+    end
+    if startup_to_handoff_seconds && !handoff_interrupted &&
+       startup_to_handoff_seconds > capsule.dig("budgets", "max_startup_to_worker_handoff_seconds")
+      process_reasons << "worker-handoff startup budget exceeded"
+    end
     process_reasons << "late S0/S1 finding" if late_s0_s1.positive?
     if change_units_before_value.length > capsule.dig("budgets", "max_consecutive_nonruntime_units")
       process_reasons << "non-runtime unit budget exceeded"
@@ -1242,7 +1340,8 @@ module HrmExperiment
         "escaped_p0_p1_defects" => escaped_p0_p1
       },
       "flow" => {
-        "semantic_readiness_seconds" => duration.call(session_started, semantic_ready),
+        "semantic_readiness_seconds" => semantic_readiness_seconds,
+        "startup_to_first_worker_handoff_seconds" => startup_to_handoff_seconds,
         "first_executable_delta_from_semantic_ready_seconds" => duration.call(semantic_ready, first_executable),
         "first_operational_evidence_from_semantic_ready_seconds" => duration.call(semantic_ready, first_operational),
         "review_ready_from_semantic_ready_seconds" => duration.call(semantic_ready, review_ready),
@@ -1311,7 +1410,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.7 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, or supersede.
+      rc.6-rc.8 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 

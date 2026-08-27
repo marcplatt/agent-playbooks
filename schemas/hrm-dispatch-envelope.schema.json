@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-dispatch-envelope.schema.json",
+  "title": "Compiled HRM worker dispatch envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "hrm_id",
+    "capsule_sha256",
+    "ledger_cursor",
+    "cache",
+    "assignment",
+    "scope",
+    "authority",
+    "dispatch_hash"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.hrm_dispatch_envelope.v0.1"},
+    "session_id": {"$ref": "#/$defs/nonempty"},
+    "hrm_id": {"$ref": "#/$defs/nonempty"},
+    "capsule_sha256": {"$ref": "#/$defs/sha256"},
+    "ledger_cursor": {"type": "integer", "minimum": 0},
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cache_key", "kernel_key", "target_contract_key", "load_policy"],
+      "properties": {
+        "cache_key": {"$ref": "#/$defs/sha256"},
+        "kernel_key": {"$ref": "#/$defs/sha256"},
+        "target_contract_key": {"$ref": "#/$defs/sha256"},
+        "load_policy": {"const": "hashes_only_unless_changed"}
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["next_action", "action", "role"],
+      "properties": {
+        "next_action": {"$ref": "#/$defs/nonempty"},
+        "action": {"type": ["string", "null"], "minLength": 1},
+        "role": {
+          "type": ["string", "null"],
+          "enum": ["orchestrator", "builder", "checker", "provider_observer", "reviewer", null]
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_mode",
+        "deliverable_type",
+        "required_dependency_ids",
+        "required_skill_ids",
+        "missing_skill_ids",
+        "required_real_seams",
+        "missing_runtime_bindings",
+        "allowed_paths",
+        "proof_obligations",
+        "exact_checks"
+      ],
+      "properties": {
+        "execution_mode": {"$ref": "#/$defs/nonempty"},
+        "deliverable_type": {"$ref": "#/$defs/nonempty"},
+        "required_dependency_ids": {"$ref": "#/$defs/string_array"},
+        "required_skill_ids": {"$ref": "#/$defs/string_array"},
+        "missing_skill_ids": {"$ref": "#/$defs/string_array"},
+        "required_real_seams": {"$ref": "#/$defs/string_array"},
+        "missing_runtime_bindings": {"$ref": "#/$defs/string_array"},
+        "allowed_paths": {"$ref": "#/$defs/string_array"},
+        "proof_obligations": {"$ref": "#/$defs/string_array"},
+        "exact_checks": {"$ref": "#/$defs/string_array"}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routine_action_authorized", "enabled_operational_effects"],
+      "properties": {
+        "routine_action_authorized": {"type": "boolean"},
+        "enabled_operational_effects": {"$ref": "#/$defs/string_array"}
+      }
+    },
+    "dispatch_hash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "string_array": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

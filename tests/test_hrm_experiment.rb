@@ -210,7 +210,7 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "newly missing deliverable"
   end
 
-  def test_legacy_supersede_cli_fails_closed_for_rc7_without_advancing_the_ledger
+  def test_legacy_supersede_cli_fails_closed_for_rc8_without_advancing_the_ledger
     predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
     successor = runtime_successor_for(predecessor)
 
@@ -233,12 +233,12 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.7"
+      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.8"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
 
-  def test_legacy_guard_cli_fails_closed_for_rc7_without_advancing_the_ledger
+  def test_legacy_guard_cli_fails_closed_for_rc8_without_advancing_the_ledger
     events = HrmExperiment.load_events(EVENTS).first(2)
 
     Dir.mktmpdir do |directory|
@@ -259,7 +259,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.7"
+      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.8"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -282,7 +282,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.7"
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.8"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -438,6 +438,50 @@ class HrmExperimentTest < Minitest::Test
     assert_equal 600, scorecard.dig("flow", "maximum_no_progress_seconds")
     assert_equal "fail", scorecard.dig("verdict", "process_envelope")
     assert_includes scorecard.dig("verdict", "reasons"), "no-material-progress budget exceeded"
+  end
+
+  def test_uninterrupted_cold_start_must_reach_semantics_and_handoff_within_budget
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = [
+      {
+        "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+        "session_id" => capsule["session_id"],
+        "hrm_id" => capsule.dig("hrm", "id"),
+        "sequence" => 1,
+        "event_type" => "session_started",
+        "occurred_at" => "2026-08-25T00:00:00Z",
+        "role" => "orchestrator"
+      },
+      {
+        "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+        "session_id" => capsule["session_id"],
+        "hrm_id" => capsule.dig("hrm", "id"),
+        "sequence" => 2,
+        "event_type" => "semantic_ready",
+        "occurred_at" => "2026-08-25T00:00:31Z",
+        "caused_by_sequence" => 1,
+        "role" => "orchestrator",
+        "details" => {"material_progress" => true}
+      },
+      {
+        "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
+        "session_id" => capsule["session_id"],
+        "hrm_id" => capsule.dig("hrm", "id"),
+        "sequence" => 3,
+        "event_type" => "worker_handoff_started",
+        "occurred_at" => "2026-08-25T00:00:32Z",
+        "caused_by_sequence" => 2,
+        "role" => "provider_observer"
+      }
+    ]
+
+    scorecard = HrmExperiment.evaluate(capsule, events)
+
+    assert_equal 31, scorecard.dig("flow", "semantic_readiness_seconds")
+    assert_equal 32, scorecard.dig("flow", "startup_to_first_worker_handoff_seconds")
+    assert_equal "fail", scorecard.dig("verdict", "process_envelope")
+    assert_includes scorecard.dig("verdict", "reasons"), "semantic-readiness startup budget exceeded"
+    assert_includes scorecard.dig("verdict", "reasons"), "worker-handoff startup budget exceeded"
   end
 
   def test_context_redundancy_budget_is_derived_and_enforced

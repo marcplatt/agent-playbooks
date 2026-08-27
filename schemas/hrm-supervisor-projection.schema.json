@@ -18,10 +18,12 @@
     "terminal_state",
     "attention",
     "next_action",
+    "operator_projection",
+    "dispatch_ref",
     "projection_hash"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.3"},
+    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.4"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "capsule_sha256": {"$ref": "#/$defs/sha256"},
@@ -104,8 +106,37 @@
         "route_blocking_finding",
         "await_operator_review",
         "discover_missing_project_api_skills",
+        "inventory_runtime_bindings",
+        "prepare_private_inputs",
+        "inspect_provider_read_only",
+        "record_operational_evidence",
+        "await_worker_result",
+        "implement_frozen_slice",
+        "freeze_candidate",
+        "run_declared_checks",
+        "prepare_review",
         "continue_routine_workflow"
       ]
+    },
+    "operator_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visibility", "status", "summary"],
+      "properties": {
+        "visibility": {"enum": ["silent", "attention", "review", "terminal"]},
+        "status": {"$ref": "#/$defs/nonempty"},
+        "summary": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "dispatch_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "cache_key"],
+      "properties": {
+        "path": {"$ref": "#/$defs/nonempty"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "cache_key": {"$ref": "#/$defs/sha256"}
+      }
     },
     "projection_hash": {"$ref": "#/$defs/sha256"}
   },
