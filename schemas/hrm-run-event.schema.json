@@ -196,7 +196,17 @@
         },
         "severity": {"enum": ["P0", "P1", "P2", "P3"]},
         "material_progress": {"type": "boolean"},
-        "note": {"type": "string"}
+        "note": {"type": "string"},
+        "successor_session_id": {"type": "string", "minLength": 1},
+        "successor_capsule_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "newly_missing_deliverable_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract"]
+          }
+        }
       }
     }
   }

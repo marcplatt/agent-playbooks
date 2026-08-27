@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "open3"
 require "tmpdir"
 require_relative "../scripts/hrm_experiment"
 
@@ -124,6 +125,108 @@ class HrmExperimentTest < Minitest::Test
       HrmExperiment.validate_capsule!(capsule)
     end
     assert_includes error.message, "start a successor capsule"
+  end
+
+  def test_supersession_is_bound_to_a_validated_runtime_successor
+    predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    events = [session_started_event_for(predecessor)]
+    successor = runtime_successor_for(predecessor)
+
+    event = HrmExperiment.supersession_event(
+      predecessor,
+      events,
+      successor,
+      Time.iso8601("2026-09-09T01:00:00Z")
+    )
+
+    assert_equal "superseded", event.dig("details", "stop_reason")
+    assert_equal successor["session_id"], event.dig("details", "successor_session_id")
+    assert_equal ["runtime_change"], event.dig("details", "newly_missing_deliverable_types")
+    assert_equal HrmExperiment.object_sha256(successor), event.dig("details", "successor_capsule_sha256")
+    assert HrmExperiment.validate_events!(events + [event])
+
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "events.jsonl")
+      HrmExperiment.append_event!(path, events.first)
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmExperiment.append_event!(path, event)
+      end
+      assert_includes error.message, "use supersede-with-successor"
+
+      receipt = HrmExperiment.append_event!(path, event, validated_supersession: true)
+      assert_includes receipt, "type=stop_reason"
+    end
+  end
+
+  def test_supersession_rejects_a_dangling_or_same_mode_successor
+    predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    events = [session_started_event_for(predecessor)]
+    successor = runtime_successor_for(predecessor)
+    successor.dig("session_lineage")["predecessor_session_id"] = "WRONG-PREDECESSOR"
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.supersession_event(predecessor, events, successor)
+    end
+    assert_includes error.message, "predecessor_session_id mismatch"
+
+    successor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    successor["session_id"] = "MS-EXAMPLE-2026-09-09-HRM-2-OBSERVATION-2"
+    successor.dig("session_lineage").merge!(
+      "predecessor_session_id" => predecessor["session_id"],
+      "capsule_sequence" => predecessor.dig("session_lineage", "capsule_sequence") + 1,
+      "continuation_reason" => "execution_mode_changed",
+      "inherited_state_path" => predecessor.dig("metrics", "session_state_path")
+    )
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.supersession_event(predecessor, events, successor)
+    end
+    assert_includes error.message, "execution_mode must change"
+    assert_includes error.message, "newly missing deliverable"
+  end
+
+  def test_supersede_with_successor_cli_appends_the_atomic_transition
+    predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    successor = runtime_successor_for(predecessor)
+
+    Dir.mktmpdir do |directory|
+      events_path = File.join(directory, "events.jsonl")
+      successor_path = File.join(directory, "successor.yaml")
+      HrmExperiment.append_event!(events_path, session_started_event_for(predecessor))
+      File.write(successor_path, YAML.dump(successor), mode: "w", perm: 0o600)
+
+      stdout, stderr, status = Open3.capture3(
+        "ruby",
+        File.join(ROOT, "scripts/hrm_experiment.rb"),
+        "supersede-with-successor",
+        PRODUCTION_CAPSULE,
+        events_path,
+        successor_path,
+        "2026-09-09T01:00:00Z"
+      )
+
+      assert status.success?, stderr
+      assert_includes stdout, "sequence=2 type=stop_reason"
+      terminal = HrmExperiment.load_events(events_path).last
+      assert_equal successor["session_id"], terminal.dig("details", "successor_session_id")
+    end
+  end
+
+  def test_superseded_stop_requires_machine_readable_successor_binding
+    predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    event = session_started_event_for(predecessor).merge(
+      "sequence" => 2,
+      "event_type" => "stop_reason",
+      "occurred_at" => "2026-09-09T01:00:00Z",
+      "caused_by_sequence" => 1,
+      "details" => {"stop_reason" => "superseded", "material_progress" => true}
+    )
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_events!([session_started_event_for(predecessor), event])
+    end
+    assert_includes error.message, "superseded stop missing"
   end
 
   def test_orchestrator_cannot_execute_builder_work
@@ -417,5 +520,34 @@ class HrmExperimentTest < Minitest::Test
     state = HrmExperiment.derive_session_state(capsule, events)
 
     assert_equal ["GRANT-EXAMPLE-MERGE-001"], state["active_grant_ids"]
+  end
+
+  private
+
+  def session_started_event_for(capsule)
+    {
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
+      "session_id" => capsule["session_id"],
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "sequence" => 1,
+      "event_type" => "session_started",
+      "occurred_at" => "2026-09-09T00:00:00Z",
+      "role" => "orchestrator"
+    }
+  end
+
+  def runtime_successor_for(predecessor)
+    successor = HrmExperiment.load_yaml(CAPSULE)
+    successor["session_id"] = "MS-EXAMPLE-2026-09-09-HRM-2-RUNTIME-SUCCESSOR"
+    successor["repository_bases"] = Marshal.load(Marshal.dump(predecessor["repository_bases"]))
+    successor["target_resolution"] = Marshal.load(Marshal.dump(predecessor["target_resolution"]))
+    successor["hrm"] = Marshal.load(Marshal.dump(predecessor["hrm"]))
+    successor.dig("session_lineage").merge!(
+      "predecessor_session_id" => predecessor["session_id"],
+      "capsule_sequence" => predecessor.dig("session_lineage", "capsule_sequence") + 1,
+      "continuation_reason" => "execution_mode_changed",
+      "inherited_state_path" => predecessor.dig("metrics", "session_state_path")
+    )
+    successor
   end
 end

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.3"
+version: "0.1.0-rc.4"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -33,6 +33,7 @@ controls:
   - declared-deliverable-liveness
   - no-progress-termination
   - online-pre-action-budget-guard
+  - lineage-bound-runtime-supersession
   - governance-loop-termination
   - scope-addition-disposition
   - changed-reach-validation
@@ -168,7 +169,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.3.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.4.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -186,7 +187,11 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    already authorizes, and do not rotate the capsule for an ordinary workflow transition.
    If the capsule's execution mode cannot produce a known missing deliverable, derive and
    validate the declared successor capsule immediately when its inputs are complete; otherwise
-   stop `blocked_input` before discovery, branch creation, or evidence preparation.
+   stop `blocked_input` before discovery, branch creation, or evidence preparation. If a new
+   incompatible deliverable is discovered during execution, create the successor first and use
+   `supersede-with-successor` to validate its HRM, target, lineage, state path, mode change, and
+   newly missing deliverable before the predecessor may become terminal. A free-text
+   `superseded` event is invalid.
 
 2. Use the stable capsule, derived session-state projection, append-only events, and validated grants as active
    state. Conversation is not authoritative state. A generic reply can accept only the last
@@ -333,6 +338,10 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.4 — 2026-08-27:** Makes execution-mode supersession an atomic, machine-bound
+  transition. A predecessor cannot stop `superseded` until a valid successor capsule names the
+  same HRM and accepted target, increments lineage, inherits the exact state path, changes mode,
+  and carries a newly missing deliverable that the predecessor could not produce.
 - **0.1.0-rc.3 — 2026-08-26:** Makes bounded read-only provider diagnostics routine, types
   sign-in and MFA as operator actions rather than decisions, restricts effect grants to
   mutations/transmissions and other material external effects, requires fresh builder/checker/

@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.3` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.4` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -94,6 +94,8 @@ ruby scripts/hrm_experiment.rb derive-state \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ruby scripts/hrm_experiment.rb guard-action \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl ACTION ROLE
+ruby scripts/hrm_experiment.rb supersede-with-successor \
+  path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl path/to/successor-capsule.yaml
 ruby scripts/hrm_experiment.rb evaluate \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ```

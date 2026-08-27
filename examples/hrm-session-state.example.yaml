@@ -1,7 +1,7 @@
 schema_version: agent_playbooks.hrm_session_state.v0.2
 session_id: MS-EXAMPLE-2026-08-25-HRM-2
 hrm_id: HRM-2
-capsule_sha256: 37bb48c26251685cb05f1dfdea471bd9d77381c38d8c2bd219dfa0da172146ce
+capsule_sha256: 178de9f60d90366513e2643c9125bf7b15b8cc938eb29b994ad52135bb28b5f2
 phase: closed
 current_change_unit:
   id: CU-EX-02
@@ -18,4 +18,4 @@ terminal:
 active_grant_ids: []
 last_event_sequence: 22
 last_event_at: "2026-09-08T00:45:00Z"
-state_hash: 3cc6b75310505551e760e474b7cdab6b763c6e8cb6f3f5580725c500810e1ef4
+state_hash: 1c0e1aba582d2d3c0d5d2fc8a546591844da47e2ba52bb772a4004b5d916ab60

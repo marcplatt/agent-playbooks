@@ -142,6 +142,13 @@ module HrmExperiment
     }
   }.freeze
 
+  SUPPORTED_DELIVERABLES_BY_MODE = {
+    "runtime_build" => %w[runtime_change executable_contract],
+    "production_observation" => %w[operational_evidence],
+    "discovery" => %w[review_packet executable_contract],
+    "rollout" => %w[operational_evidence]
+  }.freeze
+
   class SchemaValidator
     def initialize(schema)
       @root = schema
@@ -355,13 +362,7 @@ module HrmExperiment
     end
 
     entry_condition = capsule.fetch("entry_condition")
-    supported_deliverables = case capsule["execution_mode"]
-                             when "runtime_build" then %w[runtime_change executable_contract]
-                             when "production_observation" then %w[operational_evidence]
-                             when "discovery" then %w[review_packet executable_contract]
-                             when "rollout" then %w[operational_evidence]
-                             else []
-                             end
+    supported_deliverables = SUPPORTED_DELIVERABLES_BY_MODE.fetch(capsule["execution_mode"], [])
     incompatible = entry_condition.fetch("known_missing_deliverable_types") - supported_deliverables
     unless incompatible.empty?
       raise ValidationError,
@@ -371,7 +372,7 @@ module HrmExperiment
 
     role_topology = capsule.fetch("role_topology")
     unless role_topology["worker_required_actions"] == WORKER_REQUIRED_ACTIONS
-      raise ValidationError, "role_topology.worker_required_actions must match the rc.3 worker isolation contract"
+      raise ValidationError, "role_topology.worker_required_actions must match the kernel worker isolation contract"
     end
     missing_fresh_roles = WORKER_REQUIRED_ACTIONS.values.uniq - role_topology.fetch("fresh_context_roles")
     unless missing_fresh_roles.empty?
@@ -494,6 +495,18 @@ module HrmExperiment
       when "integration_read_back"
         raise ValidationError, "integration_read_back requires candidate_sha" if event["candidate_sha"].nil?
         raise ValidationError, "integration_read_back requires integration_verified" unless details["integration_verified"] == true
+      when "stop_reason"
+        next unless details["stop_reason"] == "superseded"
+
+        missing = %w[
+          successor_session_id
+          successor_capsule_sha256
+          newly_missing_deliverable_types
+        ].reject { |key| details.key?(key) }
+        raise ValidationError, "superseded stop missing #{missing.join(', ')}" unless missing.empty?
+        if details["newly_missing_deliverable_types"].empty?
+          raise ValidationError, "superseded stop requires a newly missing deliverable"
+        end
       end
     rescue ArgumentError => e
       raise ValidationError, "event #{index + 1}: invalid occurred_at: #{e.message}"
@@ -646,7 +659,11 @@ module HrmExperiment
     raise ValidationError, "authority grant time invalid: #{e.message}"
   end
 
-  def append_event!(path, event)
+  def append_event!(path, event, validated_supersession: false)
+    if event["event_type"] == "stop_reason" && event.dig("details", "stop_reason") == "superseded" && !validated_supersession
+      raise ValidationError, "use supersede-with-successor so the terminal event is bound to a validated successor capsule"
+    end
+
     prior_events = File.exist?(path) ? load_events(path) : []
     expected_sequence = prior_events.length + 1
     unless event["sequence"] == expected_sequence
@@ -662,6 +679,79 @@ module HrmExperiment
       file.fsync
     end
     "event appended: #{event['session_id']} sequence=#{event['sequence']} type=#{event['event_type']}"
+  end
+
+  def validate_successor!(predecessor, events, successor)
+    validate_capsule!(predecessor)
+    validate_events!(events)
+    validate_capsule!(successor)
+
+    errors = []
+    events.each do |event|
+      errors << "predecessor event session_id mismatch" unless event["session_id"] == predecessor["session_id"]
+      errors << "predecessor event hrm_id mismatch" unless event["hrm_id"] == predecessor.dig("hrm", "id")
+    end
+    if events.any? { |event| %w[hrm_closed stop_reason].include?(event["event_type"]) }
+      errors << "predecessor session is already terminal"
+    end
+
+    lineage = successor.fetch("session_lineage")
+    errors << "successor predecessor_session_id mismatch" unless lineage["predecessor_session_id"] == predecessor["session_id"]
+    unless lineage["capsule_sequence"] == predecessor.dig("session_lineage", "capsule_sequence") + 1
+      errors << "successor capsule_sequence must increment by one"
+    end
+    errors << "successor continuation_reason must be execution_mode_changed" unless lineage["continuation_reason"] == "execution_mode_changed"
+    unless lineage["inherited_state_path"] == predecessor.dig("metrics", "session_state_path")
+      errors << "successor inherited_state_path must equal the predecessor session_state_path"
+    end
+
+    %w[playbook_pin system_reference project_root repository_bases target_resolution hrm].each do |key|
+      errors << "successor #{key} mismatch" unless successor[key] == predecessor[key]
+    end
+    %w[function_ids accepted_scenarios].each do |key|
+      unless successor.dig("function_slice", key) == predecessor.dig("function_slice", key)
+        errors << "successor function_slice.#{key} mismatch"
+      end
+    end
+    if successor["execution_mode"] == predecessor["execution_mode"]
+      errors << "successor execution_mode must change"
+    end
+
+    predecessor_supported = SUPPORTED_DELIVERABLES_BY_MODE.fetch(predecessor["execution_mode"], [])
+    newly_missing = successor.dig("entry_condition", "known_missing_deliverable_types") -
+                    predecessor.dig("entry_condition", "known_missing_deliverable_types")
+    mode_incompatible = newly_missing - predecessor_supported
+    if mode_incompatible.empty?
+      errors << "successor must carry a newly missing deliverable that the predecessor mode cannot produce"
+    end
+
+    raise ValidationError, "successor capsule invalid: #{errors.join(', ')}" unless errors.empty?
+
+    mode_incompatible
+  end
+
+  def supersession_event(predecessor, events, successor, now = Time.now.utc)
+    newly_missing = validate_successor!(predecessor, events, successor)
+    raise ValidationError, "supersede-with-successor requires a session_started event" if events.empty?
+
+    {
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
+      "session_id" => predecessor["session_id"],
+      "hrm_id" => predecessor.dig("hrm", "id"),
+      "sequence" => events.length + 1,
+      "event_type" => "stop_reason",
+      "occurred_at" => now.utc.iso8601,
+      "caused_by_sequence" => events.last["sequence"],
+      "role" => "orchestrator",
+      "details" => {
+        "stop_reason" => "superseded",
+        "material_progress" => true,
+        "successor_session_id" => successor["session_id"],
+        "successor_capsule_sha256" => object_sha256(successor),
+        "newly_missing_deliverable_types" => newly_missing,
+        "note" => "Superseded by validated successor #{successor['session_id']}."
+      }
+    }
   end
 
   def compactions_before(events, boundary_sequence, role: nil)
@@ -1116,6 +1206,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb append-event EVENTS.jsonl < EVENT.json
         ruby scripts/hrm_experiment.rb guard-action CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
+        ruby scripts/hrm_experiment.rb supersede-with-successor PREDECESSOR.yaml EVENTS.jsonl SUCCESSOR.yaml [ISO8601_NOW]
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
     TEXT
   end
@@ -1177,6 +1268,19 @@ if $PROGRAM_NAME == __FILE__
       )
       puts HrmExperiment.append_event!(events_path, event)
       exit 3 if event["event_type"] == "stop_reason"
+    when "supersede-with-successor"
+      predecessor_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      successor_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      now_arg = ARGV.shift
+      now = now_arg ? Time.iso8601(now_arg) : Time.now.utc
+      event = HrmExperiment.supersession_event(
+        HrmExperiment.load_yaml(predecessor_path),
+        HrmExperiment.load_events(events_path),
+        HrmExperiment.load_yaml(successor_path),
+        now
+      )
+      puts HrmExperiment.append_event!(events_path, event, validated_supersession: true)
     when "evaluate"
       capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
