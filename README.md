@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.4` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.5` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -98,7 +98,19 @@ ruby scripts/hrm_experiment.rb supersede-with-successor \
   path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl path/to/successor-capsule.yaml
 ruby scripts/hrm_experiment.rb evaluate \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
+ruby scripts/hrm_supervisor.rb resume \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
+ruby scripts/hrm_supervisor.rb append \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl < event.json
+ruby scripts/hrm_supervisor.rb guard \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl ACTION ROLE
+ruby scripts/hrm_supervisor.rb supersede \
+  path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl path/to/successor-capsule.yaml
 ```
+
+During rc.5, use the non-LLM supervisor for run writes and continuation reads. It serializes
+event appends and commits a cursor-bound state, scorecard, and compact attention projection;
+the LLM orchestrator consumes that projection instead of replaying startup validation output.
 
 ## Change-propagation playbooks
 

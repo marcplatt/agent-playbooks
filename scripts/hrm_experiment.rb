@@ -664,20 +664,22 @@ module HrmExperiment
       raise ValidationError, "use supersede-with-successor so the terminal event is bound to a validated successor capsule"
     end
 
-    prior_events = File.exist?(path) ? load_events(path) : []
-    expected_sequence = prior_events.length + 1
-    unless event["sequence"] == expected_sequence
-      raise ValidationError, "event sequence must be #{expected_sequence}, got #{event['sequence'].inspect}"
-    end
-
-    validate_events!(prior_events + [event])
-    File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
+    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
       file.flock(File::LOCK_EX)
+      prior_events = load_events(path)
+      expected_sequence = prior_events.length + 1
+      unless event["sequence"] == expected_sequence
+        raise ValidationError, "event sequence must be #{expected_sequence}, got #{event['sequence'].inspect}"
+      end
+
+      validate_events!(prior_events + [event])
+      file.seek(0, IO::SEEK_END)
       file.write(JSON.generate(event))
       file.write("\n")
       file.flush
       file.fsync
     end
+    File.chmod(0o600, path)
     "event appended: #{event['session_id']} sequence=#{event['sequence']} type=#{event['event_type']}"
   end
 

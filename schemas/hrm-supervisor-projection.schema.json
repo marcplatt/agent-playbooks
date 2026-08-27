@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-playbooks/hrm-supervisor-projection.schema.json",
+  "title": "Compact HRM supervisor projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "hrm_id",
+    "capsule_sha256",
+    "ledger_cursor",
+    "state_hash",
+    "scorecard_event_count",
+    "phase",
+    "terminal_state",
+    "attention",
+    "next_action",
+    "projection_hash"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent_playbooks.hrm_supervisor_projection.v0.1"},
+    "session_id": {"$ref": "#/$defs/nonempty"},
+    "hrm_id": {"$ref": "#/$defs/nonempty"},
+    "capsule_sha256": {"$ref": "#/$defs/sha256"},
+    "ledger_cursor": {"type": "integer", "minimum": 0},
+    "state_hash": {"$ref": "#/$defs/sha256"},
+    "scorecard_event_count": {"type": "integer", "minimum": 0},
+    "phase": {
+      "enum": [
+        "planned",
+        "semantic_readiness",
+        "ready",
+        "building",
+        "observing",
+        "candidate_frozen",
+        "checking",
+        "review_ready",
+        "closed",
+        "deferred",
+        "blocked"
+      ]
+    },
+    "terminal_state": {"enum": ["active", "closed", "deferred", "blocked", "superseded"]},
+    "attention": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "kind", "interrupt_class", "event_sequence", "summary"],
+        "properties": {
+          "key": {"$ref": "#/$defs/nonempty"},
+          "kind": {"enum": ["operator_action", "decision", "blocking_finding", "operator_review"]},
+          "interrupt_class": {"type": ["string", "null"], "enum": ["S0", "S1", "S2", "S3", null]},
+          "event_sequence": {"type": "integer", "minimum": 1},
+          "summary": {"$ref": "#/$defs/nonempty"}
+        }
+      }
+    },
+    "next_action": {
+      "enum": [
+        "terminal",
+        "await_operator_action",
+        "await_operator_decision",
+        "route_blocking_finding",
+        "await_operator_review",
+        "continue_routine_workflow"
+      ]
+    },
+    "projection_hash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

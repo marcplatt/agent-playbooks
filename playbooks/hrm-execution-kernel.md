@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.4"
+version: "0.1.0-rc.5"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -28,6 +28,9 @@ controls:
   - bounded-role-context
   - fresh-worker-context-isolation
   - durable-state-not-chat-state
+  - non-llm-supervisor-single-writer
+  - cursor-bound-projection-commit
+  - operator-attention-firewall
   - frozen-function-slice
   - one-writer-per-overlapping-change-unit
   - declared-deliverable-liveness
@@ -118,6 +121,33 @@ reference request with one unresolved question, exact source and heading, maximu
 and required disposition. A full-playbook read is prohibited by default and counts as a
 context-budget exception.
 
+## Non-LLM supervisor and attention firewall
+
+The rc.5 experiment adds one state-owning process below the LLM orchestrator. The supervisor
+does not interpret business meaning, derive scope, spawn workers, select checks, grant
+authority, or perform repository/provider effects. It owns only the mechanical run protocol:
+
+1. take one exclusive lock for the event ledger;
+2. reread and validate the capsule and complete ledger under that lock;
+3. assign the next event sequence and append/fsync the event;
+4. derive session state and scorecard from that exact in-memory ledger; and
+5. atomically replace those artifacts, then publish the compact supervisor projection last as
+   the cursor-bound commit marker.
+
+The append-only ledger remains authoritative. The session state, scorecard, and supervisor
+projection are disposable derived artifacts and grant no new authority. If a process stops
+after the ledger append but before the projection commit, `resume` repairs the derived set from
+the ledger before continuation. Every rc.5 append, guarded action, and supersession goes through
+`scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
+
+The attention projection includes only unresolved operator actions, genuine decision requests,
+blocking or S0/S1 findings, and an active `review_ready` stop. Routine workflow is represented
+as `continue_routine_workflow`, not rendered as an operator-facing validation transcript or a
+request to approve a micro-transition. The projection is capped at 4,096 bytes and carries the
+ledger cursor, state hash, scorecard event count, next action, and its own digest. An LLM may
+explain or act on that projection, but may not silently reinterpret it or use conversation
+memory as a newer state.
+
 ## Non-negotiable safety kernel
 
 1. **Meaning before irreversible work.** Surface unresolved business meaning, authority,
@@ -158,7 +188,8 @@ context-budget exception.
 - the exact target HRM contract and its accepted scenarios;
 - one append-only JSONL event log; and
 - one compact session-state projection derived from the capsule and event log; and
-- one scorecard derived from the capsule and event log.
+- one scorecard derived from the capsule and event log; and
+- one compact supervisor projection committed at the same event cursor.
 
 Later gated effects require a grant validated against `hrm-authority-grant.schema.json` and
 the active capsule.
@@ -169,7 +200,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.4.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.5.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -189,15 +220,16 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    validate the declared successor capsule immediately when its inputs are complete; otherwise
    stop `blocked_input` before discovery, branch creation, or evidence preparation. If a new
    incompatible deliverable is discovered during execution, create the successor first and use
-   `supersede-with-successor` to validate its HRM, target, lineage, state path, mode change, and
-   newly missing deliverable before the predecessor may become terminal. A free-text
+   `scripts/hrm_supervisor.rb supersede` to validate its HRM, target, lineage, state path, mode
+   change, and newly missing deliverable before the predecessor may become terminal. A free-text
    `superseded` event is invalid.
 
-2. Use the stable capsule, derived session-state projection, append-only events, and validated grants as active
-   state. Conversation is not authoritative state. A generic reply can accept only the last
-   prepared exact decision. Emit an event for every lifecycle transition, material decision,
-   candidate freeze, conclusive check, operator-review boundary, finding disposition, and
-   terminal reason; append it without replaying the ledger into context.
+2. Start or resume through `scripts/hrm_supervisor.rb`. Use its cursor-bound compact projection,
+   stable capsule, append-only events, and validated grants as active state. Conversation is not
+   authoritative state. A generic reply can accept only the last prepared exact decision. Emit
+   an event for every lifecycle transition, material decision, candidate freeze, conclusive
+   check, operator-review boundary, finding disposition, and terminal reason; append it through
+   the supervisor without replaying the ledger or derived artifacts into context.
 
 3. Load only the role projection and execute worker-owned work in fresh contexts:
    - orchestrator: outcome, decision frontier, phase, active units, blockers, budgets, next
@@ -338,6 +370,10 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.5 — 2026-08-27:** Adds the smallest state-owning supervisor slice: one lock and
+  append path, crash-repairing resume, cursor-bound state/scorecard/attention projection, and a
+  compact continuation signal. It does not add worker management, new authority, business
+  interpretation, or operational effects.
 - **0.1.0-rc.4 — 2026-08-27:** Makes execution-mode supersession an atomic, machine-bound
   transition. A predecessor cannot stop `superseded` until a valid successor capsule names the
   same HRM and accepted target, increments lineage, inherits the exact state path, changes mode,
