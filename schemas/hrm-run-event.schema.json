@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "session_id", "hrm_id", "sequence", "event_type", "occurred_at"],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_run_event.v0.2"},
+    "schema_version": {"const": "agent_playbooks.hrm_run_event.v0.3"},
     "session_id": {"type": "string", "minLength": 1},
     "hrm_id": {"type": "string", "minLength": 1},
     "sequence": {"type": "integer", "minimum": 1},
@@ -16,9 +16,16 @@
         "semantic_readiness_requested",
         "decision_requested",
         "decision_received",
+        "operator_action_required",
+        "operator_action_completed",
         "semantic_ready",
         "change_unit_started",
-        "first_value_artifact",
+        "worker_handoff_started",
+        "worker_result_received",
+        "context_snapshot",
+        "action_guard_passed",
+        "first_executable_delta",
+        "first_operational_evidence",
         "candidate_frozen",
         "check_started",
         "check_completed",
@@ -43,12 +50,15 @@
     "ci_plan_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
     "role": {
       "type": ["string", "null"],
-      "enum": ["orchestrator", "builder", "checker", "reviewer", "operator", null]
+      "enum": ["orchestrator", "builder", "checker", "provider_observer", "reviewer", "operator", null]
     },
     "context": {
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "turn_id",
+        "measurement_scope",
+        "active_context_bytes",
         "instruction_bytes",
         "artifact_bytes",
         "repeated_artifact_bytes",
@@ -61,6 +71,9 @@
         "files_outside_declared_dependencies"
       ],
       "properties": {
+        "turn_id": {"type": "string", "minLength": 1},
+        "measurement_scope": {"const": "turn_cumulative"},
+        "active_context_bytes": {"type": "integer", "minimum": 0},
         "instruction_bytes": {"type": "integer", "minimum": 0},
         "artifact_bytes": {"type": "integer", "minimum": 0},
         "repeated_artifact_bytes": {"type": "integer", "minimum": 0},
@@ -103,12 +116,50 @@
             "business_meaning",
             "operator_function_review",
             "exact_head_merge_release",
-            "live_effect_authority",
+            "external_effect_authority",
             "hrm_closure",
             "routine_workflow"
           ]
         },
+        "effect_class": {
+          "enum": [
+            "provider_mutation",
+            "customer_transmission",
+            "money_movement",
+            "credential_mutation",
+            "permission_mutation",
+            "deployment",
+            "activation",
+            "canary_execution",
+            "destructive_action",
+            "autonomy"
+          ]
+        },
         "exact_effect": {"type": "string", "minLength": 1},
+        "action_id": {"type": "string", "minLength": 1},
+        "operator_action_kind": {
+          "enum": ["sign_in", "mfa", "credential_unlock", "private_value_entry", "physical_presence"]
+        },
+        "exact_action": {"type": "string", "minLength": 1},
+        "action": {
+          "enum": [
+            "inspect_read_only",
+            "inspect_provider_read_only",
+            "manage_task_branch_worktree",
+            "implement_frozen_slice",
+            "commit_in_scope_changes",
+            "publish_or_update_review_pr",
+            "run_declared_checks",
+            "correct_within_budget",
+            "wait_for_declared_checks",
+            "prepare_private_inputs",
+            "record_operational_evidence",
+            "post_authorized_merge_readback"
+          ]
+        },
+        "guarded_role": {
+          "enum": ["orchestrator", "builder", "checker", "provider_observer", "reviewer"]
+        },
         "grant_id": {"type": "string", "minLength": 1},
         "integration_verified": {"type": "boolean"},
         "after_non_disposable_work": {"type": "boolean"},

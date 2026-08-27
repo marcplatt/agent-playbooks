@@ -13,12 +13,14 @@
     "repository_bases",
     "target_resolution",
     "session_lineage",
+    "entry_condition",
     "hrm",
     "experiment_profile",
     "execution_mode",
     "deliverable_type",
     "function_slice",
     "workflow_lease",
+    "role_topology",
     "authority",
     "verification",
     "reference_requests",
@@ -27,7 +29,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "agent_playbooks.hrm_execution_capsule.v0.2"
+      "const": "agent_playbooks.hrm_execution_capsule.v0.3"
     },
     "session_id": {
       "type": "string",
@@ -39,7 +41,7 @@
       "required": ["kernel_id", "kernel_version", "source_sha"],
       "properties": {
         "kernel_id": {"const": "AP-EXEC-001"},
-        "kernel_version": {"const": "0.1.0-rc.2"},
+        "kernel_version": {"const": "0.1.0-rc.3"},
         "source_sha": {"$ref": "#/$defs/sha"}
       }
     },
@@ -100,6 +102,20 @@
         "inherited_state_path": {"type": ["string", "null"], "minLength": 1}
       }
     },
+    "entry_condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["known_missing_deliverable_types", "on_mode_mismatch"],
+      "properties": {
+        "known_missing_deliverable_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["runtime_change", "operational_evidence", "review_packet", "executable_contract"]}
+        },
+        "on_mode_mismatch": {"const": "start_successor_capsule_or_stop_blocked_input"}
+      }
+    },
     "hrm": {
       "type": "object",
       "additionalProperties": false,
@@ -157,7 +173,8 @@
         "permitted_routine_actions",
         "continue_across_in_scope_change_units",
         "merge_policy",
-        "operator_gate_classes"
+        "operator_gate_classes",
+        "read_only_diagnostic_scope"
       ],
       "properties": {
         "objective": {"const": "advance_to_next_human_gate"},
@@ -168,6 +185,7 @@
           "items": {
             "enum": [
               "inspect_read_only",
+              "inspect_provider_read_only",
               "manage_task_branch_worktree",
               "implement_frozen_slice",
               "commit_in_scope_changes",
@@ -194,10 +212,71 @@
               "business_meaning",
               "operator_function_review",
               "exact_head_merge_release",
-              "live_effect_authority",
+              "external_effect_authority",
               "hrm_closure"
             ]
           }
+        },
+        "read_only_diagnostic_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope_id", "systems", "permitted_operations", "stop_conditions"],
+          "properties": {
+            "scope_id": {"$ref": "#/$defs/nonempty"},
+            "systems": {"$ref": "#/$defs/nonempty_string_array"},
+            "permitted_operations": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "repository_and_local_state",
+                  "provider_health",
+                  "provider_configuration",
+                  "provider_logs",
+                  "authenticated_portal_navigation",
+                  "credential_presence_and_validity"
+                ]
+              }
+            },
+            "stop_conditions": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "provider_mutation_required",
+                  "customer_transmission_required",
+                  "money_movement_required",
+                  "credential_mutation_required",
+                  "permission_mutation_required",
+                  "deployment_or_activation_required",
+                  "canary_execution_required",
+                  "destructive_action_required",
+                  "business_meaning_required"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "role_topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_role", "orchestrator_mode", "fresh_context_roles", "worker_required_actions"],
+      "properties": {
+        "root_role": {"const": "orchestrator"},
+        "orchestrator_mode": {"const": "coordinate_only"},
+        "fresh_context_roles": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["builder", "checker", "provider_observer", "reviewer"]}
+        },
+        "worker_required_actions": {
+          "type": "object",
+          "additionalProperties": {"enum": ["builder", "checker", "provider_observer", "reviewer"]}
         }
       }
     },
@@ -211,6 +290,7 @@
           "additionalProperties": false,
           "required": [
             "inspect_read_only",
+            "inspect_provider_read_only",
             "manage_task_branch_worktree",
             "implement_allowed_paths",
             "commit_changes",
@@ -225,6 +305,7 @@
           ],
           "properties": {
             "inspect_read_only": {"type": "boolean"},
+            "inspect_provider_read_only": {"type": "boolean"},
             "manage_task_branch_worktree": {"type": "boolean"},
             "implement_allowed_paths": {"type": "boolean"},
             "commit_changes": {"type": "boolean"},
@@ -242,19 +323,27 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "provider_writes",
+            "provider_mutations",
+            "customer_transmissions",
+            "money_movements",
+            "credential_mutations",
+            "permission_mutations",
             "deployment",
             "activation",
-            "canary",
-            "production_observation",
+            "canary_execution",
+            "destructive_actions",
             "autonomy"
           ],
           "properties": {
-            "provider_writes": {"type": "boolean"},
+            "provider_mutations": {"type": "boolean"},
+            "customer_transmissions": {"type": "boolean"},
+            "money_movements": {"type": "boolean"},
+            "credential_mutations": {"type": "boolean"},
+            "permission_mutations": {"type": "boolean"},
             "deployment": {"type": "boolean"},
             "activation": {"type": "boolean"},
-            "canary": {"type": "boolean"},
-            "production_observation": {"type": "boolean"},
+            "canary_execution": {"type": "boolean"},
+            "destructive_actions": {"type": "boolean"},
             "autonomy": {"type": "boolean"}
           }
         }
@@ -306,8 +395,7 @@
         "no_material_progress_minutes",
         "max_ci_minutes",
         "max_context_redundancy_ratio",
-        "max_mechanical_operator_prompts_before_review_ready",
-        "max_context_compactions_before_first_value",
+        "max_context_compactions_before_expected_value",
         "max_inline_raw_log_bytes",
         "max_state_artifact_echo_bytes",
         "context_bytes_by_role"
@@ -318,18 +406,18 @@
         "no_material_progress_minutes": {"type": "integer", "minimum": 1},
         "max_ci_minutes": {"type": "integer", "minimum": 0},
         "max_context_redundancy_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-        "max_mechanical_operator_prompts_before_review_ready": {"type": "integer", "minimum": 0},
-        "max_context_compactions_before_first_value": {"type": "integer", "minimum": 0},
+        "max_context_compactions_before_expected_value": {"type": "integer", "minimum": 0},
         "max_inline_raw_log_bytes": {"type": "integer", "minimum": 0},
         "max_state_artifact_echo_bytes": {"type": "integer", "minimum": 0},
         "context_bytes_by_role": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["orchestrator", "builder", "checker", "reviewer", "operator"],
+          "required": ["orchestrator", "builder", "checker", "provider_observer", "reviewer", "operator"],
           "properties": {
             "orchestrator": {"type": "integer", "minimum": 1},
             "builder": {"type": "integer", "minimum": 1},
             "checker": {"type": "integer", "minimum": 1},
+            "provider_observer": {"type": "integer", "minimum": 1},
             "reviewer": {"type": "integer", "minimum": 1},
             "operator": {"type": "integer", "minimum": 1}
           }

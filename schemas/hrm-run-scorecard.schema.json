@@ -18,7 +18,7 @@
     "verdict"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_run_scorecard.v0.2"},
+    "schema_version": {"const": "agent_playbooks.hrm_run_scorecard.v0.3"},
     "run_identity": {
       "type": "object",
       "additionalProperties": false,
@@ -90,20 +90,22 @@
       "additionalProperties": false,
       "required": [
         "semantic_readiness_seconds",
-        "first_value_from_semantic_ready_seconds",
+        "first_executable_delta_from_semantic_ready_seconds",
+        "first_operational_evidence_from_semantic_ready_seconds",
         "review_ready_from_semantic_ready_seconds",
         "total_elapsed_seconds",
         "maximum_no_progress_seconds",
-        "nonruntime_units_before_first_value",
+        "nonmatching_units_before_expected_value",
         "maximum_correction_rounds"
       ],
       "properties": {
         "semantic_readiness_seconds": {"$ref": "#/$defs/nullable_integer"},
-        "first_value_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "first_executable_delta_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "first_operational_evidence_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
         "review_ready_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
         "total_elapsed_seconds": {"$ref": "#/$defs/nullable_integer"},
         "maximum_no_progress_seconds": {"$ref": "#/$defs/nullable_integer"},
-        "nonruntime_units_before_first_value": {"type": "integer", "minimum": 0},
+        "nonmatching_units_before_expected_value": {"type": "integer", "minimum": 0},
         "maximum_correction_rounds": {"type": "integer", "minimum": 0}
       }
     },
@@ -113,15 +115,15 @@
       "required": [
         "decision_requests",
         "genuine_human_gate_requests",
-        "mechanical_operator_prompts",
-        "mechanical_operator_prompts_before_review_ready",
+        "operator_action_requests",
+        "operator_action_completions",
         "late_s0_s1_findings"
       ],
       "properties": {
         "decision_requests": {"type": "integer", "minimum": 0},
         "genuine_human_gate_requests": {"type": "integer", "minimum": 0},
-        "mechanical_operator_prompts": {"type": "integer", "minimum": 0},
-        "mechanical_operator_prompts_before_review_ready": {"type": "integer", "minimum": 0},
+        "operator_action_requests": {"type": "integer", "minimum": 0},
+        "operator_action_completions": {"type": "integer", "minimum": 0},
         "late_s0_s1_findings": {"type": "integer", "minimum": 0}
       }
     },
@@ -129,22 +131,28 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "active_context_bytes",
+        "peak_active_context_bytes",
+        "orchestrator_peak_active_context_bytes",
         "repeated_artifact_bytes",
         "context_redundancy_ratio",
         "inline_raw_log_bytes",
         "state_artifact_echo_bytes",
-        "context_compactions_before_first_value",
+        "orchestrator_context_compactions_before_first_executable_delta",
+        "orchestrator_context_compactions_before_first_operational_evidence",
+        "context_snapshots",
         "files_outside_declared_dependencies",
         "budget_violations"
       ],
       "properties": {
-        "active_context_bytes": {"type": "integer", "minimum": 0},
+        "peak_active_context_bytes": {"type": "integer", "minimum": 0},
+        "orchestrator_peak_active_context_bytes": {"type": "integer", "minimum": 0},
         "repeated_artifact_bytes": {"type": "integer", "minimum": 0},
         "context_redundancy_ratio": {"type": "number", "minimum": 0, "maximum": 1},
         "inline_raw_log_bytes": {"type": "integer", "minimum": 0},
         "state_artifact_echo_bytes": {"type": "integer", "minimum": 0},
-        "context_compactions_before_first_value": {"type": "integer", "minimum": 0},
+        "orchestrator_context_compactions_before_first_executable_delta": {"type": "integer", "minimum": 0},
+        "orchestrator_context_compactions_before_first_operational_evidence": {"type": "integer", "minimum": 0},
+        "context_snapshots": {"type": "integer", "minimum": 0},
         "files_outside_declared_dependencies": {"type": "integer", "minimum": 0},
         "budget_violations": {"type": "integer", "minimum": 0}
       }

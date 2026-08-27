@@ -1,8 +1,8 @@
-schema_version: agent_playbooks.hrm_execution_capsule.v0.2
+schema_version: agent_playbooks.hrm_execution_capsule.v0.3
 session_id: MS-EXAMPLE-2026-08-25-HRM-2
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.2
+  kernel_version: 0.1.0-rc.3
   source_sha: "1111111111111111111111111111111111111111"
 system_reference: SYS-EXAMPLE-001
 project_root: /example/project
@@ -22,6 +22,9 @@ session_lineage:
   capsule_sequence: 1
   continuation_reason: initial
   inherited_state_path: null
+entry_condition:
+  known_missing_deliverable_types: [runtime_change]
+  on_mode_mismatch: start_successor_capsule_or_stop_blocked_input
 hrm:
   id: HRM-2
   contract_path: docs/milestones/HRM-2.md
@@ -43,6 +46,7 @@ workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:
     - inspect_read_only
+    - inspect_provider_read_only
     - manage_task_branch_worktree
     - implement_frozen_slice
     - commit_in_scope_changes
@@ -57,11 +61,29 @@ workflow_lease:
     - business_meaning
     - operator_function_review
     - exact_head_merge_release
-    - live_effect_authority
+    - external_effect_authority
     - hrm_closure
+  read_only_diagnostic_scope:
+    scope_id: DIAG-EXAMPLE-HRM-2
+    systems: [example_project, example_provider]
+    permitted_operations: [repository_and_local_state, provider_health, provider_configuration, provider_logs, authenticated_portal_navigation, credential_presence_and_validity]
+    stop_conditions: [provider_mutation_required, customer_transmission_required, money_movement_required, credential_mutation_required, permission_mutation_required, deployment_or_activation_required, canary_execution_required, destructive_action_required, business_meaning_required]
+role_topology:
+  root_role: orchestrator
+  orchestrator_mode: coordinate_only
+  fresh_context_roles: [builder, checker, provider_observer]
+  worker_required_actions:
+    implement_frozen_slice: builder
+    commit_in_scope_changes: builder
+    correct_within_budget: builder
+    run_declared_checks: checker
+    inspect_provider_read_only: provider_observer
+    prepare_private_inputs: provider_observer
+    record_operational_evidence: provider_observer
 authority:
   workflow:
     inspect_read_only: true
+    inspect_provider_read_only: true
     manage_task_branch_worktree: true
     implement_allowed_paths: true
     commit_changes: true
@@ -74,11 +96,15 @@ authority:
     post_authorized_merge_readback: true
     merge_without_grant: false
   operational:
-    provider_writes: false
+    provider_mutations: false
+    customer_transmissions: false
+    money_movements: false
+    credential_mutations: false
+    permission_mutations: false
     deployment: false
     activation: false
-    canary: false
-    production_observation: false
+    canary_execution: false
+    destructive_actions: false
     autonomy: false
 verification:
   profile: standard
@@ -93,14 +119,14 @@ budgets:
   no_material_progress_minutes: 45
   max_ci_minutes: 30
   max_context_redundancy_ratio: 0.15
-  max_mechanical_operator_prompts_before_review_ready: 0
-  max_context_compactions_before_first_value: 0
+  max_context_compactions_before_expected_value: 0
   max_inline_raw_log_bytes: 2000
   max_state_artifact_echo_bytes: 1000
   context_bytes_by_role:
     orchestrator: 32000
     builder: 20000
     checker: 12000
+    provider_observer: 12000
     reviewer: 20000
     operator: 8000
 metrics:

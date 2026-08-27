@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.2"
+version: "0.1.0-rc.3"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -19,16 +19,20 @@ controls:
   - self-contained-safety-kernel
   - accepted-current-hrm-auto-resolution
   - routine-workflow-execution-lease
+  - bounded-read-only-diagnostic-lease
+  - operator-action-not-decision
   - exact-authority-grant-overlay
-  - mechanical-operator-prompt-budget
+  - mutation-transmission-only-effect-gates
   - compact-state-artifact-writes
   - exact-version-pin
   - bounded-role-context
+  - fresh-worker-context-isolation
   - durable-state-not-chat-state
   - frozen-function-slice
   - one-writer-per-overlapping-change-unit
   - declared-deliverable-liveness
   - no-progress-termination
+  - online-pre-action-budget-guard
   - governance-loop-termination
   - scope-addition-disposition
   - changed-reach-validation
@@ -63,9 +67,19 @@ next in-scope change unit. Capsule creation, technical proof, publication, and C
 not operator decisions.
 
 Human gates are limited to business meaning, operator-facing function review, policy-required
-exact-head merge release, exact live-effect authority, and HRM closure. Each request names a
-decision ID and exact effect; never ask merely “approve” or “proceed.” A generic reply accepts
-only the last prepared decision's complete envelope, then execution continues.
+exact-head merge release, exact external-effect authority, and HRM closure. External-effect
+authority means a mutation, transmission, money movement, credential or permission change,
+deployment, activation, Canary execution, destructive action, or autonomy change. Read-only
+repository inspection, provider health/config/log inspection, authenticated portal navigation,
+and credential-presence diagnostics inside the capsule's one bounded diagnostic scope are
+routine lease actions, not approval gates. Each request names a decision ID and exact effect;
+never ask merely “approve” or “proceed.” A generic reply accepts only the last prepared
+decision's complete envelope, then execution continues.
+
+Sign-in, MFA, credential unlock, private-value entry, and required physical presence are
+`operator_action_required` handoffs. They are not decisions, authority grants, or evidence of
+acceptance. Resume the same diagnostic tree after the action without asking for another
+approval; stop only when a declared diagnostic stop condition is reached.
 
 ## Stable capsule and authority overlay
 
@@ -76,8 +90,9 @@ function-slice, or execution-mode change and a lineage-bound durable state proje
 
 Later authority is a validated `hrm-authority-grant` overlay bound to the session, HRM,
 candidate, issuer, effects, conditions, and time limit. An exact merge grant permits that one
-merge and its automatic read-back; live-effect grants remain separately expiring and
-fail-closed. A grant never broadens the frozen function slice or silently changes the mode.
+merge and its automatic read-back; external-effect grants remain separately expiring and
+fail-closed. A read-only observation never consumes such a grant. A grant never broadens the
+frozen function slice or silently changes the mode.
 
 ## Compact state and raw artifacts
 
@@ -85,8 +100,17 @@ Use the event appender so a state update returns only event ID, sequence, and ty
 the growing JSONL ledger into active context. Keep raw CI output outside chat, PR prose, review
 packets, and events. Record only the check summary, raw-artifact path, byte count, and digest.
 Do not paste this kernel into the task prompt when the pinned repository dispatcher can load
-it. A context compaction before first executable value, raw-log replay, or state-artifact echo
-is measured against the capsule budget rather than treated as free.
+it. Emit cumulative per-turn `context_snapshot` events at startup, worker handoff, and before
+guarded actions. A root-orchestrator compaction before `first_executable_delta` or
+`first_operational_evidence`, raw-log replay, or state-artifact echo is measured against the
+capsule budget rather than treated as free. A governance record, state projection, capsule,
+or receipt never counts as executable or operational value.
+
+The root context is coordination-only. It resolves meaning, owns the decision frontier, emits
+bounded worker projections, and receives compact results. A fresh builder owns implementation
+and correction, a fresh checker owns declared checks, and a fresh provider observer owns the
+bounded provider diagnostic tree and operational-evidence collection. Do not make role labels
+inside one growing root conversation stand in for these context boundaries.
 
 An agent may open a named legacy section only when the capsule contains an approved
 reference request with one unresolved question, exact source and heading, maximum bytes,
@@ -103,9 +127,10 @@ context-budget exception.
 3. **State separation.** Planned, implemented, integrated, deployed, activated,
    canary-observed, production-observed, and autonomy-eligible are distinct. Evidence for one
    never promotes another.
-4. **Exact authority.** Provider, customer, money, credential, permission, deployment,
-   activation, canary, production, destructive, or autonomy effects require current explicit
-   authority for the exact action. Otherwise remain fail-closed.
+4. **Exact authority.** Provider mutation, customer transmission, money movement, credential
+   or permission mutation, deployment, activation, Canary execution, destructive action, or
+   autonomy change requires current explicit authority for the exact action. Bounded read-only
+   inspection is routine; privacy, preservation, and access controls still apply.
 5. **Stable effects.** Every authorized external mutation needs exact destination, stable
    operation identity, idempotency, read-back or reconciliation, ambiguous-result handling,
    bounded retry, stop conditions, and rollback or compensation.
@@ -143,7 +168,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.2.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.3.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -159,6 +184,9 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
 
    Apply the workflow lease immediately. Do not request permission for a routine action it
    already authorizes, and do not rotate the capsule for an ordinary workflow transition.
+   If the capsule's execution mode cannot produce a known missing deliverable, derive and
+   validate the declared successor capsule immediately when its inputs are complete; otherwise
+   stop `blocked_input` before discovery, branch creation, or evidence preparation.
 
 2. Use the stable capsule, derived session-state projection, append-only events, and validated grants as active
    state. Conversation is not authoritative state. A generic reply can accept only the last
@@ -166,7 +194,7 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    candidate freeze, conclusive check, operator-review boundary, finding disposition, and
    terminal reason; append it without replaying the ledger into context.
 
-3. Load only the role projection:
+3. Load only the role projection and execute worker-owned work in fresh contexts:
    - orchestrator: outcome, decision frontier, phase, active units, blockers, budgets, next
      transition;
    - builder: function slice, scenarios, allowed paths, non-goals, dependencies, exact checks,
@@ -176,7 +204,9 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    - operator: capabilities ready and remaining, blockers, prepared decisions, exact review
      surface, findings requiring disposition, closure effect.
    Do not give builders organization-level derivation or reviewers the builder conversation.
-   Record every context manifest and budget exception.
+   The root may not implement, correct, run checks, perform provider diagnosis, prepare private
+   inputs, or collect operational evidence. Record every handoff and cumulative per-turn context
+   snapshot; return compact results rather than worker conversation.
 
 4. Advance only through:
    `planned -> semantic_readiness -> ready -> building|observing -> candidate_frozen ->
@@ -200,7 +230,10 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    Technical proof and routine workflow are checker/orchestrator responsibilities unless the
    HRM contract explicitly makes the proof an operator-visible acceptance scenario.
 
-8. Enforce capsule budgets. A runtime-build run terminates `governance_loop` when
+8. Before every guarded action, run `guard-action` against the current capsule, event log,
+   action, role, context snapshot, and current time. The guard records its result and prevents
+   the action when the role topology, lease, context budget, pre-value compaction budget, or
+   no-progress clock fails. A runtime-build run terminates `governance_loop` when
    consecutive non-runtime units exceed budget without an executable delta. Terminate
    `no_progress` when the material-progress clock expires and `budget_exhausted` when
    correction, CI, or context limits are exceeded. Return the smallest blocker and permitted
@@ -215,7 +248,9 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
     projection. Return valid findings as one bounded correction bundle. Exceeding the
     correction budget stops for disposition.
 
-11. Mark `review_ready` only when the declared deliverable and evidence exist. Runtime-build
+11. Mark `review_ready` only when the declared deliverable and evidence exist. Emit
+    `first_executable_delta` only for a material runtime change and
+    `first_operational_evidence` only for verified operational proof. Runtime-build
     runs cannot close with documentation alone. Production-observation runs do not invent
     code when operational evidence is the deliverable. Stop for operator review; do not
     cross later authority boundaries.
@@ -256,6 +291,7 @@ the disposition. Do not retain unrelated reference prose in subsequent role proj
 | Orchestrator projection | 32,000 bytes |
 | Builder projection | 20,000 bytes |
 | Checker projection | 12,000 bytes |
+| Provider-observer projection | 12,000 bytes |
 | Reviewer projection excluding diff | 20,000 bytes |
 | Operator projection | 8,000 bytes |
 
@@ -276,9 +312,11 @@ The evaluator reports three independent conclusions:
 - `outcome_and_safety`: accepted scenarios and non-negotiable safety gates pass; and
 - `process_envelope`: liveness, context, CI, correction, and scope budgets pass.
 
-The process envelope also fails on a mechanical operator prompt before `review_ready`, a
-pre-value context compaction, or raw-log/state-ledger echo beyond budget. Report genuine and
-mechanical decision requests separately; a safe run can still fail the autonomy experiment.
+The event validator rejects a routine or read-only operation serialized as an operator
+decision. The process envelope also fails on a root compaction before the expected executable
+or operational value, or raw-log/state-ledger echo beyond budget. Report genuine decision
+requests separately from non-decision operator actions; a safe run can still fail the autonomy
+experiment.
 
 `overall: pass` requires all three. Do not average them into a score that can trade safety
 for speed. A blocked or deferred run may be validly controlled but is not a completed outcome.
@@ -295,6 +333,12 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.3 — 2026-08-26:** Makes bounded read-only provider diagnostics routine, types
+  sign-in and MFA as operator actions rather than decisions, restricts effect grants to
+  mutations/transmissions and other material external effects, requires fresh builder/checker/
+  provider-observer contexts, introduces online pre-action liveness/context guards, replaces
+  generic first value with executable-delta and operational-evidence events, and fails capsule
+  validation when its mode cannot produce a known missing deliverable.
 - **0.1.0-rc.2 — 2026-08-26:** Derives the active HRM automatically; adds a routine execution
   lease, five genuine human gates, exact authority-grant overlays, stable capsule lineage,
   compact event writes, external raw logs, and measured prompt/context overhead.

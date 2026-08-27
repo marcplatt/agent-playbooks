@@ -19,7 +19,7 @@
     "state_hash"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_session_state.v0.1"},
+    "schema_version": {"const": "agent_playbooks.hrm_session_state.v0.2"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "capsule_sha256": {"$ref": "#/$defs/sha256"},

@@ -1,8 +1,8 @@
-schema_version: agent_playbooks.hrm_authority_grant.v0.1
+schema_version: agent_playbooks.hrm_authority_grant.v0.2
 grant_id: "{{stable_grant_id}}"
 session_id: "{{capsule_session_id}}"
 hrm_id: "{{exact_hrm_id}}"
-grant_type: "operator_function_acceptance|merge_release|live_effect_authority|hrm_closure"
+grant_type: "operator_function_acceptance|merge_release|external_effect_authority|hrm_closure"
 issued_by: "{{authority_name_or_role}}"
 issued_at: "{{iso8601_timestamp}}"
 expires_at: null

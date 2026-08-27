@@ -1,4 +1,4 @@
-schema_version: agent_playbooks.hrm_run_scorecard.v0.2
+schema_version: agent_playbooks.hrm_run_scorecard.v0.3
 run_identity:
   session_id: "{{stable_session_id}}"
   hrm_id: "{{target_hrm}}"
@@ -24,25 +24,29 @@ hard_gates:
   escaped_p0_p1_defects: 0
 flow:
   semantic_readiness_seconds: null
-  first_value_from_semantic_ready_seconds: null
+  first_executable_delta_from_semantic_ready_seconds: null
+  first_operational_evidence_from_semantic_ready_seconds: null
   review_ready_from_semantic_ready_seconds: null
   total_elapsed_seconds: null
   maximum_no_progress_seconds: null
-  nonruntime_units_before_first_value: 0
+  nonmatching_units_before_expected_value: 0
   maximum_correction_rounds: 0
 decisions:
   decision_requests: 0
   genuine_human_gate_requests: 0
-  mechanical_operator_prompts: 0
-  mechanical_operator_prompts_before_review_ready: 0
+  operator_action_requests: 0
+  operator_action_completions: 0
   late_s0_s1_findings: 0
 context:
-  active_context_bytes: 0
+  peak_active_context_bytes: 0
+  orchestrator_peak_active_context_bytes: 0
   repeated_artifact_bytes: 0
   context_redundancy_ratio: 0.0
   inline_raw_log_bytes: 0
   state_artifact_echo_bytes: 0
-  context_compactions_before_first_value: 0
+  orchestrator_context_compactions_before_first_executable_delta: 0
+  orchestrator_context_compactions_before_first_operational_evidence: 0
+  context_snapshots: 0
   files_outside_declared_dependencies: 0
   budget_violations: 0
 validation:

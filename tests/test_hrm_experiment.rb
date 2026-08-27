@@ -116,14 +116,111 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "metrics.aftercare_window_days"
   end
 
+  def test_mode_mismatch_requires_a_successor_before_work
+    capsule = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    capsule.dig("entry_condition")["known_missing_deliverable_types"] = ["runtime_change"]
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "start a successor capsule"
+  end
+
+  def test_orchestrator_cannot_execute_builder_work
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = HrmExperiment.load_events(EVENTS).first(2)
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.guard_action(capsule, events, "implement_frozen_slice", "orchestrator", Time.iso8601("2026-08-25T00:01:00Z"))
+    end
+    assert_includes error.message, "requires a fresh builder context"
+  end
+
+  def test_read_only_provider_diagnostic_runs_under_one_routine_lease
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = HrmExperiment.load_events(EVENTS).first(7)
+    events << Marshal.load(Marshal.dump(HrmExperiment.load_events(EVENTS)[14])).merge(
+      "sequence" => 8,
+      "occurred_at" => "2026-08-25T00:12:00Z",
+      "caused_by_sequence" => 7,
+      "role" => "provider_observer"
+    )
+
+    guard = HrmExperiment.guard_action(
+      capsule,
+      events,
+      "inspect_provider_read_only",
+      "provider_observer",
+      Time.iso8601("2026-08-25T00:13:00Z")
+    )
+
+    assert_equal "action_guard_passed", guard["event_type"]
+    assert_equal "inspect_provider_read_only", guard.dig("details", "action")
+  end
+
+  def test_online_guard_stops_when_no_progress_budget_has_elapsed
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule["experiment_profile"] = "custom"
+    capsule.dig("budgets")["no_material_progress_minutes"] = 1
+    events = HrmExperiment.load_events(EVENTS).first(2)
+
+    guard = HrmExperiment.guard_action(
+      capsule,
+      events,
+      "inspect_read_only",
+      "orchestrator",
+      Time.iso8601("2026-08-25T00:02:01Z")
+    )
+
+    assert_equal "stop_reason", guard["event_type"]
+    assert_equal "no_progress", guard.dig("details", "stop_reason")
+  end
+
+  def test_online_guard_stops_after_pre_executable_orchestrator_compaction
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    events = HrmExperiment.load_events(EVENTS).first(2)
+    events[1].dig("context")["context_compactions"] = 1
+
+    guard = HrmExperiment.guard_action(
+      capsule,
+      events,
+      "inspect_read_only",
+      "orchestrator",
+      Time.iso8601("2026-08-25T00:00:45Z")
+    )
+
+    assert_equal "stop_reason", guard["event_type"]
+    assert_equal "budget_exhausted", guard.dig("details", "stop_reason")
+  end
+
+  def test_login_is_an_operator_action_not_a_decision
+    events = HrmExperiment.load_events(EVENTS).first(2)
+    events << {
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
+      "session_id" => "MS-EXAMPLE-2026-08-25-HRM-2",
+      "hrm_id" => "HRM-2",
+      "sequence" => 3,
+      "event_type" => "operator_action_required",
+      "occurred_at" => "2026-08-25T00:01:00Z",
+      "caused_by_sequence" => 2,
+      "details" => {
+        "action_id" => "ACTION-EXAMPLE-SIGNIN-001",
+        "operator_action_kind" => "sign_in",
+        "exact_action" => "Sign in to the already in-scope provider portal."
+      }
+    }
+
+    assert HrmExperiment.validate_events!(events)
+  end
+
   def test_duplicate_conclusive_check_fails_the_process_envelope
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    duplicate = Marshal.load(Marshal.dump(events[9]))
-    duplicate["sequence"] = 11
+    duplicate = Marshal.load(Marshal.dump(events[16]))
+    duplicate["sequence"] = 23
     duplicate["occurred_at"] = "2026-08-25T00:31:00Z"
-    duplicate["caused_by_sequence"] = 10
-    events.insert(10, duplicate)
+    duplicate["caused_by_sequence"] = 17
+    events.insert(17, duplicate)
     events.each_with_index { |event, index| event["sequence"] = index + 1 }
 
     scorecard = HrmExperiment.evaluate(capsule, events)
@@ -136,13 +233,13 @@ class HrmExperimentTest < Minitest::Test
   def test_missing_check_identity_invalidates_instrumentation
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    events[9]["candidate_sha"] = nil
+    events[16]["candidate_sha"] = nil
 
     scorecard = HrmExperiment.evaluate(capsule, events)
 
     refute scorecard.dig("verdict", "run_valid")
     assert_equal "run_invalid", scorecard.dig("verdict", "overall")
-    assert_includes scorecard.dig("instrumentation", "missing_required_events"), "check_identity:event_10"
+    assert_includes scorecard.dig("instrumentation", "missing_required_events"), "check_identity:event_17"
   end
 
   def test_no_material_progress_budget_is_derived_and_enforced
@@ -160,43 +257,50 @@ class HrmExperimentTest < Minitest::Test
   def test_context_redundancy_budget_is_derived_and_enforced
     capsule = HrmExperiment.load_yaml(CAPSULE)
     capsule["experiment_profile"] = "custom"
-    capsule.dig("budgets")["max_context_redundancy_ratio"] = 0.05
+    capsule.dig("budgets")["max_context_redundancy_ratio"] = 0.03
 
     scorecard = HrmExperiment.evaluate(capsule, HrmExperiment.load_events(EVENTS))
 
-    assert_equal 0.0606, scorecard.dig("context", "context_redundancy_ratio")
+    assert_equal 0.0385, scorecard.dig("context", "context_redundancy_ratio")
     assert_equal "fail", scorecard.dig("verdict", "process_envelope")
     assert_includes scorecard.dig("verdict", "reasons"), "context-redundancy budget exceeded"
   end
 
-  def test_mechanical_operator_prompt_before_review_ready_fails_process_envelope
-    capsule = HrmExperiment.load_yaml(CAPSULE)
+  def test_routine_workflow_cannot_be_serialized_as_an_operator_decision
     events = HrmExperiment.load_events(EVENTS)
-    events[2].dig("details")["decision_kind"] = "routine_workflow"
-    events[2].dig("details")["exact_effect"] = "Authorize routine branch creation."
+    events[3].dig("details")["decision_kind"] = "routine_workflow"
+    events[3].dig("details")["exact_effect"] = "Authorize routine branch creation."
 
-    scorecard = HrmExperiment.evaluate(capsule, events)
-
-    assert_equal 1, scorecard.dig("decisions", "mechanical_operator_prompts_before_review_ready")
-    assert_equal "fail", scorecard.dig("verdict", "process_envelope")
-    assert_includes scorecard.dig("verdict", "reasons"), "mechanical operator prompt budget exceeded"
+    error = assert_raises(HrmExperiment::ValidationError) { HrmExperiment.validate_events!(events) }
+    assert_includes error.message, "not a genuine human gate"
   end
 
-  def test_pre_value_context_compaction_fails_process_envelope
+  def test_read_only_work_cannot_be_serialized_as_external_effect_authority
+    events = HrmExperiment.load_events(EVENTS)
+    events[3].dig("details").merge!(
+      "decision_kind" => "external_effect_authority",
+      "exact_effect" => "Inspect provider health without mutation."
+    )
+
+    error = assert_raises(HrmExperiment::ValidationError) { HrmExperiment.validate_events!(events) }
+    assert_includes error.message, "mutation or transmission effect_class"
+  end
+
+  def test_pre_executable_context_compaction_fails_process_envelope
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    events.first.dig("context")["context_compactions"] = 1
+    events[1].dig("context")["context_compactions"] = 1
 
     scorecard = HrmExperiment.evaluate(capsule, events)
 
-    assert_equal 1, scorecard.dig("context", "context_compactions_before_first_value")
-    assert_includes scorecard.dig("verdict", "reasons"), "pre-value context-compaction budget exceeded"
+    assert_equal 1, scorecard.dig("context", "orchestrator_context_compactions_before_first_executable_delta")
+    assert_includes scorecard.dig("verdict", "reasons"), "pre-expected-value context-compaction budget exceeded"
   end
 
   def test_inline_raw_log_budget_is_enforced
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    events[9].dig("context")["inline_raw_log_bytes"] = 2001
+    events[14].dig("context")["inline_raw_log_bytes"] = 2001
 
     scorecard = HrmExperiment.evaluate(capsule, events)
 
@@ -207,7 +311,7 @@ class HrmExperimentTest < Minitest::Test
   def test_state_artifact_echo_budget_is_enforced
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    events.first.dig("context")["state_artifact_echo_bytes"] = 1001
+    events[1].dig("context")["state_artifact_echo_bytes"] = 1001
 
     scorecard = HrmExperiment.evaluate(capsule, events)
 
@@ -217,7 +321,7 @@ class HrmExperimentTest < Minitest::Test
 
   def test_decision_request_requires_an_exact_prepared_effect
     events = HrmExperiment.load_events(EVENTS)
-    events[2].dig("details").delete("exact_effect")
+    events[3].dig("details").delete("exact_effect")
 
     error = assert_raises(HrmExperiment::ValidationError) do
       HrmExperiment.validate_events!(events)
@@ -240,7 +344,7 @@ class HrmExperimentTest < Minitest::Test
   def test_closed_run_requires_accepted_scenarios_to_pass
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    events[13].dig("details", "scenario_results")["ACC-EX-01"] = "deferred"
+    events[20].dig("details", "scenario_results")["ACC-EX-01"] = "deferred"
 
     scorecard = HrmExperiment.evaluate(capsule, events)
 
@@ -252,7 +356,7 @@ class HrmExperimentTest < Minitest::Test
   def test_closed_run_requires_preregistered_checks_on_the_final_candidate
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS)
-    events[9].dig("check")["conclusion"] = "failed"
+    events[16].dig("check")["conclusion"] = "failed"
 
     scorecard = HrmExperiment.evaluate(capsule, events)
 
@@ -267,10 +371,10 @@ class HrmExperimentTest < Minitest::Test
     assert HrmExperiment.validate_authority_grant!(grant, capsule)
   end
 
-  def test_live_effect_grant_requires_an_expiry
+  def test_external_effect_grant_requires_an_expiry
     grant = HrmExperiment.load_yaml(AUTHORITY_GRANT)
     grant.merge!(
-      "grant_type" => "live_effect_authority",
+      "grant_type" => "external_effect_authority",
       "allowed_effects" => ["canary_execution"],
       "expires_at" => nil
     )
@@ -278,7 +382,7 @@ class HrmExperimentTest < Minitest::Test
     error = assert_raises(HrmExperiment::ValidationError) do
       HrmExperiment.validate_authority_grant!(grant, HrmExperiment.load_yaml(CAPSULE))
     end
-    assert_includes error.message, "live grant requires an expiry"
+    assert_includes error.message, "external-effect grant requires an expiry"
   end
 
   def test_append_event_returns_a_compact_receipt_and_preserves_valid_jsonl
@@ -296,7 +400,7 @@ class HrmExperimentTest < Minitest::Test
     capsule = HrmExperiment.load_yaml(CAPSULE)
     events = HrmExperiment.load_events(EVENTS).first(10)
     events << {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.2",
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "sequence" => 11,

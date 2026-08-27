@@ -1,4 +1,4 @@
-schema_version: agent_playbooks.hrm_session_state.v0.1
+schema_version: agent_playbooks.hrm_session_state.v0.2
 session_id: "{{capsule_session_id}}"
 hrm_id: "{{exact_hrm_id}}"
 capsule_sha256: "{{derived_capsule_sha256}}"

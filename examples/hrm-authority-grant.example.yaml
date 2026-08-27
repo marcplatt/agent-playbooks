@@ -1,4 +1,4 @@
-schema_version: agent_playbooks.hrm_authority_grant.v0.1
+schema_version: agent_playbooks.hrm_authority_grant.v0.2
 grant_id: GRANT-EXAMPLE-MERGE-001
 session_id: MS-EXAMPLE-2026-08-25-HRM-2
 hrm_id: HRM-2

@@ -14,12 +14,44 @@ module HrmExperiment
     business_meaning
     operator_function_review
     exact_head_merge_release
-    live_effect_authority
+    external_effect_authority
     hrm_closure
   ].freeze
 
+  EXTERNAL_EFFECT_CLASSES = %w[
+    provider_mutation
+    customer_transmission
+    money_movement
+    credential_mutation
+    permission_mutation
+    deployment
+    activation
+    canary_execution
+    destructive_action
+    autonomy
+  ].freeze
+
+  OPERATOR_ACTION_KINDS = %w[
+    sign_in
+    mfa
+    credential_unlock
+    private_value_entry
+    physical_presence
+  ].freeze
+
+  WORKER_REQUIRED_ACTIONS = {
+    "implement_frozen_slice" => "builder",
+    "commit_in_scope_changes" => "builder",
+    "correct_within_budget" => "builder",
+    "run_declared_checks" => "checker",
+    "inspect_provider_read_only" => "provider_observer",
+    "prepare_private_inputs" => "provider_observer",
+    "record_operational_evidence" => "provider_observer"
+  }.freeze
+
   RUNTIME_BUILD_ACTIONS = %w[
     inspect_read_only
+    inspect_provider_read_only
     manage_task_branch_worktree
     implement_frozen_slice
     commit_in_scope_changes
@@ -32,6 +64,7 @@ module HrmExperiment
 
   PRODUCTION_OBSERVATION_ACTIONS = %w[
     inspect_read_only
+    inspect_provider_read_only
     prepare_private_inputs
     run_declared_checks
     wait_for_declared_checks
@@ -40,6 +73,7 @@ module HrmExperiment
 
   RUNTIME_WORKFLOW_AUTHORITY = {
     "inspect_read_only" => true,
+    "inspect_provider_read_only" => true,
     "manage_task_branch_worktree" => true,
     "implement_allowed_paths" => true,
     "commit_changes" => true,
@@ -55,6 +89,7 @@ module HrmExperiment
 
   PRODUCTION_WORKFLOW_AUTHORITY = {
     "inspect_read_only" => true,
+    "inspect_provider_read_only" => true,
     "manage_task_branch_worktree" => false,
     "implement_allowed_paths" => false,
     "commit_changes" => false,
@@ -79,8 +114,7 @@ module HrmExperiment
         "no_material_progress_minutes" => 45,
         "max_ci_minutes" => 30,
         "max_context_redundancy_ratio" => 0.15,
-        "max_mechanical_operator_prompts_before_review_ready" => 0,
-        "max_context_compactions_before_first_value" => 0,
+        "max_context_compactions_before_expected_value" => 0,
         "max_inline_raw_log_bytes" => 2000,
         "max_state_artifact_echo_bytes" => 1000
       },
@@ -98,8 +132,7 @@ module HrmExperiment
         "no_material_progress_minutes" => 30,
         "max_ci_minutes" => 20,
         "max_context_redundancy_ratio" => 0.10,
-        "max_mechanical_operator_prompts_before_review_ready" => 0,
-        "max_context_compactions_before_first_value" => 0,
+        "max_context_compactions_before_expected_value" => 0,
         "max_inline_raw_log_bytes" => 2000,
         "max_state_artifact_echo_bytes" => 1000
       },
@@ -321,8 +354,33 @@ module HrmExperiment
       raise ValidationError, "workflow_lease.operator_gate_classes must equal the five genuine human gates"
     end
 
+    entry_condition = capsule.fetch("entry_condition")
+    supported_deliverables = case capsule["execution_mode"]
+                             when "runtime_build" then %w[runtime_change executable_contract]
+                             when "production_observation" then %w[operational_evidence]
+                             when "discovery" then %w[review_packet executable_contract]
+                             when "rollout" then %w[operational_evidence]
+                             else []
+                             end
+    incompatible = entry_condition.fetch("known_missing_deliverable_types") - supported_deliverables
+    unless incompatible.empty?
+      raise ValidationError,
+            "execution mode cannot produce known missing deliverable(s) #{incompatible.join(', ')}; " \
+            "start a successor capsule with continuation_reason execution_mode_changed or stop blocked_input"
+    end
+
+    role_topology = capsule.fetch("role_topology")
+    unless role_topology["worker_required_actions"] == WORKER_REQUIRED_ACTIONS
+      raise ValidationError, "role_topology.worker_required_actions must match the rc.3 worker isolation contract"
+    end
+    missing_fresh_roles = WORKER_REQUIRED_ACTIONS.values.uniq - role_topology.fetch("fresh_context_roles")
+    unless missing_fresh_roles.empty?
+      raise ValidationError, "fresh context is required for #{missing_fresh_roles.join(', ')}"
+    end
+
     action_authority = {
       "inspect_read_only" => "inspect_read_only",
+      "inspect_provider_read_only" => "inspect_provider_read_only",
       "manage_task_branch_worktree" => "manage_task_branch_worktree",
       "implement_frozen_slice" => "implement_allowed_paths",
       "commit_in_scope_changes" => "commit_changes",
@@ -378,16 +436,53 @@ module HrmExperiment
       when "decision_requested"
         missing = %w[decision_id decision_kind exact_effect].reject { |key| details.key?(key) }
         raise ValidationError, "decision_requested missing #{missing.join(', ')}" unless missing.empty?
+        unless STANDARD_OPERATOR_GATES.include?(details["decision_kind"])
+          raise ValidationError, "decision_requested is not a genuine human gate"
+        end
+        if details["decision_kind"] == "external_effect_authority" &&
+           !EXTERNAL_EFFECT_CLASSES.include?(details["effect_class"])
+          raise ValidationError, "external-effect decision requires a mutation or transmission effect_class"
+        end
       when "decision_received"
         missing = %w[decision_id decision_kind exact_effect].reject { |key| details.key?(key) }
         raise ValidationError, "decision_received missing #{missing.join(', ')}" unless missing.empty?
+        if details["decision_kind"] == "external_effect_authority" &&
+           !EXTERNAL_EFFECT_CLASSES.include?(details["effect_class"])
+          raise ValidationError, "external-effect decision requires a mutation or transmission effect_class"
+        end
+      when "operator_action_required", "operator_action_completed"
+        missing = %w[action_id operator_action_kind exact_action].reject { |key| details.key?(key) }
+        raise ValidationError, "#{event['event_type']} missing #{missing.join(', ')}" unless missing.empty?
+        unless OPERATOR_ACTION_KINDS.include?(details["operator_action_kind"])
+          raise ValidationError, "unsupported operator action kind #{details['operator_action_kind'].inspect}"
+        end
+      when "context_snapshot"
+        raise ValidationError, "context_snapshot requires context" unless event["context"]
+        raise ValidationError, "context_snapshot requires a role" if event["role"].nil?
+      when "action_guard_passed"
+        missing = %w[action guarded_role].reject { |key| details.key?(key) }
+        raise ValidationError, "action_guard_passed missing #{missing.join(', ')}" unless missing.empty?
+        raise ValidationError, "guarded_role must equal event role" unless details["guarded_role"] == event["role"]
+        required_role = WORKER_REQUIRED_ACTIONS[details["action"]]
+        if required_role && event["role"] != required_role
+          raise ValidationError, "#{details['action']} guard requires role #{required_role}"
+        end
+      when "first_executable_delta"
+        unless details["deliverable_type"] == "runtime_change" && details["material_progress"] == true
+          raise ValidationError, "first_executable_delta must record a material runtime_change"
+        end
+        raise ValidationError, "first_executable_delta requires builder role" unless event["role"] == "builder"
+      when "first_operational_evidence"
+        unless details["deliverable_type"] == "operational_evidence" && details["material_progress"] == true
+          raise ValidationError, "first_operational_evidence must record material operational_evidence"
+        end
+        raise ValidationError, "first_operational_evidence requires provider_observer role" unless event["role"] == "provider_observer"
       when "authority_granted", "authority_consumed"
         missing = %w[grant_id decision_kind exact_effect].reject { |key| details.key?(key) }
         raise ValidationError, "#{event['event_type']} missing #{missing.join(', ')}" unless missing.empty?
-        if details["decision_kind"] == "routine_workflow"
-          raise ValidationError, "routine workflow cannot require an authority grant"
-        end
+        raise ValidationError, "routine workflow cannot require an authority grant" unless STANDARD_OPERATOR_GATES.include?(details["decision_kind"])
       when "check_completed"
+        raise ValidationError, "check_completed requires checker role" unless event["role"] == "checker"
         if event.dig("check", "conclusive")
           check = event.fetch("check")
           missing = %w[summary raw_artifact_path raw_artifact_sha256 raw_artifact_bytes].reject { |key| check.key?(key) }
@@ -435,7 +530,7 @@ module HrmExperiment
         phase = "semantic_readiness"
       when "semantic_ready", "integration_read_back"
         phase = "ready"
-      when "change_unit_started", "first_value_artifact"
+      when "change_unit_started", "first_executable_delta", "first_operational_evidence"
         phase = capsule["execution_mode"] == "production_observation" ? "observing" : "building"
       when "candidate_frozen"
         phase = "candidate_frozen"
@@ -481,7 +576,7 @@ module HrmExperiment
                      end
 
     state = {
-      "schema_version" => "agent_playbooks.hrm_session_state.v0.1",
+      "schema_version" => "agent_playbooks.hrm_session_state.v0.2",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "capsule_sha256" => object_sha256(capsule),
@@ -534,12 +629,13 @@ module HrmExperiment
     case grant["grant_type"]
     when "operator_function_acceptance", "merge_release", "hrm_closure"
       errors << "candidate_sha is required" if grant["candidate_sha"].nil?
-    when "live_effect_authority"
-      live_effects = %w[provider_write deployment activation canary_execution production_observation autonomy]
-      errors << "live grant requires an expiry" if expires_at.nil?
-      errors << "live grant requires repository" if grant["repository"].nil?
-      errors << "live grant requires candidate_sha" if grant["candidate_sha"].nil?
-      errors << "live grant contains a non-operational effect" unless (grant["allowed_effects"] - live_effects).empty?
+    when "external_effect_authority"
+      errors << "external-effect grant requires an expiry" if expires_at.nil?
+      errors << "external-effect grant requires repository" if grant["repository"].nil?
+      errors << "external-effect grant requires candidate_sha" if grant["candidate_sha"].nil?
+      unless (grant["allowed_effects"] - EXTERNAL_EFFECT_CLASSES).empty?
+        errors << "external-effect grant contains a read-only or non-operational effect"
+      end
     end
     errors << "merge grant requires repository" if grant["grant_type"] == "merge_release" && grant["repository"].nil?
 
@@ -568,6 +664,85 @@ module HrmExperiment
     "event appended: #{event['session_id']} sequence=#{event['sequence']} type=#{event['event_type']}"
   end
 
+  def compactions_before(events, boundary_sequence, role: nil)
+    snapshots = events.select do |event|
+      event["event_type"] == "context_snapshot" &&
+        (boundary_sequence.nil? || event["sequence"] < boundary_sequence) &&
+        (role.nil? || event["role"] == role)
+    end
+    snapshots.group_by { |event| event.dig("context", "turn_id") }.values.sum do |turn_events|
+      turn_events.map { |event| event.dig("context", "context_compactions") }.max || 0
+    end
+  end
+
+  def guard_action(capsule, events, action, role, now = Time.now.utc)
+    validate_capsule!(capsule)
+    validate_events!(events)
+    raise ValidationError, "guard-action requires a session_started event" if events.empty?
+
+    events.each do |event|
+      raise ValidationError, "guard-action session_id mismatch" unless event["session_id"] == capsule["session_id"]
+      raise ValidationError, "guard-action hrm_id mismatch" unless event["hrm_id"] == capsule.dig("hrm", "id")
+    end
+    if events.any? { |event| %w[hrm_closed stop_reason].include?(event["event_type"]) }
+      raise ValidationError, "guard-action cannot advance a terminal session"
+    end
+    unless capsule.dig("workflow_lease", "permitted_routine_actions").include?(action)
+      raise ValidationError, "action #{action.inspect} is outside the workflow lease"
+    end
+
+    required_role = capsule.dig("role_topology", "worker_required_actions", action)
+    if required_role && role != required_role
+      raise ValidationError, "action #{action.inspect} requires a fresh #{required_role} context, not #{role}"
+    end
+
+    latest_context = events.reverse.find do |event|
+      event["event_type"] == "context_snapshot" && event["role"] == role
+    end
+    raise ValidationError, "fresh context_snapshot required for #{role} before #{action}" unless latest_context
+
+    context_budget = capsule.dig("budgets", "context_bytes_by_role", role)
+    raise ValidationError, "no context budget declared for role #{role.inspect}" unless context_budget
+
+    first_executable = events.find { |event| event["event_type"] == "first_executable_delta" }
+    first_operational = events.find { |event| event["event_type"] == "first_operational_evidence" }
+    expected_value = capsule["deliverable_type"] == "runtime_change" ? first_executable : first_operational
+    compactions = compactions_before(events, expected_value && expected_value["sequence"], role: "orchestrator")
+    last_progress = events.reverse.find { |event| event.dig("details", "material_progress") } || events.first
+    elapsed = (now - Time.iso8601(last_progress.fetch("occurred_at"))).to_i
+
+    stop_reason = nil
+    stop_note = nil
+    if elapsed > capsule.dig("budgets", "no_material_progress_minutes") * 60
+      stop_reason = "no_progress"
+      stop_note = "online guard stopped before #{action}: no material progress for #{elapsed} seconds"
+    elsif latest_context.dig("context", "active_context_bytes") > context_budget
+      stop_reason = "budget_exhausted"
+      stop_note = "online guard stopped before #{action}: #{role} context budget exceeded"
+    elsif expected_value.nil? &&
+          compactions > capsule.dig("budgets", "max_context_compactions_before_expected_value")
+      stop_reason = "budget_exhausted"
+      stop_note = "online guard stopped before #{action}: orchestrator compacted before expected executable or operational value"
+    end
+
+    details = if stop_reason
+                {"stop_reason" => stop_reason, "material_progress" => false, "note" => stop_note}
+              else
+                {"action" => action, "guarded_role" => role, "material_progress" => false}
+              end
+    {
+      "schema_version" => "agent_playbooks.hrm_run_event.v0.3",
+      "session_id" => capsule["session_id"],
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "sequence" => events.length + 1,
+      "event_type" => stop_reason ? "stop_reason" : "action_guard_passed",
+      "occurred_at" => now.utc.iso8601,
+      "caused_by_sequence" => events.last["sequence"],
+      "role" => stop_reason ? "orchestrator" : role,
+      "details" => details
+    }
+  end
+
   def evaluate(capsule, events)
     validate_capsule!(capsule)
     validate_events!(events)
@@ -591,6 +766,23 @@ module HrmExperiment
         identity_errors << "unbound decision response #{decision_id} at event #{response['sequence']}"
       elsif request.dig("details", "decision_kind") != response.dig("details", "decision_kind")
         identity_errors << "decision kind mismatch #{decision_id} at event #{response['sequence']}"
+      elsif request.dig("details", "effect_class") != response.dig("details", "effect_class")
+        identity_errors << "decision effect class mismatch #{decision_id} at event #{response['sequence']}"
+      end
+    end
+    operator_actions_by_id = events.select { |event| event["event_type"] == "operator_action_required" }.group_by do |event|
+      event.dig("details", "action_id")
+    end
+    operator_actions_by_id.each do |action_id, requests|
+      identity_errors << "duplicate operator action request #{action_id}" if requests.length > 1
+    end
+    events.select { |event| event["event_type"] == "operator_action_completed" }.each do |completion|
+      action_id = completion.dig("details", "action_id")
+      request = Array(operator_actions_by_id[action_id]).first
+      if request.nil? || request["sequence"] >= completion["sequence"]
+        identity_errors << "unbound operator action completion #{action_id} at event #{completion['sequence']}"
+      elsif request.dig("details", "operator_action_kind") != completion.dig("details", "operator_action_kind")
+        identity_errors << "operator action kind mismatch #{action_id} at event #{completion['sequence']}"
       end
     end
 
@@ -614,7 +806,8 @@ module HrmExperiment
     required_event_types = ["session_started"]
     case closure_decision
     when "closed"
-      required_event_types.concat(["semantic_ready", "first_value_artifact", "review_ready", "hrm_closed"])
+      expected_value_event = capsule["deliverable_type"] == "runtime_change" ? "first_executable_delta" : "first_operational_evidence"
+      required_event_types.concat(["semantic_ready", "context_snapshot", "worker_handoff_started", "action_guard_passed", expected_value_event, "review_ready", "hrm_closed"])
     when "blocked", "deferred"
       required_event_types.concat(["hrm_closed", "stop_reason"])
     end
@@ -629,7 +822,9 @@ module HrmExperiment
 
     session_started = first.call("session_started")
     semantic_ready = first.call("semantic_ready")
-    first_value = first.call("first_value_artifact")
+    first_executable = first.call("first_executable_delta")
+    first_operational = first.call("first_operational_evidence")
+    expected_value = capsule["deliverable_type"] == "runtime_change" ? first_executable : first_operational
     review_ready = first.call("review_ready")
     review_started = first.call("operator_review_started")
     review_completed = first.call("operator_review_completed")
@@ -651,28 +846,24 @@ module HrmExperiment
     end.compact.max
 
     change_units_before_value = Array(by_type["change_unit_started"]).select do |event|
-      first_value && event["sequence"] < first_value["sequence"] && event.dig("details", "deliverable_type") != "runtime_change"
+      expected_value && event["sequence"] < expected_value["sequence"] && event.dig("details", "deliverable_type") != capsule["deliverable_type"]
     end
 
     correction_rounds = Array(by_type["candidate_frozen"]).group_by do |event|
       event["change_unit_id"] || "unbound"
     end.values.map { |items| [items.length - 1, 0].max }
 
-    context_events = events.select { |event| event["context"] }
-    active_context_bytes = context_events.sum do |event|
-      context = event["context"]
-      context["instruction_bytes"] + context["artifact_bytes"] + context["tool_output_bytes"]
-    end
+    context_events = events.select { |event| event["event_type"] == "context_snapshot" }
+    peak_active_context_bytes = context_events.map { |event| event.dig("context", "active_context_bytes") }.max || 0
+    orchestrator_peak_context_bytes = context_events.select { |event| event["role"] == "orchestrator" }
+                                                    .map { |event| event.dig("context", "active_context_bytes") }.max || 0
     artifact_bytes = context_events.sum { |event| event.dig("context", "artifact_bytes") }
     repeated_artifact_bytes = context_events.sum { |event| event.dig("context", "repeated_artifact_bytes") }
     context_redundancy_ratio = artifact_bytes.zero? ? 0.0 : (repeated_artifact_bytes.to_f / artifact_bytes).round(4)
     inline_raw_log_bytes = context_events.sum { |event| event.dig("context", "inline_raw_log_bytes") }
     state_artifact_echo_bytes = context_events.sum { |event| event.dig("context", "state_artifact_echo_bytes") }
-    context_compactions_before_first_value = context_events.sum do |event|
-      next 0 if first_value && event["sequence"] >= first_value["sequence"]
-
-      event.dig("context", "context_compactions")
-    end
+    context_compactions_before_executable = compactions_before(events, first_executable && first_executable["sequence"], role: "orchestrator")
+    context_compactions_before_operational = compactions_before(events, first_operational && first_operational["sequence"], role: "orchestrator")
     scope_escape_files = context_events.sum { |event| event.dig("context", "files_outside_declared_dependencies") }
     context_budget_violations = context_events.count do |event|
       role = event["role"]
@@ -680,7 +871,7 @@ module HrmExperiment
       next false unless budget
 
       context = event["context"]
-      context["instruction_bytes"] + context["artifact_bytes"] + context["tool_output_bytes"] > budget
+      context["active_context_bytes"] > budget
     end
 
     completed_checks = Array(by_type["check_completed"])
@@ -731,15 +922,11 @@ module HrmExperiment
     end
 
     decision_requests = Array(by_type["decision_requested"])
-    mechanical_operator_prompts = decision_requests.select do |event|
-      event.dig("details", "decision_kind") == "routine_workflow"
-    end
-    mechanical_prompts_before_review_ready = mechanical_operator_prompts.count do |event|
-      review_ready.nil? || event["sequence"] < review_ready["sequence"]
-    end
     genuine_human_gate_requests = decision_requests.count do |event|
       STANDARD_OPERATOR_GATES.include?(event.dig("details", "decision_kind"))
     end
+    operator_action_requests = Array(by_type["operator_action_required"])
+    operator_action_completions = Array(by_type["operator_action_completed"])
 
     scenario_results = closure_details.fetch("scenario_results", {})
     accepted_scenarios = capsule.dig("hrm", "accepted_scenarios")
@@ -776,11 +963,9 @@ module HrmExperiment
     if context_redundancy_ratio > capsule.dig("budgets", "max_context_redundancy_ratio")
       process_reasons << "context-redundancy budget exceeded"
     end
-    if mechanical_prompts_before_review_ready > capsule.dig("budgets", "max_mechanical_operator_prompts_before_review_ready")
-      process_reasons << "mechanical operator prompt budget exceeded"
-    end
-    if context_compactions_before_first_value > capsule.dig("budgets", "max_context_compactions_before_first_value")
-      process_reasons << "pre-value context-compaction budget exceeded"
+    expected_compactions = capsule["deliverable_type"] == "runtime_change" ? context_compactions_before_executable : context_compactions_before_operational
+    if expected_compactions > capsule.dig("budgets", "max_context_compactions_before_expected_value")
+      process_reasons << "pre-expected-value context-compaction budget exceeded"
     end
     if inline_raw_log_bytes > capsule.dig("budgets", "max_inline_raw_log_bytes")
       process_reasons << "inline raw-log budget exceeded"
@@ -831,7 +1016,7 @@ module HrmExperiment
               end
 
     scorecard = {
-      "schema_version" => "agent_playbooks.hrm_run_scorecard.v0.2",
+      "schema_version" => "agent_playbooks.hrm_run_scorecard.v0.3",
       "run_identity" => {
         "session_id" => capsule["session_id"],
         "hrm_id" => capsule.dig("hrm", "id"),
@@ -860,27 +1045,31 @@ module HrmExperiment
       },
       "flow" => {
         "semantic_readiness_seconds" => duration.call(session_started, semantic_ready),
-        "first_value_from_semantic_ready_seconds" => duration.call(semantic_ready, first_value),
+        "first_executable_delta_from_semantic_ready_seconds" => duration.call(semantic_ready, first_executable),
+        "first_operational_evidence_from_semantic_ready_seconds" => duration.call(semantic_ready, first_operational),
         "review_ready_from_semantic_ready_seconds" => duration.call(semantic_ready, review_ready),
         "total_elapsed_seconds" => duration.call(session_started, terminal_event),
         "maximum_no_progress_seconds" => maximum_no_progress_seconds,
-        "nonruntime_units_before_first_value" => change_units_before_value.length,
+        "nonmatching_units_before_expected_value" => change_units_before_value.length,
         "maximum_correction_rounds" => correction_rounds.max || 0
       },
       "decisions" => {
         "decision_requests" => decision_requests.length,
         "genuine_human_gate_requests" => genuine_human_gate_requests,
-        "mechanical_operator_prompts" => mechanical_operator_prompts.length,
-        "mechanical_operator_prompts_before_review_ready" => mechanical_prompts_before_review_ready,
+        "operator_action_requests" => operator_action_requests.length,
+        "operator_action_completions" => operator_action_completions.length,
         "late_s0_s1_findings" => late_s0_s1
       },
       "context" => {
-        "active_context_bytes" => active_context_bytes,
+        "peak_active_context_bytes" => peak_active_context_bytes,
+        "orchestrator_peak_active_context_bytes" => orchestrator_peak_context_bytes,
         "repeated_artifact_bytes" => repeated_artifact_bytes,
         "context_redundancy_ratio" => context_redundancy_ratio,
         "inline_raw_log_bytes" => inline_raw_log_bytes,
         "state_artifact_echo_bytes" => state_artifact_echo_bytes,
-        "context_compactions_before_first_value" => context_compactions_before_first_value,
+        "orchestrator_context_compactions_before_first_executable_delta" => context_compactions_before_executable,
+        "orchestrator_context_compactions_before_first_operational_evidence" => context_compactions_before_operational,
+        "context_snapshots" => context_events.length,
         "files_outside_declared_dependencies" => scope_escape_files,
         "budget_violations" => context_budget_violations
       },
@@ -923,6 +1112,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb derive-state CAPSULE.yaml EVENTS.jsonl
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb append-event EVENTS.jsonl < EVENT.json
+        ruby scripts/hrm_experiment.rb guard-action CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
     TEXT
   end
@@ -968,6 +1158,22 @@ if $PROGRAM_NAME == __FILE__
       events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       event = JSON.parse($stdin.read)
       puts HrmExperiment.append_event!(events_path, event)
+    when "guard-action"
+      capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      action = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      role = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
+      now_arg = ARGV.shift
+      now = now_arg ? Time.iso8601(now_arg) : Time.now.utc
+      event = HrmExperiment.guard_action(
+        HrmExperiment.load_yaml(capsule_path),
+        HrmExperiment.load_events(events_path),
+        action,
+        role,
+        now
+      )
+      puts HrmExperiment.append_event!(events_path, event)
+      exit 3 if event["event_type"] == "stop_reason"
     when "evaluate"
       capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
@@ -979,7 +1185,7 @@ if $PROGRAM_NAME == __FILE__
     else
       raise HrmExperiment::ValidationError, HrmExperiment.usage
     end
-  rescue HrmExperiment::ValidationError, JSON::ParserError, Errno::ENOENT => e
+  rescue HrmExperiment::ValidationError, JSON::ParserError, Errno::ENOENT, ArgumentError => e
     warn e.message
     exit 2
   end

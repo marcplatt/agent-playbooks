@@ -20,12 +20,12 @@
     "one_time"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_authority_grant.v0.1"},
+    "schema_version": {"const": "agent_playbooks.hrm_authority_grant.v0.2"},
     "grant_id": {"$ref": "#/$defs/nonempty"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "grant_type": {
-      "enum": ["operator_function_acceptance", "merge_release", "live_effect_authority", "hrm_closure"]
+      "enum": ["operator_function_acceptance", "merge_release", "external_effect_authority", "hrm_closure"]
     },
     "issued_by": {"$ref": "#/$defs/nonempty"},
     "issued_at": {"$ref": "#/$defs/nonempty"},
@@ -40,11 +40,15 @@
         "enum": [
           "operator_function_acceptance",
           "merge_exact_head",
-          "provider_write",
+          "provider_mutation",
+          "customer_transmission",
+          "money_movement",
+          "credential_mutation",
+          "permission_mutation",
           "deployment",
           "activation",
           "canary_execution",
-          "production_observation",
+          "destructive_action",
           "autonomy",
           "hrm_closure"
         ]
