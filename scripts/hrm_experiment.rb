@@ -10,6 +10,8 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.5"
+
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
     operator_function_review
@@ -1206,11 +1208,25 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-state STATE.yaml
         ruby scripts/hrm_experiment.rb derive-state CAPSULE.yaml EVENTS.jsonl
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
-        ruby scripts/hrm_experiment.rb append-event EVENTS.jsonl < EVENT.json
-        ruby scripts/hrm_experiment.rb guard-action CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
-        ruby scripts/hrm_experiment.rb supersede-with-successor PREDECESSOR.yaml EVENTS.jsonl SUCCESSOR.yaml [ISO8601_NOW]
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
+
+      rc.5 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, or supersede.
     TEXT
+  end
+
+  def reject_legacy_mutation_cli!(command, capsule = nil)
+    kernel_version = capsule&.dig("playbook_pin", "kernel_version")
+    return if capsule && kernel_version != SUPERVISOR_OWNED_KERNEL_VERSION
+
+    version = kernel_version || SUPERVISOR_OWNED_KERNEL_VERSION
+    supervisor_command = {
+      "append-event" => "append",
+      "guard-action" => "guard",
+      "supersede-with-successor" => "supersede"
+    }.fetch(command)
+    raise ValidationError,
+          "legacy hrm_experiment.rb #{command} is disabled for #{version}; " \
+          "use scripts/hrm_supervisor.rb #{supervisor_command} so the ledger and projection advance together"
   end
 end
 
@@ -1251,9 +1267,7 @@ if $PROGRAM_NAME == __FILE__
       )
       puts "authority grant valid: #{grant_path}"
     when "append-event"
-      events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
-      event = JSON.parse($stdin.read)
-      puts HrmExperiment.append_event!(events_path, event)
+      HrmExperiment.reject_legacy_mutation_cli!(command)
     when "guard-action"
       capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
@@ -1261,8 +1275,11 @@ if $PROGRAM_NAME == __FILE__
       role = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       now_arg = ARGV.shift
       now = now_arg ? Time.iso8601(now_arg) : Time.now.utc
+      capsule = HrmExperiment.load_yaml(capsule_path)
+      HrmExperiment.validate_capsule!(capsule)
+      HrmExperiment.reject_legacy_mutation_cli!(command, capsule)
       event = HrmExperiment.guard_action(
-        HrmExperiment.load_yaml(capsule_path),
+        capsule,
         HrmExperiment.load_events(events_path),
         action,
         role,
@@ -1276,8 +1293,11 @@ if $PROGRAM_NAME == __FILE__
       successor_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmExperiment.usage
       now_arg = ARGV.shift
       now = now_arg ? Time.iso8601(now_arg) : Time.now.utc
+      predecessor = HrmExperiment.load_yaml(predecessor_path)
+      HrmExperiment.validate_capsule!(predecessor)
+      HrmExperiment.reject_legacy_mutation_cli!(command, predecessor)
       event = HrmExperiment.supersession_event(
-        HrmExperiment.load_yaml(predecessor_path),
+        predecessor,
         HrmExperiment.load_events(events_path),
         HrmExperiment.load_yaml(successor_path),
         now

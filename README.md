@@ -92,10 +92,6 @@ ruby scripts/hrm_experiment.rb validate-grant \
   path/to/hrm-authority-grant.yaml path/to/hrm-execution-capsule.yaml
 ruby scripts/hrm_experiment.rb derive-state \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
-ruby scripts/hrm_experiment.rb guard-action \
-  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl ACTION ROLE
-ruby scripts/hrm_experiment.rb supersede-with-successor \
-  path/to/predecessor-capsule.yaml path/to/hrm-run-events.jsonl path/to/successor-capsule.yaml
 ruby scripts/hrm_experiment.rb evaluate \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ruby scripts/hrm_supervisor.rb resume \
@@ -111,6 +107,8 @@ ruby scripts/hrm_supervisor.rb supersede \
 During rc.5, use the non-LLM supervisor for run writes and continuation reads. It serializes
 event appends and commits a cursor-bound state, scorecard, and compact attention projection;
 the LLM orchestrator consumes that projection instead of replaying startup validation output.
+The legacy `hrm_experiment.rb` append, guard, and supersede commands fail closed for rc.5 so
+they cannot advance the authoritative ledger without committing the matching projection.
 
 ## Change-propagation playbooks
 
