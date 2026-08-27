@@ -700,6 +700,9 @@ module HrmExperiment
       event["event_type"] == "context_snapshot" && event["role"] == role
     end
     raise ValidationError, "fresh context_snapshot required for #{role} before #{action}" unless latest_context
+    unless latest_context["sequence"] == events.last["sequence"]
+      raise ValidationError, "context_snapshot for #{role} must immediately precede guard-action"
+    end
 
     context_budget = capsule.dig("budgets", "context_bytes_by_role", role)
     raise ValidationError, "no context budget declared for role #{role.inspect}" unless context_budget
