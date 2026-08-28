@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.8"
+version: "0.1.0-rc.9"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -176,7 +176,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.8 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.9 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -192,7 +192,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.8 append, guarded action, and transition goes through
+the ledger before continuation. Every rc.9 append, context receipt, guarded action, and transition goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
 and only then binds the predecessor's terminal supersession event.
@@ -265,7 +265,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.8.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.9.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -289,11 +289,17 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    before the predecessor may become terminal. A manually copied capsule or free-text
    `superseded` event is invalid during routine mode transition.
 
-2. Start or resume through `scripts/hrm_supervisor.rb`. On an empty bound ledger, `resume`
+2. Validate a released worktree with the read-only `scripts/hrm_supervisor.rb release-check`
+   command. It must contain no artifacts for the new session. Start or resume only inside the
+   actual HRM task through `scripts/hrm_supervisor.rb resume`. On an empty bound ledger, `resume`
    atomically writes `session_started` before compiling the first assignment. Use its
    cursor-bound compact projection
    and compiled dispatch envelope as active model state. Validate hashes mechanically; do not
    reread the complete kernel, project map, capsule, or ledger when their cache keys are unchanged.
+   The dispatch names only the dependencies required for its current assignment and carries exact
+   supervisor `context` and `guard` commands. Machine-parsed dispatch bytes are not conversation
+   echo. The supervisor measures declared artifact bytes; the worker reports only bounded tool-output
+   counters. A process-failing accepted event and its terminal stop are written under the same lock.
    The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not
    authoritative state. A generic reply can accept only the last prepared exact decision. Emit
    an event for every lifecycle transition, material decision, candidate freeze, conclusive
@@ -446,6 +452,11 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.9 — 2026-08-27:** Makes released sessions provably unstarted, terminalizes accepted
+  process failures in the same locked append, and stops stale active sessions on resume. Replaces
+  free-form context events with supervisor-measured declared dependencies, assignment-minimal
+  dependency sets, and exact context/guard commands in the compiled dispatch. Platform instructions
+  and machine-parsed dispatch are excluded from repository-context and echo accounting respectively.
 - **0.1.0-rc.8 — 2026-08-27:** Compiles a hash-bound worker dispatch envelope and separate quiet
   operator projection so unchanged kernel/HRM sources do not need full LLM rereads. Enforces
   30-second uninterrupted semantic/handoff budgets, derives execution-mode successors through

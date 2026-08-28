@@ -43,7 +43,7 @@
       "required": ["kernel_id", "kernel_version", "source_sha"],
       "properties": {
         "kernel_id": {"const": "AP-EXEC-001"},
-        "kernel_version": {"const": "0.1.0-rc.8"},
+        "kernel_version": {"const": "0.1.0-rc.9"},
         "source_sha": {"$ref": "#/$defs/sha"}
       }
     },

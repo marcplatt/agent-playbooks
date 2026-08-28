@@ -28,6 +28,110 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal "silent", projection.dig("operator_projection", "visibility")
       assert_equal "inventory_runtime_bindings", dispatch.dig("assignment", "action")
       assert_equal "provider_observer", dispatch.dig("assignment", "role")
+      assert_equal [], dispatch.dig("assignment", "required_dependency_ids")
+      assert_equal "agent_playbooks.hrm_dispatch_envelope.v0.2", dispatch["schema_version"]
+      assert_equal "context", dispatch.dig("protocol", "context_command", 2)
+      assert_equal "guard", dispatch.dig("protocol", "guard_command", 2)
+      assert_equal 0, dispatch.dig("protocol", "context_report", "machine_parsed_dispatch_echo_bytes")
+    end
+  end
+
+  def test_release_check_does_not_start_or_create_runtime_artifacts
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+
+    Dir.mktmpdir("hrm-release", ROOT) do |directory|
+      local_capsule = Marshal.load(Marshal.dump(capsule))
+      local_capsule["project_root"] = directory
+      local_capsule.dig("metrics")["event_log_path"] = "release.events.jsonl"
+      local_capsule.dig("metrics")["session_state_path"] = "release.state.yaml"
+      local_capsule.dig("metrics")["scorecard_path"] = "release.scorecard.yaml"
+      capsule_path = File.join(directory, "capsule.yaml")
+      File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
+      events_path = File.join(directory, "release.events.jsonl")
+
+      receipt = HrmSupervisor.validate_release(capsule_path, events_path)
+
+      assert receipt["release_ready"]
+      refute File.exist?(events_path)
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.validate_release(capsule_path, events_path)
+      end
+      assert_includes error.message, "unstarted session"
+    end
+  end
+
+  def test_supervisor_measures_context_and_terminalizes_failure_in_same_locked_append
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+
+    Dir.mktmpdir("hrm-context", ROOT) do |directory|
+      local_capsule = Marshal.load(Marshal.dump(capsule))
+      local_capsule["project_root"] = directory
+      local_capsule.dig("metrics")["event_log_path"] = "context.events.jsonl"
+      local_capsule.dig("metrics")["session_state_path"] = "context.state.yaml"
+      local_capsule.dig("metrics")["scorecard_path"] = "context.scorecard.yaml"
+      capsule_path = File.join(directory, "capsule.yaml")
+      File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
+      events_path = File.join(directory, "context.events.jsonl")
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+
+      receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-1",
+        "loaded_dependency_ids" => [],
+        "tool_output_bytes" => local_capsule.dig("budgets", "context_bytes_by_role", "provider_observer") + 1
+      })
+      events = HrmExperiment.load_events(events_path)
+      state = HrmExperiment.load_yaml(File.join(directory, "context.state.yaml"))
+
+      assert receipt["auto_terminalized"]
+      assert_equal "context_snapshot", receipt["accepted_event_type"]
+      assert_equal "stop_reason", receipt["event_type"]
+      assert_equal %w[session_started context_snapshot stop_reason], events.map { |event| event["event_type"] }
+      assert_equal 0, events[1].dig("context", "artifact_bytes")
+      assert_equal 0, events[1].dig("context", "state_artifact_echo_bytes")
+      assert_equal "budget_exhausted", events.last.dig("details", "stop_reason")
+      assert_equal "blocked", state.dig("terminal", "state")
+      assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.append(capsule_path, events_path, {
+          "event_type" => "finding_opened",
+          "occurred_at" => "2026-08-27T22:01:00Z",
+          "role" => "orchestrator",
+          "details" => {"finding_id" => "F-1", "blocking" => false, "note" => "must not append"}
+        })
+      end
+    end
+  end
+
+  def test_resume_terminalizes_a_prestarted_stale_run
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      receipt = HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T23:00:00Z"))
+      events = HrmExperiment.load_events(events_path)
+
+      assert_equal "terminalize", receipt["action"]
+      assert_equal "stop_reason", receipt["event_type"]
+      assert_equal "no_progress", events.last.dig("details", "stop_reason")
+    end
+  end
+
+  def test_rc9_rejects_free_form_context_snapshot_append
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    started = HrmExperiment.load_events(EVENTS).first
+    context = Marshal.load(Marshal.dump(HrmExperiment.load_events(EVENTS)[1]))
+    context["schema_version"] = "agent_playbooks.hrm_run_event.v0.5"
+    context.delete("sequence")
+    context.delete("session_id")
+    context.delete("hrm_id")
+    context.delete("caused_by_sequence")
+
+    with_run(capsule, [started]) do |capsule_path, events_path, _paths|
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.append(capsule_path, events_path, context)
+      end
+      assert_includes error.message, "supervisor-measured"
+      assert_equal 1, HrmExperiment.load_events(events_path).length
     end
   end
 
@@ -410,29 +514,21 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
-  def test_declared_external_kernel_context_reaches_routine_projection
+  def test_declared_external_kernel_context_is_valid_evaluator_evidence
     capsule = HrmExperiment.load_yaml(CAPSULE)
     started = HrmExperiment.load_events(EVENTS).first
     context = Marshal.load(Marshal.dump(HrmExperiment.load_events(EVENTS)[1]))
     context["schema_version"] = "agent_playbooks.hrm_run_event.v0.5"
-    context.delete("sequence")
-    context.delete("session_id")
-    context.delete("hrm_id")
-    context.delete("caused_by_sequence")
     context.fetch("context").merge!(
       "loaded_dependency_ids" => ["example.execution-capsule", "ap.exec.kernel"],
       "outside_declared_dependency_ids" => [],
       "files_outside_declared_dependencies" => 0
     )
 
-    with_run(capsule, [started]) do |capsule_path, events_path, paths|
-      receipt = HrmSupervisor.append(capsule_path, events_path, context)
-      projection = JSON.parse(File.read(paths["projection"], encoding: "UTF-8"))
+    scorecard = HrmExperiment.evaluate(capsule, [started, context])
 
-      assert_equal "inventory_runtime_bindings", receipt["next_action"]
-      assert_equal "pending", projection.dig("scorecard_verdict", "process_envelope")
-      assert_equal 2, projection["ledger_cursor"]
-    end
+    assert scorecard.dig("verdict", "run_valid")
+    assert_equal "pending", scorecard.dig("verdict", "process_envelope")
   end
 
   def test_inherited_decision_receipt_is_bound_to_immutable_predecessor_event

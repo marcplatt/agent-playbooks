@@ -14,10 +14,11 @@
     "assignment",
     "scope",
     "authority",
+    "protocol",
     "dispatch_hash"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_dispatch_envelope.v0.1"},
+    "schema_version": {"const": "agent_playbooks.hrm_dispatch_envelope.v0.2"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "capsule_sha256": {"$ref": "#/$defs/sha256"},
@@ -36,14 +37,15 @@
     "assignment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["next_action", "action", "role"],
+      "required": ["next_action", "action", "role", "required_dependency_ids"],
       "properties": {
         "next_action": {"$ref": "#/$defs/nonempty"},
         "action": {"type": ["string", "null"], "minLength": 1},
         "role": {
           "type": ["string", "null"],
           "enum": ["orchestrator", "builder", "checker", "provider_observer", "reviewer", null]
-        }
+        },
+        "required_dependency_ids": {"$ref": "#/$defs/string_array"}
       }
     },
     "scope": {
@@ -53,6 +55,7 @@
         "execution_mode",
         "deliverable_type",
         "required_dependency_ids",
+        "declared_dependency_ids",
         "required_skill_ids",
         "missing_skill_ids",
         "required_real_seams",
@@ -65,6 +68,7 @@
         "execution_mode": {"$ref": "#/$defs/nonempty"},
         "deliverable_type": {"$ref": "#/$defs/nonempty"},
         "required_dependency_ids": {"$ref": "#/$defs/string_array"},
+        "declared_dependency_ids": {"$ref": "#/$defs/string_array"},
         "required_skill_ids": {"$ref": "#/$defs/string_array"},
         "missing_skill_ids": {"$ref": "#/$defs/string_array"},
         "required_real_seams": {"$ref": "#/$defs/string_array"},
@@ -83,6 +87,36 @@
         "enabled_operational_effects": {"$ref": "#/$defs/string_array"}
       }
     },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_command", "guard_command", "context_report", "result_contract"],
+      "properties": {
+        "context_command": {"$ref": "#/$defs/nullable_command"},
+        "guard_command": {"$ref": "#/$defs/nullable_command"},
+        "context_report": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stdin",
+            "required_fields",
+            "optional_nonnegative_integer_fields",
+            "measurement_scope",
+            "platform_instructions",
+            "machine_parsed_dispatch_echo_bytes"
+          ],
+          "properties": {
+            "stdin": {"const": "json"},
+            "required_fields": {"$ref": "#/$defs/string_array"},
+            "optional_nonnegative_integer_fields": {"$ref": "#/$defs/string_array"},
+            "measurement_scope": {"const": "declared_artifact_bytes_plus_worker_reported_tool_output"},
+            "platform_instructions": {"const": "excluded"},
+            "machine_parsed_dispatch_echo_bytes": {"const": 0}
+          }
+        },
+        "result_contract": {"const": "append_compact_events_only"}
+      }
+    },
     "dispatch_hash": {"$ref": "#/$defs/sha256"}
   },
   "$defs": {
@@ -92,6 +126,16 @@
       "type": "array",
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1}
+    },
+    "nullable_command": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      ]
     }
   }
 }

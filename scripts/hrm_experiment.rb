@@ -12,8 +12,8 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.8"
-  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7 0.1.0-rc.8].freeze
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.9"
+  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7 0.1.0-rc.8 0.1.0-rc.9].freeze
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -863,7 +863,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.8" ?
+    %w[0.1.0-rc.8 0.1.0-rc.9].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -959,7 +959,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.8"
+    if %w[0.1.0-rc.8 0.1.0-rc.9].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1410,7 +1410,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.8 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.9 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 
