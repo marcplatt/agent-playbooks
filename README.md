@@ -159,7 +159,9 @@ selection, digest, and byte count. The pack binds the capsule, dispatch, claim, 
 API registry, and construction manifest and is rehashed at activation, context, and guard.
 RC.18 assigns builders 256 KiB of loaded artifacts plus a 64 KiB tool reserve and provider
 observers 96 KiB plus a 32 KiB reserve. RC.19 preserves those provisional data-plane budgets and
-adds a claim-bound `result-contract` read. The worker retrieves only its exact action-specific
+adds a claim-bound `result-contract` read. In a compact launch, `commands.result_contract` directs
+the worker to execute the existing result command without its final payload placeholder, avoiding
+duplicate command transport. The worker retrieves only its exact action-specific
 domain template after activation; the compact root receipt still carries no result schema. If a
 post-guard protocol command cannot complete, the separate `worker-failure` command accepts only a
 bounded error code and stage and atomically stops the run as `protocol_failure`. Invalid result

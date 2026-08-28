@@ -569,6 +569,7 @@ module HrmSupervisor
       ensure_run_writable!(capsule, events)
       handoff = pending_worker_handoff(events)
       details = handoff&.fetch("details", {}) || {}
+      claim_id ||= details["worker_claim_id"]
       unless handoff && details["worker_claim_id"] == claim_id
         raise HrmExperiment::ValidationError, "result contract requires the exact pending worker claim"
       end
@@ -591,9 +592,14 @@ module HrmSupervisor
         "encoding" => "unpadded_base64url_canonical_json",
         "result_input" => rc13_result_input_contract(assignment.fetch("action"), capsule),
         "failure_input" => {
-          "required_keys" => %w[error_code stage],
-          "allowed_error_codes" => %w[protocol_command_failed result_payload_invalid],
-          "allowed_stages" => %w[result]
+          "required_keys" => %w[protocol_failure],
+          "template" => {
+            "protocol_failure" => {
+              "error_code" => "result_payload_invalid",
+              "stage" => "result"
+            }
+          },
+          "allowed_error_codes" => %w[protocol_command_failed result_payload_invalid]
         }
       }
       if JSON.generate(contract).bytesize > MAX_RECEIPT_BYTES
@@ -623,6 +629,7 @@ module HrmSupervisor
       action = guard.dig("details", "action")
       role = guard.dig("details", "guarded_role")
       handoff, context = result_protocol_prefix!(capsule, events, role)
+      claim_id ||= handoff.dig("details", "worker_claim_id")
       unless handoff.dig("details", "worker_claim_id") == claim_id &&
              handoff["role"] == role && context["role"] == role
         raise HrmExperiment::ValidationError, "worker failure must bind the exact pending claim and role"
@@ -2511,25 +2518,6 @@ module HrmSupervisor
           launch.fetch("ledger_cursor").to_s,
           launch.fetch("dispatch_sha256")
         ]
-        if rc19?(capsule)
-          launch["result_contract_command"] = [
-            "ruby",
-            File.expand_path(__FILE__),
-            "result-contract",
-            handoff_command.fetch(3),
-            handoff_command.fetch(4),
-            claim.fetch("worker_claim_id")
-          ]
-          launch["worker_failure_command"] = [
-            "ruby",
-            File.expand_path(__FILE__),
-            "worker-failure",
-            handoff_command.fetch(3),
-            handoff_command.fetch(4),
-            claim.fetch("worker_claim_id"),
-            "__BASE64URL_CANONICAL_JSON_FAILURE__"
-          ]
-        end
         if worker_context_plane?(capsule) && claim["worker_context_pack_sha256"]
           launch["worker_context_pack"] = {
             "path" => claim.fetch("worker_context_pack_path"),
@@ -2556,7 +2544,7 @@ module HrmSupervisor
        %w[start handoff].include?(receipt["action"])
       receipt = compact_rc14_launch_receipt(receipt)
     end
-    receipt = compact_rc18_launch_receipt(receipt) if worker_context_plane?(capsule) && receipt["worker_launch"]
+    receipt = compact_rc18_launch_receipt(receipt, capsule) if worker_context_plane?(capsule) && receipt["worker_launch"]
     if worker_context_plane?(capsule) && action == "expand_context"
       receipt = receipt.slice(
         "action",
@@ -2680,17 +2668,17 @@ module HrmSupervisor
     receipt.select { |key, _value| retained.include?(key) }
   end
 
-  def compact_rc18_launch_receipt(receipt)
+  def compact_rc18_launch_receipt(receipt, capsule)
     launch = receipt.fetch("worker_launch")
     claim = launch["worker_claim"]
     commands = if claim
                  {
                    "activate" => launch.fetch("activation_command"),
-                   "result_contract" => launch["result_contract_command"],
+                   "result_contract" => ("result_without_payload" if rc19?(capsule)),
                    "context" => launch.fetch("context_command"),
                    "guard" => launch.fetch("guard_command"),
                    "result" => launch.fetch("result_command"),
-                   "fail_closed" => launch["worker_failure_command"],
+                   "fail_closed" => ("result_with_protocol_failure_envelope" if rc19?(capsule)),
                    "expand_context" => launch["expansion_command"]
                  }.compact
                else
@@ -3508,14 +3496,27 @@ if $PROGRAM_NAME == __FILE__
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 capsule = HrmExperiment.load_yaml(capsule_path)
-                result_payload = if HrmSupervisor.activation_protocol?(capsule)
-                                   encoded = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
-                                   raise HrmExperiment::ValidationError, HrmSupervisor.usage unless ARGV.empty?
-                                   HrmSupervisor.decode_one_shot_argument!(encoded, "result")
-                                 else
-                                   JSON.parse($stdin.read)
-                                 end
-                HrmSupervisor.result(capsule_path, events_path, result_payload)
+                if HrmSupervisor.rc19?(capsule) && ARGV.empty?
+                  HrmSupervisor.result_contract(capsule_path, events_path, nil)
+                else
+                  result_payload = if HrmSupervisor.activation_protocol?(capsule)
+                                     encoded = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                                     raise HrmExperiment::ValidationError, HrmSupervisor.usage unless ARGV.empty?
+                                     HrmSupervisor.decode_one_shot_argument!(encoded, "result")
+                                   else
+                                     JSON.parse($stdin.read)
+                                   end
+                  if HrmSupervisor.rc19?(capsule) && result_payload.keys == ["protocol_failure"]
+                    HrmSupervisor.worker_failure(
+                      capsule_path,
+                      events_path,
+                      nil,
+                      result_payload.fetch("protocol_failure")
+                    )
+                  else
+                    HrmSupervisor.result(capsule_path, events_path, result_payload)
+                  end
+                end
               when "worker-failure"
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage

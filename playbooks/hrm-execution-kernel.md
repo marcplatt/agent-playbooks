@@ -469,7 +469,8 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
 
 3. Load only the compiled assignment and role projection and execute worker-owned work in fresh contexts.
    The child's first tool is the exact claim/cursor/dispatch-digest-bound `activation_command`.
-   Under rc.19 its second tool is the claim-bound `result-contract` command; this returns only the
+   Under rc.19 its second tool executes `commands.result` without its final payload placeholder when
+   `commands.result_contract` is `result_without_payload`; this claim-bound contract read returns only the
    exact domain template and bounded failure vocabulary, never source or task context. It verifies
    the refreshed dispatch digest without dumping the dispatch. An rc.18 or rc.19 builder reads
    only the supplied ignored base context pack and any accepted digest-chained delta packs. If a necessary adjacent interface is absent, it may use
@@ -637,8 +638,9 @@ never copies raw or private evidence.
 
 - **0.1.0-rc.19 — 2026-08-28:** Preserves RC.11-RC.18 version-gated ledger, claim,
   activation, compact receipt, and worker-context-pack behavior. Adds a read-only, claim-bound
-  result-contract command so a fresh worker retrieves the exact action-specific domain template
-  without inlining it into root coordination. Adds a separate post-guard fail-closed command with
+  result-contract mode so a fresh worker retrieves the exact action-specific domain template
+  without inlining or duplicating command arrays in root coordination. The same result command's
+  exact `protocol_failure` envelope supplies the separate post-guard fail-closed mode with
   a fixed error-code/stage vocabulary; it atomically records `protocol_failure`, while malformed
   result payloads remain no-write. RC.19 receipts continue to target 3,072 bytes with at least
   1,024 bytes of hard-cap margin.

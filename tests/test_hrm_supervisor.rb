@@ -1911,11 +1911,16 @@ class HrmSupervisorTest < Minitest::Test
         activation.fetch(-1),
         base + 2
       )
-      contract = HrmSupervisor.result_contract(capsule_path, events_path, claim_id)
+      contract_stdout, contract_stderr, contract_status = Open3.capture3(
+        *commands.fetch("result").first(commands.fetch("result").length - 1),
+        chdir: handoff.dig("worker_launch", "working_directory")
+      )
+      assert contract_status.success?, contract_stderr
+      contract = JSON.parse(contract_stdout)
       assert_equal "inventory_runtime_bindings", contract.fetch("assigned_action")
       assert_equal "provider_observer", contract.fetch("assigned_role")
       assert_equal ["runtime_readiness"], contract.dig("result_input", "required_keys")
-      assert_equal %w[error_code stage], contract.dig("failure_input", "required_keys")
+      assert_equal %w[protocol_failure], contract.dig("failure_input", "required_keys")
 
       HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "rc19-provider",
@@ -1933,10 +1938,14 @@ class HrmSupervisorTest < Minitest::Test
       assert_includes bad.message, "requires only domain keys runtime_readiness"
       assert_equal before_bad_result, File.binread(events_path)
 
-      receipt = HrmSupervisor.worker_failure(capsule_path, events_path, claim_id, {
-        "error_code" => "result_payload_invalid",
-        "stage" => "result"
-      })
+      fail_command = commands.fetch("result").dup
+      fail_command[-1] = HrmSupervisor.encode_one_shot_argument(contract.dig("failure_input", "template"))
+      fail_stdout, fail_stderr, fail_status = Open3.capture3(
+        *fail_command,
+        chdir: handoff.dig("worker_launch", "working_directory")
+      )
+      assert_equal 3, fail_status.exitstatus, fail_stderr
+      receipt = JSON.parse(fail_stdout)
       events = HrmExperiment.load_events(events_path)
       assert_equal "stop_reason", events.last.fetch("event_type")
       assert_equal "protocol_failure", events.last.dig("details", "stop_reason")
