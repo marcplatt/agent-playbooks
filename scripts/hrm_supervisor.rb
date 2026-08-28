@@ -54,6 +54,7 @@ module HrmSupervisor
 
   def resume(capsule_path, events_path, now = Time.now.utc)
     capsule = HrmExperiment.load_yaml(capsule_path)
+    ensure_start_directory!(capsule, events_path)
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
       if events.empty?
@@ -87,6 +88,15 @@ module HrmSupervisor
       "release_ready" => true,
       "event_log_path" => paths["events"]
     }
+  end
+
+  def ensure_start_directory!(capsule, events_path)
+    paths = artifact_paths(capsule, events_path)
+    return if File.exist?(paths["events"])
+
+    directory = File.dirname(paths["events"])
+    FileUtils.mkdir_p(directory, mode: 0o700)
+    File.chmod(0o700, directory)
   end
 
   def append(capsule_path, events_path, event)
@@ -840,7 +850,7 @@ module HrmSupervisor
     action, role = action_roles.fetch(next_action, [nil, nil])
     dependency_kinds_by_action = {
       "discover_project_api_skills" => %w[project_api_skill_registry],
-      "inventory_runtime_bindings" => %w[implementation_source run_state],
+      "inventory_runtime_bindings" => %w[implementation_source],
       "prepare_private_inputs" => %w[run_state],
       "inspect_provider_read_only" => %w[project_api_skill_registry run_state],
       "record_operational_evidence" => %w[project_api_skill_registry run_state],

@@ -292,7 +292,8 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
 2. Validate a released worktree with the read-only `scripts/hrm_supervisor.rb release-check`
    command. It must contain no artifacts for the new session. Start or resume only inside the
    actual HRM task through `scripts/hrm_supervisor.rb resume`. On an empty bound ledger, `resume`
-   atomically writes `session_started` before compiling the first assignment. Use its
+   creates the ignored artifact directory if needed and atomically writes `session_started`
+   before compiling the first assignment. Use its
    cursor-bound compact projection
    and compiled dispatch envelope as active model state. Validate hashes mechanically; do not
    reread the complete kernel, project map, capsule, or ledger when their cache keys are unchanged.

@@ -42,18 +42,19 @@ class HrmSupervisorTest < Minitest::Test
     Dir.mktmpdir("hrm-release", ROOT) do |directory|
       local_capsule = Marshal.load(Marshal.dump(capsule))
       local_capsule["project_root"] = directory
-      local_capsule.dig("metrics")["event_log_path"] = "release.events.jsonl"
-      local_capsule.dig("metrics")["session_state_path"] = "release.state.yaml"
-      local_capsule.dig("metrics")["scorecard_path"] = "release.scorecard.yaml"
+      local_capsule.dig("metrics")["event_log_path"] = ".codex/hrm-runs/release.events.jsonl"
+      local_capsule.dig("metrics")["session_state_path"] = ".codex/hrm-runs/release.state.yaml"
+      local_capsule.dig("metrics")["scorecard_path"] = ".codex/hrm-runs/release.scorecard.yaml"
       capsule_path = File.join(directory, "capsule.yaml")
       File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
-      events_path = File.join(directory, "release.events.jsonl")
+      events_path = File.join(directory, ".codex/hrm-runs/release.events.jsonl")
 
       receipt = HrmSupervisor.validate_release(capsule_path, events_path)
 
       assert receipt["release_ready"]
       refute File.exist?(events_path)
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      assert File.directory?(File.dirname(events_path))
       error = assert_raises(HrmExperiment::ValidationError) do
         HrmSupervisor.validate_release(capsule_path, events_path)
       end
