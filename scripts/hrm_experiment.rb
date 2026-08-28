@@ -12,7 +12,7 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.18"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.19"
   SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[
     0.1.0-rc.6
     0.1.0-rc.7
@@ -26,11 +26,13 @@ module HrmExperiment
     0.1.0-rc.15
     0.1.0-rc.16
     0.1.0-rc.18
+    0.1.0-rc.19
   ].freeze
-  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].freeze
+  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18 0.1.0-rc.19].freeze
   RC15_KERNEL_VERSION = "0.1.0-rc.15"
   RC16_KERNEL_VERSION = "0.1.0-rc.16"
   RC18_KERNEL_VERSION = "0.1.0-rc.18"
+  RC19_KERNEL_VERSION = "0.1.0-rc.19"
   RC15_ACTIVATION_BUDGETS = {
     "max_startup_to_worker_activation_seconds" => 30,
     "max_handoff_to_worker_activation_seconds" => 20
@@ -40,6 +42,7 @@ module HrmExperiment
     "max_handoff_to_worker_activation_seconds" => 25
   }.freeze
   RC18_ACTIVATION_BUDGETS = RC16_ACTIVATION_BUDGETS
+  RC19_ACTIVATION_BUDGETS = RC18_ACTIVATION_BUDGETS
 
   PINNED_CONTEXT_BYTES_BY_ROLE = {
     "orchestrator" => 32_000,
@@ -54,6 +57,7 @@ module HrmExperiment
     "builder" => 327_680,
     "provider_observer" => 131_072
   ).freeze
+  RC19_CONTEXT_BYTES_BY_ROLE = RC18_CONTEXT_BYTES_BY_ROLE
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -461,7 +465,7 @@ module HrmExperiment
       raise ValidationError, "context_dependencies must contain unique dependency_id values"
     end
 
-    if capsule.dig("playbook_pin", "kernel_version") == RC18_KERNEL_VERSION
+    if [RC18_KERNEL_VERSION, RC19_KERNEL_VERSION].include?(capsule.dig("playbook_pin", "kernel_version"))
       context = capsule.fetch("worker_context")
       worker_pack_dependency = capsule.fetch("context_dependencies").find do |dependency|
         dependency["dependency_id"] == "ap.worker-context-pack"
@@ -691,6 +695,7 @@ module HrmExperiment
                                  when RC15_KERNEL_VERSION then RC15_ACTIVATION_BUDGETS
                                  when RC16_KERNEL_VERSION then RC16_ACTIVATION_BUDGETS
                                  when RC18_KERNEL_VERSION then RC18_ACTIVATION_BUDGETS
+                                 when RC19_KERNEL_VERSION then RC19_ACTIVATION_BUDGETS
                                  end
     if activation_budget_contract &&
        %w[runtime_build production_observation].include?(capsule["execution_mode"])
@@ -713,7 +718,7 @@ module HrmExperiment
     mismatches << "deliverable_type" unless capsule["deliverable_type"] == contract["deliverable_type"]
     mismatches << "verification.profile" unless capsule.dig("verification", "profile") == contract["verification_profile"]
     contract["budgets"].each do |key, expected|
-      expected = RC18_CONTEXT_BYTES_BY_ROLE if kernel_version == RC18_KERNEL_VERSION &&
+      expected = RC18_CONTEXT_BYTES_BY_ROLE if [RC18_KERNEL_VERSION, RC19_KERNEL_VERSION].include?(kernel_version) &&
                                                key == "context_bytes_by_role"
       mismatches << "budgets.#{key}" unless capsule.dig("budgets", key) == expected
     end
@@ -931,7 +936,7 @@ module HrmExperiment
         stop_reason = event.dig("details", "stop_reason")
         phase = "review_ready" if stop_reason == "review_ready"
         phase = "ready" if stop_reason == "done_verified"
-        phase = "blocked" if %w[blocked_input blocked_external scope_divergence governance_loop no_progress budget_exhausted superseded].include?(stop_reason)
+        phase = "blocked" if %w[blocked_input blocked_external scope_divergence governance_loop no_progress budget_exhausted protocol_failure superseded].include?(stop_reason)
       end
     end
 
@@ -956,7 +961,7 @@ module HrmExperiment
                        terminal_details["closure_decision"]
                      elsif stop_reason == "superseded"
                        "superseded"
-                     elsif %w[blocked_input blocked_external scope_divergence governance_loop no_progress budget_exhausted].include?(stop_reason)
+                     elsif %w[blocked_input blocked_external scope_divergence governance_loop no_progress budget_exhausted protocol_failure].include?(stop_reason)
                        "blocked"
                      else
                        "active"
@@ -1131,7 +1136,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18 0.1.0-rc.19].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -1227,7 +1232,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18 0.1.0-rc.19].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1397,7 +1402,7 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
-      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].include?(capsule.dig("playbook_pin", "kernel_version")) &&
+      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18 0.1.0-rc.19].include?(capsule.dig("playbook_pin", "kernel_version")) &&
                   event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
 
       loaded_bytes = context["loaded_artifact_bytes_by_id"]
@@ -1536,7 +1541,7 @@ module HrmExperiment
       process_reasons << "worker-handoff startup budget exceeded"
     end
     kernel_version = capsule.dig("playbook_pin", "kernel_version")
-    activation_gated = if [RC15_KERNEL_VERSION, RC16_KERNEL_VERSION, RC18_KERNEL_VERSION].include?(kernel_version)
+    activation_gated = if [RC15_KERNEL_VERSION, RC16_KERNEL_VERSION, RC18_KERNEL_VERSION, RC19_KERNEL_VERSION].include?(kernel_version)
                          %w[runtime_build production_observation].include?(capsule["execution_mode"])
                        else
                          ACTIVATION_KERNEL_VERSIONS.include?(kernel_version) &&
@@ -1581,6 +1586,7 @@ module HrmExperiment
     process_reasons << "non-blocking scope absorbed" if nonblocking_absorbed.positive?
     stop_reasons = Array(by_type["stop_reason"]).map { |event| event.dig("details", "stop_reason") }
     process_reasons << "liveness stop triggered" if (stop_reasons & %w[governance_loop no_progress budget_exhausted]).any?
+    process_reasons << "worker protocol failure" if stop_reasons.include?("protocol_failure")
 
     safety_failed = unauthorized_effects.positive? || ambiguous_mutations.positive? || capability_regressions.positive? || escaped_p0_p1.positive? || scenario_results.value?("failed")
     outcome_and_safety = if !explicit_terminal
@@ -1729,7 +1735,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.18 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.19 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 

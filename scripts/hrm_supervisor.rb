@@ -29,6 +29,7 @@ module HrmSupervisor
   RC15_KERNEL_VERSION = "0.1.0-rc.15"
   RC16_KERNEL_VERSION = "0.1.0-rc.16"
   RC18_KERNEL_VERSION = "0.1.0-rc.18"
+  RC19_KERNEL_VERSION = "0.1.0-rc.19"
   SUPERVISOR_MEASURED_CONTEXT_VERSIONS = [
     RC9_KERNEL_VERSION,
     RC10_KERNEL_VERSION,
@@ -38,7 +39,8 @@ module HrmSupervisor
     RC14_KERNEL_VERSION,
     RC15_KERNEL_VERSION,
     RC16_KERNEL_VERSION,
-    RC18_KERNEL_VERSION
+    RC18_KERNEL_VERSION,
+    RC19_KERNEL_VERSION
   ].freeze
   MAX_TERMINAL_REASON_CODES = 8
   TERMINAL_REASON_CODE_BY_SCORECARD_REASON = {
@@ -62,7 +64,8 @@ module HrmSupervisor
     "non-blocking scope absorbed" => "nonblocking_scope_absorbed",
     "liveness stop triggered" => "liveness_stop_triggered",
     "outcome or safety gate failed" => "outcome_or_safety_gate_failed",
-    "aftercare pending" => "aftercare_pending"
+    "aftercare pending" => "aftercare_pending",
+    "worker protocol failure" => "worker_protocol_failure"
   }.freeze
   RESULT_PROTOCOL_SUPERVISOR_BOUND_EVENT_TYPES = %w[
     worker_handoff_started
@@ -117,7 +120,18 @@ module HrmSupervisor
     HrmExperiment.validator("hrm-dispatch-envelope.schema.json").validate!(dispatch)
     if capsule && (rc12?(capsule) || activation_protocol?(capsule))
       expected_working_directory = File.realpath(File.expand_path(capsule.fetch("project_root")))
-      expected_order = if rc18?(capsule)
+      expected_order = if rc19?(capsule)
+                         %w[
+                           activate
+                           read_result_contract
+                           verify_dispatch_digest_without_dump
+                           read_worker_context_pack
+                           request_preapproved_context_expansion_if_needed
+                           context
+                           guard
+                           result_or_fail_closed
+                         ]
+                       elsif worker_context_plane?(capsule)
                          %w[
                            activate
                            verify_dispatch_digest_without_dump
@@ -216,7 +230,7 @@ module HrmSupervisor
     HrmExperiment.validate_capsule!(capsule)
     paths = artifact_paths(capsule, events_path)
     present = paths.values.select { |path| File.exist?(path) }
-    if rc18?(capsule)
+    if worker_context_plane?(capsule)
       safe_session = capsule.fetch("session_id").gsub(/[^A-Za-z0-9_.-]/, "_")
       present.concat(
         Dir.glob(File.join(File.dirname(File.expand_path(events_path)), "#{safe_session}.worker-context-*.json"))
@@ -271,7 +285,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless supervisor_measured_context?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor context command requires an rc.9 through rc.18 capsule"
+            "the supervisor context command requires an rc.9 through rc.19 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -291,7 +305,7 @@ module HrmSupervisor
 
       normalized = normalize_context_report!(report, capsule, role)
       required_ids = dispatch.dig("assignment", "required_dependency_ids")
-      worker_context = if rc18?(capsule) && role == "builder"
+      worker_context = if worker_context_plane?(capsule) && role == "builder"
                          validate_worker_context_pack!(capsule, events, events_path)
                        end
       if worker_context && normalized.fetch("worker_context_pack_sha256") != worker_context.dig("ref", "sha256")
@@ -411,7 +425,7 @@ module HrmSupervisor
         )
       end
       context_pack_bundle = nil
-      if rc18?(capsule) && role == "builder"
+      if worker_context_plane?(capsule) && role == "builder"
         context_pack_bundle = build_worker_context_pack(capsule, dispatch, details, events_path)
         details.merge!(
           "worker_context_pack_path" => context_pack_bundle.dig("ref", "path"),
@@ -443,7 +457,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless activation_protocol?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor activate command requires an rc.13 capsule or its rc.14-rc.18 successors"
+            "the supervisor activate command requires an rc.13 capsule or its rc.14-rc.19 successors"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -487,7 +501,7 @@ module HrmSupervisor
       if activation_projection?(capsule)
         activation_details["observed_activation_dispatch_sha256"] = current_file_sha256
       end
-      validate_worker_context_pack!(capsule, events, events_path) if rc18?(capsule) && assignment["role"] == "builder"
+      validate_worker_context_pack!(capsule, events, events_path) if worker_context_plane?(capsule) && assignment["role"] == "builder"
       append_prepared(capsule, events, events_path, {
         "event_type" => "worker_started",
         "occurred_at" => now.utc.iso8601,
@@ -523,7 +537,7 @@ module HrmSupervisor
           capsule_path,
           assignment
         )
-        if rc18?(capsule) && role == "builder"
+        if worker_context_plane?(capsule) && role == "builder"
           validate_worker_context_pack!(capsule, events, events_path)
           rc18_output_target_path!(capsule)
         end
@@ -545,10 +559,103 @@ module HrmSupervisor
     end
   end
 
+  def result_contract(capsule_path, events_path, claim_id)
+    capsule = HrmExperiment.load_yaml(capsule_path)
+    unless rc19?(capsule)
+      raise HrmExperiment::ValidationError, "the supervisor result-contract command requires rc.19"
+    end
+    with_run_lock(events_path, capsule) do
+      events = load_and_validate_run(capsule, events_path)
+      ensure_run_writable!(capsule, events)
+      handoff = pending_worker_handoff(events)
+      details = handoff&.fetch("details", {}) || {}
+      unless handoff && details["worker_claim_id"] == claim_id
+        raise HrmExperiment::ValidationError, "result contract requires the exact pending worker claim"
+      end
+      assignment = {
+        "action" => details.fetch("action"),
+        "role" => details.fetch("worker_role")
+      }
+      validate_worker_claim_for_assignment!(
+        capsule,
+        events,
+        events_path,
+        capsule_path,
+        assignment
+      )
+      contract = {
+        "action" => "result_contract",
+        "worker_claim_id" => claim_id,
+        "assigned_action" => assignment.fetch("action"),
+        "assigned_role" => assignment.fetch("role"),
+        "encoding" => "unpadded_base64url_canonical_json",
+        "result_input" => rc13_result_input_contract(assignment.fetch("action"), capsule),
+        "failure_input" => {
+          "required_keys" => %w[error_code stage],
+          "allowed_error_codes" => %w[protocol_command_failed result_payload_invalid],
+          "allowed_stages" => %w[result]
+        }
+      }
+      if JSON.generate(contract).bytesize > MAX_RECEIPT_BYTES
+        raise HrmExperiment::ValidationError, "rc.19 result contract exceeds #{MAX_RECEIPT_BYTES} bytes"
+      end
+      contract
+    end
+  end
+
+  def worker_failure(capsule_path, events_path, claim_id, failure, now = Time.now.utc)
+    capsule = HrmExperiment.load_yaml(capsule_path)
+    unless rc19?(capsule)
+      raise HrmExperiment::ValidationError, "the supervisor worker-failure command requires rc.19"
+    end
+    with_run_lock(events_path, capsule) do
+      events = load_and_validate_run(capsule, events_path)
+      ensure_run_writable!(capsule, events)
+      unless failure.is_a?(Hash) && failure.keys.sort == %w[error_code stage] &&
+             %w[protocol_command_failed result_payload_invalid].include?(failure["error_code"]) &&
+             failure["stage"] == "result"
+        raise HrmExperiment::ValidationError, "worker failure requires only an allowed error_code and stage"
+      end
+      guard = events.last
+      unless guard&.dig("event_type") == "action_guard_passed"
+        raise HrmExperiment::ValidationError, "worker failure requires the exact pending post-guard lifecycle"
+      end
+      action = guard.dig("details", "action")
+      role = guard.dig("details", "guarded_role")
+      handoff, context = result_protocol_prefix!(capsule, events, role)
+      unless handoff.dig("details", "worker_claim_id") == claim_id &&
+             handoff["role"] == role && context["role"] == role
+        raise HrmExperiment::ValidationError, "worker failure must bind the exact pending claim and role"
+      end
+      validate_worker_claim_for_assignment!(
+        capsule,
+        events,
+        events_path,
+        capsule_path,
+        {"action" => action, "role" => role},
+        recompute_source: false
+      )
+      append_prepared(capsule, events, events_path, {
+        "event_type" => "stop_reason",
+        "occurred_at" => now.utc.iso8601,
+        "role" => "orchestrator",
+        "caused_by_sequence" => guard.fetch("sequence"),
+        "details" => {
+          "stop_reason" => "protocol_failure",
+          "action" => action,
+          "worker_role" => role,
+          "worker_claim_id" => claim_id,
+          "material_progress" => false,
+          "note" => "Supervisor stopped after a claim-bound #{failure.fetch('stage')} #{failure.fetch('error_code')}."
+        }
+      }, "worker-failure", capsule_path)
+    end
+  end
+
   def result(capsule_path, events_path, result_event, now = Time.now.utc)
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless result_protocol?(capsule)
-      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 through rc.18 capsule"
+      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 through rc.19 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -643,7 +750,7 @@ module HrmSupervisor
 
   def derive_rc13_result_event!(capsule, action, role, claim, domain, now)
     unless domain.is_a?(Hash)
-      raise HrmExperiment::ValidationError, "rc.13-rc.18 result domain payload must be a JSON object"
+      raise HrmExperiment::ValidationError, "rc.13-rc.19 result domain payload must be a JSON object"
     end
     binding = {
       "action" => action,
@@ -662,12 +769,12 @@ module HrmSupervisor
       }
     when "implement_frozen_slice"
       expected_keys = %w[candidate_sha change_unit_id runtime_readiness]
-      expected_keys << "output_artifact_sha256" if rc18?(capsule)
+      expected_keys << "output_artifact_sha256" if worker_context_plane?(capsule)
       require_exact_domain_keys!(domain, expected_keys, action)
       output_artifact = validate_rc18_output_artifact!(
         capsule,
         domain.fetch("output_artifact_sha256")
-      ) if rc18?(capsule)
+      ) if worker_context_plane?(capsule)
       {
         "event_type" => "first_executable_delta",
         "occurred_at" => now.utc.iso8601,
@@ -714,7 +821,7 @@ module HrmSupervisor
       }
     else
       raise HrmExperiment::ValidationError,
-            "rc.13-rc.18 has no action-specific result contract for #{action.inspect}"
+            "rc.13-rc.19 has no action-specific result contract for #{action.inspect}"
     end
   end
 
@@ -780,7 +887,7 @@ module HrmSupervisor
     return true if actual_keys == expected_keys.sort
 
     raise HrmExperiment::ValidationError,
-          "rc.13-rc.18 #{action} result requires only domain keys #{expected_keys.sort.join(', ')}"
+          "rc.13-rc.19 #{action} result requires only domain keys #{expected_keys.sort.join(', ')}"
   end
 
   def result_protocol_prefix!(capsule, events, role)
@@ -814,7 +921,7 @@ module HrmSupervisor
               "result requires the claim-bound worker activation immediately after handoff"
       end
     end
-    expansion_events = if rc18?(capsule)
+    expansion_events = if worker_context_plane?(capsule)
                          protocol_events.select { |event| event["event_type"] == "worker_context_expanded" }
                        else
                          []
@@ -917,8 +1024,8 @@ module HrmSupervisor
       successor.dig("authority", "operational")[key] = false
     end
     profile.fetch("budgets").each { |key, value| successor.dig("budgets")[key] = value }
-    successor.dig("budgets")["context_bytes_by_role"] = HrmExperiment::RC18_CONTEXT_BYTES_BY_ROLE if rc18?(successor)
-    if (rc16?(successor) || rc18?(successor)) && %w[runtime_build production_observation].include?(execution_mode)
+    successor.dig("budgets")["context_bytes_by_role"] = HrmExperiment::RC18_CONTEXT_BYTES_BY_ROLE if worker_context_plane?(successor)
+    if (rc16?(successor) || worker_context_plane?(successor)) && %w[runtime_build production_observation].include?(execution_mode)
       successor.dig("budgets")["max_startup_to_worker_activation_seconds"] = 30
       successor.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 25
     elsif rc15?(successor) && %w[runtime_build production_observation].include?(execution_mode)
@@ -1262,7 +1369,7 @@ module HrmSupervisor
   end
 
   def validate_worker_context_pack!(capsule, events, events_path)
-    raise HrmExperiment::ValidationError, "worker-context packs require rc.18" unless rc18?(capsule)
+    raise HrmExperiment::ValidationError, "worker-context packs require rc.18 or rc.19" unless worker_context_plane?(capsule)
 
     handoff = pending_worker_handoff(events)
     ref_events = worker_context_ref_events(events)
@@ -1370,7 +1477,7 @@ module HrmSupervisor
 
   def expand_context(capsule_path, events_path, claim_id, request, now = Time.now.utc)
     capsule = HrmExperiment.load_yaml(capsule_path)
-    raise HrmExperiment::ValidationError, "context expansion requires rc.18" unless rc18?(capsule)
+    raise HrmExperiment::ValidationError, "context expansion requires rc.18 or rc.19" unless worker_context_plane?(capsule)
 
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -1648,8 +1755,16 @@ module HrmSupervisor
     capsule.dig("playbook_pin", "kernel_version") == RC18_KERNEL_VERSION
   end
 
+  def rc19?(capsule)
+    capsule.dig("playbook_pin", "kernel_version") == RC19_KERNEL_VERSION
+  end
+
+  def worker_context_plane?(capsule)
+    rc18?(capsule) || rc19?(capsule)
+  end
+
   def activation_projection?(capsule)
-    rc15?(capsule) || rc16?(capsule) || rc18?(capsule)
+    rc15?(capsule) || rc16?(capsule) || worker_context_plane?(capsule)
   end
 
   def activation_protocol?(capsule)
@@ -1895,7 +2010,7 @@ module HrmSupervisor
       unless activated
         raise HrmExperiment::ValidationError,
               "worker claim requires an immediate supervisor-accepted rc.13 activation " \
-              "or its rc.14-rc.18 successor protocol " \
+              "or its rc.14-rc.19 successor protocol " \
               "bound to the exact deterministic activation dispatch digest"
       end
     end
@@ -1923,7 +2038,7 @@ module HrmSupervisor
               validation["claimed_dispatch_sha256"] == expected_dispatch_sha256)
     unless valid
       raise HrmExperiment::ValidationError,
-            "rc.15/rc.16/rc.18 worker_started requires matching claimed and observed activation dispatch digests " \
+            "rc.15/rc.16/rc.18/rc.19 worker_started requires matching claimed and observed activation dispatch digests " \
             "bound to the exact deterministic activation dispatch digest"
     end
     validation
@@ -1969,7 +2084,7 @@ module HrmSupervisor
     unless report.is_a?(Hash)
       raise HrmExperiment::ValidationError, "context report must be a JSON object"
     end
-    dependency_field = if rc18?(capsule) && role == "builder"
+    dependency_field = if worker_context_plane?(capsule) && role == "builder"
                          "worker_context_pack_sha256"
                        elsif bounded_context?(capsule)
                          "loaded_artifact_bytes_by_id"
@@ -1986,7 +2101,7 @@ module HrmSupervisor
       raise HrmExperiment::ValidationError, "context report requires a non-empty turn_id"
     end
     normalized = {"turn_id" => turn_id}
-    if rc18?(capsule) && role == "builder"
+    if worker_context_plane?(capsule) && role == "builder"
       digest = report["worker_context_pack_sha256"]
       unless digest.is_a?(String) && digest.match?(/\A[0-9a-f]{64}\z/)
         raise HrmExperiment::ValidationError,
@@ -2099,7 +2214,7 @@ module HrmSupervisor
         validate_rc15_activation_evidence!(event.fetch("details", {}))
       end
     end
-    if rc18?(capsule)
+    if worker_context_plane?(capsule)
       executable = events.reverse.find { |event| event["event_type"] == "first_executable_delta" }
       if executable
         details = executable.fetch("details", {})
@@ -2396,7 +2511,26 @@ module HrmSupervisor
           launch.fetch("ledger_cursor").to_s,
           launch.fetch("dispatch_sha256")
         ]
-        if rc18?(capsule) && claim["worker_context_pack_sha256"]
+        if rc19?(capsule)
+          launch["result_contract_command"] = [
+            "ruby",
+            File.expand_path(__FILE__),
+            "result-contract",
+            handoff_command.fetch(3),
+            handoff_command.fetch(4),
+            claim.fetch("worker_claim_id")
+          ]
+          launch["worker_failure_command"] = [
+            "ruby",
+            File.expand_path(__FILE__),
+            "worker-failure",
+            handoff_command.fetch(3),
+            handoff_command.fetch(4),
+            claim.fetch("worker_claim_id"),
+            "__BASE64URL_CANONICAL_JSON_FAILURE__"
+          ]
+        end
+        if worker_context_plane?(capsule) && claim["worker_context_pack_sha256"]
           launch["worker_context_pack"] = {
             "path" => claim.fetch("worker_context_pack_path"),
             "sha256" => claim.fetch("worker_context_pack_sha256"),
@@ -2422,8 +2556,8 @@ module HrmSupervisor
        %w[start handoff].include?(receipt["action"])
       receipt = compact_rc14_launch_receipt(receipt)
     end
-    receipt = compact_rc18_launch_receipt(receipt) if rc18?(capsule) && receipt["worker_launch"]
-    if rc18?(capsule) && action == "expand_context"
+    receipt = compact_rc18_launch_receipt(receipt) if worker_context_plane?(capsule) && receipt["worker_launch"]
+    if worker_context_plane?(capsule) && action == "expand_context"
       receipt = receipt.slice(
         "action",
         "session_id",
@@ -2552,9 +2686,11 @@ module HrmSupervisor
     commands = if claim
                  {
                    "activate" => launch.fetch("activation_command"),
+                   "result_contract" => launch["result_contract_command"],
                    "context" => launch.fetch("context_command"),
                    "guard" => launch.fetch("guard_command"),
                    "result" => launch.fetch("result_command"),
+                   "fail_closed" => launch["worker_failure_command"],
                    "expand_context" => launch["expansion_command"]
                  }.compact
                else
@@ -2616,7 +2752,7 @@ module HrmSupervisor
       }
     when "implement_frozen_slice"
       required_keys = %w[candidate_sha change_unit_id runtime_readiness]
-      required_keys << "output_artifact_sha256" if rc18?(capsule)
+      required_keys << "output_artifact_sha256" if worker_context_plane?(capsule)
       template = {
         "change_unit_id" => "replace-with-change-unit-id",
         "candidate_sha" => "0" * 40,
@@ -2627,7 +2763,7 @@ module HrmSupervisor
           "evidence_sha256" => "0" * 64
         }
       }
-      template["output_artifact_sha256"] = "0" * 64 if rc18?(capsule)
+      template["output_artifact_sha256"] = "0" * 64 if worker_context_plane?(capsule)
       {
         "domain_event" => "first_executable_delta",
         "required_keys" => required_keys,
@@ -2663,15 +2799,15 @@ module HrmSupervisor
       }
     else
       raise HrmExperiment::ValidationError,
-            "rc.13-rc.18 has no action-specific result input contract for #{action.inspect}"
+            "rc.13-rc.19 has no action-specific result input contract for #{action.inspect}"
     end
   end
 
   def validate_receipt_size!(capsule, receipt)
-    return true unless rc18?(capsule) || (zero_normalization?(capsule) && receipt["worker_launch"])
+    return true unless worker_context_plane?(capsule) || (zero_normalization?(capsule) && receipt["worker_launch"])
 
     bytes = JSON.generate(receipt).bytesize
-    limit = rc18?(capsule) ? RC18_RECEIPT_TARGET_BYTES : MAX_RECEIPT_BYTES
+    limit = worker_context_plane?(capsule) ? RC18_RECEIPT_TARGET_BYTES : MAX_RECEIPT_BYTES
     if bytes > limit
       raise HrmExperiment::ValidationError,
             "#{capsule.dig('playbook_pin', 'kernel_version')} worker launch receipt exceeds " \
@@ -2838,7 +2974,7 @@ module HrmSupervisor
     assignment_dependency_ids = capsule.fetch("context_dependencies").each_with_object([]) do |dependency, ids|
       ids << dependency["dependency_id"] if assignment_dependency_kinds.include?(dependency["kind"])
     end
-    if rc18?(capsule) && action == "implement_frozen_slice" && role == "builder"
+    if worker_context_plane?(capsule) && action == "implement_frozen_slice" && role == "builder"
       assignment_dependency_ids = ["ap.worker-context-pack"]
     end
     assignment_dependencies = capsule.fetch("context_dependencies").each_with_object([]) do |dependency, items|
@@ -2856,7 +2992,7 @@ module HrmSupervisor
         "access_policy" => "targeted_queries_and_bounded_slices"
       }
     end
-    if rc18?(capsule) && action == "implement_frozen_slice" && role == "builder"
+    if worker_context_plane?(capsule) && action == "implement_frozen_slice" && role == "builder"
       assignment_dependencies = [{
         "dependency_id" => "ap.worker-context-pack",
         "kind" => "worker_context_pack",
@@ -2880,7 +3016,7 @@ module HrmSupervisor
       "capsule_sha256" => HrmExperiment.object_sha256(capsule)
     )
     role_context_budget = role ? capsule.dig("budgets", "context_bytes_by_role", role) : 0
-    loaded_artifact_budget, tool_output_reserve = if rc18?(capsule) && role &&
+    loaded_artifact_budget, tool_output_reserve = if worker_context_plane?(capsule) && role &&
                                                      capsule.dig("worker_context", "role_budgets", role)
                                                     budget = capsule.dig("worker_context", "role_budgets", role)
                                                     [
@@ -3010,7 +3146,18 @@ module HrmSupervisor
       }
     }
     if activation_protocol?(capsule)
-      dispatch.fetch("protocol")["worker_execution_order"] = if rc18?(capsule)
+      dispatch.fetch("protocol")["worker_execution_order"] = if rc19?(capsule)
+                                                                  %w[
+                                                                    activate
+                                                                    read_result_contract
+                                                                    verify_dispatch_digest_without_dump
+                                                                    read_worker_context_pack
+                                                                    request_preapproved_context_expansion_if_needed
+                                                                    context
+                                                                    guard
+                                                                    result_or_fail_closed
+                                                                  ]
+                                                                elsif worker_context_plane?(capsule)
                                                                 %w[
                                                                   activate
                                                                   verify_dispatch_digest_without_dump
@@ -3037,7 +3184,7 @@ module HrmSupervisor
       if next_action == "await_worker_result"
         dispatch.fetch("protocol")["result_lifecycle_sha256"] = worker_lifecycle_sha256(events)
       end
-      if rc18?(capsule) && action == "implement_frozen_slice" && role == "builder"
+      if worker_context_plane?(capsule) && action == "implement_frozen_slice" && role == "builder"
         dispatch.fetch("assignment")["load_policy"] = "supervisor_context_pack_only"
         dispatch.fetch("assignment")["worker_context_manifest_sha256"] = HrmExperiment.object_sha256(
           capsule.fetch("worker_context")
@@ -3276,7 +3423,9 @@ module HrmSupervisor
         ruby scripts/hrm_supervisor.rb activate CAPSULE.yaml EVENTS.jsonl CLAIM CURSOR DISPATCH_SHA256
         ruby scripts/hrm_supervisor.rb context CAPSULE.yaml EVENTS.jsonl ROLE [BASE64URL_CANONICAL_JSON]
         ruby scripts/hrm_supervisor.rb expand-context CAPSULE.yaml EVENTS.jsonl CLAIM BASE64URL_CANONICAL_JSON
+        ruby scripts/hrm_supervisor.rb result-contract CAPSULE.yaml EVENTS.jsonl CLAIM
         ruby scripts/hrm_supervisor.rb result CAPSULE.yaml EVENTS.jsonl [BASE64URL_CANONICAL_JSON]
+        ruby scripts/hrm_supervisor.rb worker-failure CAPSULE.yaml EVENTS.jsonl CLAIM BASE64URL_CANONICAL_JSON
         ruby scripts/hrm_supervisor.rb append CAPSULE.yaml EVENTS.jsonl < EVENT.json
         ruby scripts/hrm_supervisor.rb guard CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
         ruby scripts/hrm_supervisor.rb supersede PREDECESSOR.yaml EVENTS.jsonl SUCCESSOR.yaml [ISO8601_NOW]
@@ -3345,6 +3494,12 @@ if $PROGRAM_NAME == __FILE__
                   claim_id,
                   HrmSupervisor.decode_one_shot_argument!(encoded, "context expansion")
                 )
+              when "result-contract"
+                capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                claim_id = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                raise HrmExperiment::ValidationError, HrmSupervisor.usage unless ARGV.empty?
+                HrmSupervisor.result_contract(capsule_path, events_path, claim_id)
               when "append"
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
@@ -3361,6 +3516,18 @@ if $PROGRAM_NAME == __FILE__
                                    JSON.parse($stdin.read)
                                  end
                 HrmSupervisor.result(capsule_path, events_path, result_payload)
+              when "worker-failure"
+                capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                claim_id = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                encoded = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                raise HrmExperiment::ValidationError, HrmSupervisor.usage unless ARGV.empty?
+                HrmSupervisor.worker_failure(
+                  capsule_path,
+                  events_path,
+                  claim_id,
+                  HrmSupervisor.decode_one_shot_argument!(encoded, "worker failure")
+                )
               when "guard"
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage

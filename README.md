@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.18` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.19` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -80,8 +80,8 @@ This is intentionally an experiment rather than a new default. Pin the exact Age
 commit in each capsule, keep the event log append-only, and derive the scorecard with the
 repository script. Compare the resulting flow, context, CI, scope, safety, and operator-review
 measures with the preregistered budgets; do not infer success from agent self-report.
-The capsule template publishes RC.18. The two checked-in runnable example capsules remain pinned
-to RC.16 as exact compatibility fixtures; RC.18 behavior is exercised by the supervisor's
+The capsule template publishes RC.19. The two checked-in runnable example capsules remain pinned
+to RC.16 as exact compatibility fixtures; RC.18 and RC.19 behavior is exercised by the supervisor's
 generated-context demonstration tests.
 
 The operator invocation is deliberately short: “Run the current HRM under the
@@ -116,9 +116,14 @@ ruby scripts/hrm_supervisor.rb context \
 ruby scripts/hrm_supervisor.rb expand-context \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
   WORKER_CLAIM_ID BASE64URL_CANONICAL_JSON_EXPANSION
+ruby scripts/hrm_supervisor.rb result-contract \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl WORKER_CLAIM_ID
 ruby scripts/hrm_supervisor.rb result \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
   BASE64URL_CANONICAL_JSON_DOMAIN_DETAILS
+ruby scripts/hrm_supervisor.rb worker-failure \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
+  WORKER_CLAIM_ID BASE64URL_CANONICAL_JSON_FAILURE
 ruby scripts/hrm_supervisor.rb append \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl < event.json
 ruby scripts/hrm_supervisor.rb guard \
@@ -130,14 +135,14 @@ ruby scripts/hrm_supervisor.rb transition \
   path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.18, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
+During rc.19, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
 envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
 when the bound ledger is empty, then emits the first worker assignment. `transition`
 mechanically derives and binds runtime-build/production-observation successors. The legacy
 `hrm_experiment.rb` append, guard,
-and supersede commands fail closed for rc.6 through rc.18 so
+and supersede commands fail closed for rc.6 through rc.19 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
@@ -153,7 +158,12 @@ The capsule manifest fixes the pack's initial sections; every section records it
 selection, digest, and byte count. The pack binds the capsule, dispatch, claim, source snapshot,
 API registry, and construction manifest and is rehashed at activation, context, and guard.
 RC.18 assigns builders 256 KiB of loaded artifacts plus a 64 KiB tool reserve and provider
-observers 96 KiB plus 32 KiB. These allocations are provisional until at least two representative
+observers 96 KiB plus a 32 KiB reserve. RC.19 preserves those provisional data-plane budgets and
+adds a claim-bound `result-contract` read. The worker retrieves only its exact action-specific
+domain template after activation; the compact root receipt still carries no result schema. If a
+post-guard protocol command cannot complete, the separate `worker-failure` command accepts only a
+bounded error code and stage and atomically stops the run as `protocol_failure`. Invalid result
+payloads themselves remain no-write operations and cannot gain terminal authority. These allocations are provisional until at least two representative
 builder runs measure context use, compaction, and implementation quality.
 
 A builder may request only capsule-preapproved adjacent context. A mechanical acceptance writes a

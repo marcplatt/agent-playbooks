@@ -1881,6 +1881,124 @@ class HrmSupervisorTest < Minitest::Test
     FileUtils.rm_f(output_path) if output_path
   end
 
+  def test_rc19_publishes_claim_bound_result_contract_and_terminalizes_protocol_failure
+    capsule = rc19_capsule
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      base = Time.now.utc - 10
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      handoff = HrmSupervisor.handoff(capsule_path, events_path, base + 1)
+      claim_id = handoff.dig("worker_launch", "worker_claim", "worker_claim_id")
+      commands = handoff.dig("worker_launch", "commands")
+      assert commands.fetch("result_contract")
+      assert commands.fetch("fail_closed")
+      assert_operator JSON.generate(handoff).bytesize, :<=, HrmSupervisor::RC18_RECEIPT_TARGET_BYTES
+      assert_operator HrmSupervisor::MAX_RECEIPT_BYTES - JSON.generate(handoff).bytesize, :>=, 1024
+      refute_includes JSON.generate(handoff), '"result_input"'
+
+      before_activation = File.binread(events_path)
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.result_contract(capsule_path, events_path, claim_id)
+      end
+      assert_includes error.message, "activation"
+      assert_equal before_activation, File.binread(events_path)
+
+      activation = commands.fetch("activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        activation.fetch(-3),
+        Integer(activation.fetch(-2), 10),
+        activation.fetch(-1),
+        base + 2
+      )
+      contract = HrmSupervisor.result_contract(capsule_path, events_path, claim_id)
+      assert_equal "inventory_runtime_bindings", contract.fetch("assigned_action")
+      assert_equal "provider_observer", contract.fetch("assigned_role")
+      assert_equal ["runtime_readiness"], contract.dig("result_input", "required_keys")
+      assert_equal %w[error_code stage], contract.dig("failure_input", "required_keys")
+
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "rc19-provider",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 32_211},
+        "tool_output_bytes" => 0
+      })
+      HrmSupervisor.guard(capsule_path, events_path, "inventory_runtime_bindings", "provider_observer")
+      before_bad_result = File.binread(events_path)
+      bad = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.result(capsule_path, events_path, {
+          "candidate_runtime_delta" => false,
+          "runtime_bindings" => []
+        })
+      end
+      assert_includes bad.message, "requires only domain keys runtime_readiness"
+      assert_equal before_bad_result, File.binread(events_path)
+
+      receipt = HrmSupervisor.worker_failure(capsule_path, events_path, claim_id, {
+        "error_code" => "result_payload_invalid",
+        "stage" => "result"
+      })
+      events = HrmExperiment.load_events(events_path)
+      assert_equal "stop_reason", events.last.fetch("event_type")
+      assert_equal "protocol_failure", events.last.dig("details", "stop_reason")
+      assert_equal "worker_protocol_failure", receipt.fetch("reason_codes").first
+      assert_equal "fail", HrmExperiment.load_yaml(paths.fetch("scorecard")).dig("verdict", "process_envelope")
+      assert_equal "stop_process_envelope", HrmExperiment.load_json(paths.fetch("projection")).fetch("next_action")
+      stopped_ledger = File.binread(events_path)
+      assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.worker_failure(capsule_path, events_path, claim_id, {
+          "error_code" => "result_payload_invalid",
+          "stage" => "result"
+        })
+      end
+      assert_equal stopped_ledger, File.binread(events_path)
+    end
+  end
+
+  def test_rc19_exact_contract_drives_provider_to_builder_context_pack_handoff
+    capsule = rc19_capsule
+    seams = capsule.dig("function_slice", "required_real_seams")
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      base = Time.now.utc - 10
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      handoff, = handoff_and_activate(capsule_path, events_path, base + 1)
+      claim_id = handoff.dig("worker_launch", "worker_claim", "worker_claim_id")
+      contract = HrmSupervisor.result_contract(capsule_path, events_path, claim_id)
+      domain = Marshal.load(Marshal.dump(contract.dig("result_input", "template")))
+      domain.dig("runtime_readiness")["bound_real_seams"] = seams
+      domain.dig("runtime_readiness")["evidence_sha256"] = "9" * 64
+
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "rc19-valid-provider",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 32_211},
+        "tool_output_bytes" => 0
+      })
+      HrmSupervisor.guard(capsule_path, events_path, "inventory_runtime_bindings", "provider_observer")
+      result = HrmSupervisor.result(capsule_path, events_path, domain)
+      assert_equal "implement_frozen_slice", result.dig("worker_launch", "action")
+
+      builder_handoff = HrmSupervisor.handoff(capsule_path, events_path)
+      assert_operator JSON.generate(builder_handoff).bytesize, :<=, HrmSupervisor::RC18_RECEIPT_TARGET_BYTES
+      assert_operator HrmSupervisor::MAX_RECEIPT_BYTES - JSON.generate(builder_handoff).bytesize, :>=, 1024
+      assert builder_handoff.dig("worker_launch", "worker_context_pack", "sha256")
+      assert builder_handoff.dig("worker_launch", "commands", "result_contract")
+      refute_includes JSON.generate(builder_handoff), '"result_input"'
+
+      activation = builder_handoff.dig("worker_launch", "commands", "activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        activation.fetch(-3),
+        Integer(activation.fetch(-2), 10),
+        activation.fetch(-1)
+      )
+      builder_claim = builder_handoff.dig("worker_launch", "worker_claim", "worker_claim_id")
+      builder_contract = HrmSupervisor.result_contract(capsule_path, events_path, builder_claim)
+      assert_equal "implement_frozen_slice", builder_contract.fetch("assigned_action")
+      assert_equal %w[candidate_sha change_unit_id output_artifact_sha256 runtime_readiness].sort,
+                   builder_contract.dig("result_input", "required_keys").sort
+    end
+  end
+
   def test_rc18_manifest_purposes_are_bound_to_authoritative_dependency_kinds
     capsule = rc18_capsule
     primary = capsule.dig("worker_context", "initial_sections").find do |section|
@@ -1978,7 +2096,7 @@ class HrmSupervisorTest < Minitest::Test
       "source_path" => "scripts/hrm_supervisor.rb",
       "binding" => "rc18-oversize-adjacent-interface"
     )
-    capsule.dig("worker_context", "preapproved_adjacency", 0)["max_added_bytes"] = 160_000
+    capsule.dig("worker_context", "preapproved_adjacency", 0)["max_added_bytes"] = 200_000
 
     with_rc18_builder_handoff(capsule) do |capsule_path, events_path, handoff|
       command = handoff.dig("worker_launch", "commands", "activate")
@@ -2994,6 +3112,13 @@ class HrmSupervisorTest < Minitest::Test
       "output_target_path" => "/tmp/agent-playbooks-rc18-test-#{Process.pid}.rb",
       "tuning_status" => "provisional_until_two_representative_builder_runs"
     }
+    capsule
+  end
+
+  def rc19_capsule
+    capsule = capsule_for_kernel_version(rc18_capsule, "0.1.0-rc.19")
+    capsule.dig("worker_context")["output_target_path"] =
+      "/tmp/agent-playbooks-rc19-test-#{Process.pid}.rb"
     capsule
   end
 

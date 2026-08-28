@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.18"
+version: "0.1.0-rc.19"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -204,7 +204,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.18 experiment preserves the rc.16 state-owning process below the LLM orchestrator. The supervisor
+The rc.19 experiment preserves the rc.18 state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -220,7 +220,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.13 through rc.18 append, handoff receipt, activation, context receipt,
+the ledger before continuation. Every rc.13 through rc.19 append, handoff receipt, activation, context receipt,
 guarded action, and transition goes through `scripts/hrm_supervisor.rb`; direct event appends are
 legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
@@ -414,7 +414,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.18.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.19.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -452,13 +452,13 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    cache keys are unchanged. The dispatch names only the dependencies authorized for its current
    assignment and carries the
    role context budget, loaded-artifact allowance, tool-output reserve, and exact supervisor
-   handoff, activation, context, expansion, guard, and result commands. Execute the resume
-   receipt's handoff command directly. For rc.18, spawn the assigned role immediately with
+   handoff, activation, context, expansion, result-contract, guard, result, and fail-closed commands. Execute the resume
+   receipt's handoff command directly. For rc.18 and rc.19, spawn the assigned role immediately with
    `fork_turns: none` when the claim-bearing handoff receipt contains `commands.activate`; for
    rc.14 through rc.16 use the claim-bound `activation_command`, and for older formats use `launch_ready` when
    present. Do not open state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
    exactly once after spawning. Machine-parsed dispatch bytes are not conversation echo. The
-   provider reports exact materialized dependency bytes by ID. An rc.18 builder instead acknowledges
+   provider reports exact materialized dependency bytes by ID. An rc.18 or rc.19 builder instead acknowledges
    the exact worker-context-pack digest; the supervisor accounts the pack's serialized bytes.
    A process-failing accepted event and its terminal stop are written under the same lock.
    The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not
@@ -469,15 +469,18 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
 
 3. Load only the compiled assignment and role projection and execute worker-owned work in fresh contexts.
    The child's first tool is the exact claim/cursor/dispatch-digest-bound `activation_command`.
-   It verifies the refreshed dispatch digest without dumping the dispatch. An rc.18 builder reads
+   Under rc.19 its second tool is the claim-bound `result-contract` command; this returns only the
+   exact domain template and bounded failure vocabulary, never source or task context. It verifies
+   the refreshed dispatch digest without dumping the dispatch. An rc.18 or rc.19 builder reads
    only the supplied ignored base context pack and any accepted digest-chained delta packs. If a necessary adjacent interface is absent, it may use
    the supplied expansion command for one capsule-preapproved adjacency class; an escalation
    disposition returns to the root and authorizes no wider read. The builder then emits one
    cumulative context snapshot with the latest supplied pack digest and one-shot argv command;
    the supervisor accounts all retained packs in the chain,
    executes the guard array, and submits only action-specific domain details with the provided
-   one-shot result array. Do not use stdin, a TTY, a pipe, a shell wrapper, or EOF for context or
-   result protocol. Then apply these role boundaries:
+   one-shot result array. If a post-guard command cannot complete, use the exact fail-closed array;
+   malformed result input itself never writes the ledger. Do not use stdin, a TTY, a pipe, a shell
+   wrapper, or EOF for context or result protocol. Then apply these role boundaries:
    - orchestrator: outcome, decision frontier, phase, active units, blockers, budgets, next
      transition;
    - builder: function slice, scenarios, allowed paths, non-goals, dependencies, exact checks,
@@ -624,13 +627,21 @@ the raw events when a metric regresses.
 ## Terminal reasons
 
 `done_verified`, `review_ready`, `blocked_input`, `blocked_external`,
-`scope_divergence`, `governance_loop`, `no_progress`, `budget_exhausted`, and
+`scope_divergence`, `governance_loop`, `no_progress`, `budget_exhausted`, `protocol_failure`, and
 `superseded` are the only kernel terminal reasons. Detail belongs in evidence, not an
-unbounded vocabulary. RC.15, RC.16, and RC.18 map terminal process facts to at most eight stable `reason_codes` for
+unbounded vocabulary. RC.15, RC.16, RC.18, and RC.19 map terminal process facts to at most eight stable `reason_codes` for
 the supervisor projection and terminal receipt; the operator summary renders the leading code and
 never copies raw or private evidence.
 
 ## Change note
+
+- **0.1.0-rc.19 — 2026-08-28:** Preserves RC.11-RC.18 version-gated ledger, claim,
+  activation, compact receipt, and worker-context-pack behavior. Adds a read-only, claim-bound
+  result-contract command so a fresh worker retrieves the exact action-specific domain template
+  without inlining it into root coordination. Adds a separate post-guard fail-closed command with
+  a fixed error-code/stage vocabulary; it atomically records `protocol_failure`, while malformed
+  result payloads remain no-write. RC.19 receipts continue to target 3,072 bytes with at least
+  1,024 bytes of hard-cap margin.
 
 - **0.1.0-rc.18 — 2026-08-28:** Preserves RC.11-RC.16 version-gated capsule, dispatch,
   claim, receipt, and ledger behavior while separating compact coordination transport from

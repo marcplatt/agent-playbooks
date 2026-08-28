@@ -78,6 +78,7 @@
             "governance_loop",
             "no_progress",
             "budget_exhausted",
+            "protocol_failure",
             "superseded",
             null
           ]

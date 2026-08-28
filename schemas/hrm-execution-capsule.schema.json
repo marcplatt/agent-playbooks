@@ -34,7 +34,7 @@
       "if": {
         "properties": {
           "playbook_pin": {
-            "properties": {"kernel_version": {"const": "0.1.0-rc.18"}},
+            "properties": {"kernel_version": {"enum": ["0.1.0-rc.18", "0.1.0-rc.19"]}},
             "required": ["kernel_version"]
           }
         }
@@ -56,7 +56,7 @@
       "required": ["kernel_id", "kernel_version", "source_sha"],
       "properties": {
         "kernel_id": {"const": "AP-EXEC-001"},
-        "kernel_version": {"enum": ["0.1.0-rc.11", "0.1.0-rc.12", "0.1.0-rc.13", "0.1.0-rc.14", "0.1.0-rc.15", "0.1.0-rc.16", "0.1.0-rc.18"]},
+        "kernel_version": {"enum": ["0.1.0-rc.11", "0.1.0-rc.12", "0.1.0-rc.13", "0.1.0-rc.14", "0.1.0-rc.15", "0.1.0-rc.16", "0.1.0-rc.18", "0.1.0-rc.19"]},
         "source_sha": {"$ref": "#/$defs/sha"}
       }
     },
