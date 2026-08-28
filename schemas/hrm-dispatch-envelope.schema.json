@@ -108,12 +108,26 @@
     "protocol": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["handoff_command", "context_command", "guard_command", "result_command", "context_report", "result_contract"],
+      "required": [
+        "handoff_command",
+        "context_command",
+        "guard_command",
+        "result_command",
+        "context_report",
+        "result_contract"
+      ],
       "properties": {
+        "working_directory": {"type": "string", "minLength": 1},
         "handoff_command": {"$ref": "#/$defs/nullable_command"},
         "context_command": {"$ref": "#/$defs/nullable_command"},
         "guard_command": {"$ref": "#/$defs/nullable_command"},
         "result_command": {"$ref": "#/$defs/nullable_command"},
+        "worker_execution_order": {
+          "const": ["bounded_source_materialization", "context", "guard", "result"]
+        },
+        "zero_artifact_preflight": {
+          "const": "optional_and_ignored_for_artifact_identity_and_redundancy"
+        },
         "context_report": {
           "type": "object",
           "additionalProperties": false,

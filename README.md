@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.11` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.12` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -117,14 +117,14 @@ ruby scripts/hrm_supervisor.rb transition \
   path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.11, use the non-LLM supervisor for release checks, run writes, handoff and context receipts, and continuation reads. It serializes
+During rc.12, use the non-LLM supervisor for release checks, run writes, handoff and context receipts, and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
 envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
 when the bound ledger is empty, then emits the first worker assignment. `transition`
 mechanically derives and binds runtime-build/production-observation successors. The legacy
 `hrm_experiment.rb` append, guard,
-and supersede commands fail closed for rc.6 through rc.11 so
+and supersede commands fail closed for rc.6 through rc.12 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
@@ -141,10 +141,27 @@ Handoff, context, and guard commands recompute the exact current assignment and 
 self-rehashed dispatch edit. Structured handoff claims bind the assigned action and role to the
 source dispatch cursor and digest. Named experiment profiles pin the complete role-budget map;
 `custom` remains the explicit override path.
-RC.11 worker-owned lifecycle events cannot enter through the generic append path. `result`
+RC.11 and RC.12 worker-owned lifecycle events cannot enter through the generic append path. `result`
 accepts them only after the exact pending worker claim, context receipt, and matching immediate
 guard, then records the value and claim-bound worker completion atomically. A replay or edited
 claim, action, role, order, or result type leaves the ledger unchanged.
+RC.12 resume and handoff receipts include a compact `worker_launch` projection: action, role,
+cursor, one explicit project `working_directory`, project-relative dispatch path, assignment
+dependency IDs and budgets, plus exact project-relative handoff/context/guard/result commands.
+The launch `dispatch_sha256` binds the current post-refresh dispatch file and is distinct from a
+handoff claim's pre-handoff source-dispatch hash. The complete launch receipt is capped at 4,096
+bytes and is rejected before a ledger append if it cannot fit. During uninterrupted startup, the
+root executes the receipt's handoff command directly from `working_directory` and spawns the worker
+immediately with the dispatch path and claim; it does not open the
+state, scorecard, projection, or dispatch itself and never empty-waits before spawning. Workers
+execute protocol command arrays directly, without shell wrappers that can hide exit status or
+an already-appended receipt.
+
+Worker order is source materialization through bounded queries, one cumulative context receipt,
+guard, then result. Optional zero-byte preflight receipts are normalized to empty dependency maps:
+they do not count as loaded files, artifact identity, or repetition. RC.12 result validation may
+cross any number of same-role zero-artifact preflights, but rejects an intervening business event
+or a prior positive context before the final cumulative receipt.
 Routine technical choices remain silent; only unavoidable environment/private-value actions,
 genuine decisions, prepared review, and terminal state reach the operator projection.
 Stable API skills are registered once and reused across HRMs and kernel versions. Each skill

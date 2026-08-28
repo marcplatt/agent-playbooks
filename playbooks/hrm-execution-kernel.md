@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.11"
+version: "0.1.0-rc.12"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -156,7 +156,7 @@ guarded actions. A root-orchestrator compaction before `first_executable_delta` 
 capsule budget rather than treated as free. A governance record, state projection, capsule,
 or receipt never counts as executable or operational value.
 
-Every rc.11 context snapshot maps each loaded dependency ID to the exact source bytes actually
+Every rc.12 context snapshot maps each loaded dependency ID to the exact source bytes actually
 materialized through bounded queries or slices. A declared dependency authorizes targeted access;
 it neither requires nor authorizes a full-source read. Dependency-derived query output is charged
 once in `loaded_artifact_bytes_by_id` and excluded from `tool_output_bytes`, which covers only
@@ -168,6 +168,14 @@ the capsule declaration must also appear in
 contract, API-skill registry, run state, implementation sources, and declared checks are not
 scope escapes when explicitly bound there. An unidentifiable positive count is invalid
 instrumentation rather than a terminal assumption.
+
+Zero-byte dependency reports are accepted as optional preflight evidence but normalized away in
+rc.12. They do not appear in `loaded_dependency_ids` or `loaded_artifact_bytes_by_id`, do not
+increase `files_loaded`, and never seed repeated-artifact accounting. The worker performs bounded
+source inspection and materialization first, then emits one cumulative context snapshot, executes
+the exact guard command, and submits the exact result command. One or more same-role zero-artifact
+preflights may precede that final snapshot; no business event or earlier positive snapshot may
+intervene in the claim-bound result lifecycle.
 
 The `inventory_runtime_bindings` provider observer has a 10,000-byte loaded-artifact ceiling
 and a 2,000-byte minimum tool-output reserve within its unchanged 12,000-byte role budget.
@@ -190,7 +198,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.11 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.12 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -206,7 +214,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.11 append, handoff receipt, context receipt, guarded action, and transition goes through
+the ledger before continuation. Every rc.12 append, handoff receipt, context receipt, guarded action, and transition goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
 and only then binds the predecessor's terminal supersession event.
@@ -220,7 +228,19 @@ the receipt proves a claim was issued for a fresh worker but does not claim the 
 the model. Named profiles pin their complete role-budget map; use `custom` for an intentional
 override.
 
-Worker-owned lifecycle events are not generic appends in rc.11. A worker first presents its
+RC.12 `resume` and `handoff` return a compact `worker_launch` receipt containing the assignment,
+role, cursor, one explicit project `working_directory`, a project-relative dispatch path, minimal
+dependency and budget fields, and exact project-relative handoff, context, guard, and result
+command arrays. `dispatch_sha256` binds the current post-refresh dispatch file; it is not the
+handoff claim's pre-handoff source-dispatch hash. The supervisor rejects a complete launch receipt
+over 4,096 bytes before appending its event. On an uninterrupted launch the root consumes that
+receipt only: it executes the handoff command directly from `working_directory`, then immediately
+spawns a fresh worker instructed to
+consume the compiled dispatch at the supplied path. It does not open state, scorecard, projection,
+or dispatch artifacts itself, does not empty-wait before spawning, and does not wrap protocol
+commands in a shell that can obscure exit status or duplicate an already-recorded receipt.
+
+Worker-owned lifecycle events are not generic appends in rc.12. A worker first presents its
 claim through the handoff receipt, records bounded context, and passes the matching action guard.
 The `result` command then accepts only the action's expected value event with the same claim ID,
 action, and role; it atomically appends that value and a bound `worker_result_received`. Direct
@@ -295,7 +315,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.11.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.12.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -495,6 +515,15 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.12 — 2026-08-28:** Adds compact receipt-driven worker launch data so the root can
+  hand off and spawn without opening derived artifacts. Normalizes zero-byte preflight reports
+  away from artifact identity, file counts, and repetition; permits multiple same-role zero
+  preflights before the final cumulative context; and keeps result binding closed on intervening
+  events, prior positive contexts, claim mismatch, or replay. Compiled dispatches publish the
+  direct bounded-materialization, context, guard, and result order and exact command arrays.
+  Project-relative launch commands share one working directory, bind the current dispatch-file
+  digest, and fail before ledger mutation if the complete receipt exceeds 4,096 bytes; these new
+  protocol fields are version-gated so rc.11 pending claim hashes remain stable.
 - **0.1.0-rc.11 — 2026-08-28:** Widens only the runtime-binding inventory observer's artifact
   ceiling to 10,000 bytes while retaining its 12,000-byte total budget and a 2,000-byte reserve.
   Recomputes dispatches before handoff, context, and guard; binds structured worker claims to the

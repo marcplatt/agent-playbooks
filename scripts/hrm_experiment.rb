@@ -12,8 +12,16 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.11"
-  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7 0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11].freeze
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.12"
+  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[
+    0.1.0-rc.6
+    0.1.0-rc.7
+    0.1.0-rc.8
+    0.1.0-rc.9
+    0.1.0-rc.10
+    0.1.0-rc.11
+    0.1.0-rc.12
+  ].freeze
 
   PINNED_CONTEXT_BYTES_BY_ROLE = {
     "orchestrator" => 32_000,
@@ -874,7 +882,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -970,7 +978,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1132,7 +1140,7 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
-      next unless %w[0.1.0-rc.10 0.1.0-rc.11].include?(capsule.dig("playbook_pin", "kernel_version")) &&
+      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12].include?(capsule.dig("playbook_pin", "kernel_version")) &&
                   event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
 
       loaded_bytes = context["loaded_artifact_bytes_by_id"]
@@ -1441,7 +1449,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.11 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.12 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 
