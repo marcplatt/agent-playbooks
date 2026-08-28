@@ -108,11 +108,12 @@
     "protocol": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["handoff_command", "context_command", "guard_command", "context_report", "result_contract"],
+      "required": ["handoff_command", "context_command", "guard_command", "result_command", "context_report", "result_contract"],
       "properties": {
         "handoff_command": {"$ref": "#/$defs/nullable_command"},
         "context_command": {"$ref": "#/$defs/nullable_command"},
         "guard_command": {"$ref": "#/$defs/nullable_command"},
+        "result_command": {"$ref": "#/$defs/nullable_command"},
         "context_report": {
           "type": "object",
           "additionalProperties": false,

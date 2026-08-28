@@ -17,7 +17,26 @@ module HrmSupervisor
   MAX_ATTENTION_ITEMS = 12
   RC9_KERNEL_VERSION = "0.1.0-rc.9"
   RC10_KERNEL_VERSION = "0.1.0-rc.10"
-  SUPERVISOR_MEASURED_CONTEXT_VERSIONS = [RC9_KERNEL_VERSION, RC10_KERNEL_VERSION].freeze
+  RC11_KERNEL_VERSION = "0.1.0-rc.11"
+  SUPERVISOR_MEASURED_CONTEXT_VERSIONS = [RC9_KERNEL_VERSION, RC10_KERNEL_VERSION, RC11_KERNEL_VERSION].freeze
+  RC11_SUPERVISOR_BOUND_EVENT_TYPES = %w[
+    worker_handoff_started
+    context_snapshot
+    action_guard_passed
+    change_unit_started
+    runtime_binding_inventory
+    first_executable_delta
+    first_operational_evidence
+    check_started
+    check_completed
+    worker_result_received
+  ].freeze
+  RESULT_EVENT_TYPE_BY_ACTION = {
+    "inventory_runtime_bindings" => "runtime_binding_inventory",
+    "implement_frozen_slice" => "first_executable_delta",
+    "run_declared_checks" => "check_completed",
+    "record_operational_evidence" => "first_operational_evidence"
+  }.freeze
   CONTEXT_REPORT_INTEGER_FIELDS = %w[
     tool_output_bytes
     omitted_tool_output_bytes
@@ -121,6 +140,10 @@ module HrmSupervisor
       events = load_and_validate_run(capsule, events_path)
       ensure_run_writable!(capsule, events) unless events.empty?
       prepared = prepare_event(capsule, events, event)
+      if rc11?(capsule) && RC11_SUPERVISOR_BOUND_EVENT_TYPES.include?(prepared["event_type"])
+        raise HrmExperiment::ValidationError,
+              "rc.11 #{prepared['event_type']} is supervisor-bound; use the matching handoff, context, guard, or result command"
+      end
       if supervisor_measured_context?(capsule) && prepared["event_type"] == "context_snapshot"
         raise HrmExperiment::ValidationError,
               "#{capsule.dig('playbook_pin', 'kernel_version')} context snapshots are supervisor-measured; use the context command"
@@ -137,25 +160,27 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless supervisor_measured_context?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor context command requires an rc.9 or rc.10 capsule"
+            "the supervisor context command requires an rc.9, rc.10, or rc.11 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
       ensure_run_writable!(capsule, events)
-      paths = artifact_paths(capsule, events_path)
-      dispatch = HrmExperiment.load_json(paths["dispatch"])
-      validate_dispatch!(dispatch)
-      unless dispatch["ledger_cursor"] == events.length
-        raise HrmExperiment::ValidationError, "context command requires the current dispatch cursor"
-      end
+      dispatch = verified_current_dispatch!(capsule, events, events_path, capsule_path, "context")
       unless dispatch.dig("assignment", "role") == role
         raise HrmExperiment::ValidationError,
               "context role #{role.inspect} does not match dispatched role #{dispatch.dig('assignment', 'role').inspect}"
       end
+      validate_worker_claim_for_assignment!(
+        capsule,
+        events,
+        events_path,
+        capsule_path,
+        dispatch.fetch("assignment")
+      ) if rc11?(capsule)
 
       normalized = normalize_context_report!(report, capsule)
       required_ids = dispatch.dig("assignment", "required_dependency_ids")
-      loaded_bytes_by_id = if rc10?(capsule)
+      loaded_bytes_by_id = if bounded_context?(capsule)
                              normalized.fetch("loaded_artifact_bytes_by_id")
                            else
                              measure_declared_dependencies(
@@ -169,7 +194,7 @@ module HrmSupervisor
               "loaded dependency IDs must be authorized by the current assignment: #{required_ids.join(', ')}"
       end
       measurements = measure_declared_dependencies(capsule, loaded_ids)
-      if rc10?(capsule)
+      if bounded_context?(capsule)
         loaded_bytes_by_id.each do |dependency_id, bytes|
           source_size = measurements.fetch("by_id").fetch(dependency_id)
           next if bytes <= source_size
@@ -213,7 +238,7 @@ module HrmSupervisor
           "outside_declared_dependency_ids" => []
         }
       }
-      if rc10?(capsule)
+      if bounded_context?(capsule)
         event["context"].merge!(
           "loaded_artifact_bytes_by_id" => loaded_bytes_by_id,
           "loaded_artifact_budget_bytes" => dispatch.dig("assignment", "loaded_artifact_budget_bytes"),
@@ -229,12 +254,7 @@ module HrmSupervisor
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
       ensure_run_writable!(capsule, events)
-      paths = artifact_paths(capsule, events_path)
-      dispatch = HrmExperiment.load_json(paths["dispatch"])
-      validate_dispatch!(dispatch)
-      unless dispatch["ledger_cursor"] == events.length
-        raise HrmExperiment::ValidationError, "handoff requires the current dispatch cursor"
-      end
+      dispatch = verified_current_dispatch!(capsule, events, events_path, capsule_path, "handoff")
       role = dispatch.dig("assignment", "role")
       action = dispatch.dig("assignment", "action")
       unless role && action
@@ -247,16 +267,32 @@ module HrmSupervisor
         raise HrmExperiment::ValidationError, "a fresh worker handoff is already pending"
       end
 
+      details = {
+        "material_progress" => false,
+        "note" => "Fresh #{role} dispatched for #{action}."
+      }
+      if rc11?(capsule)
+        details.merge!(
+          "action" => action,
+          "worker_role" => role,
+          "source_dispatch_cursor" => dispatch.fetch("ledger_cursor"),
+          "source_dispatch_sha256" => dispatch.fetch("dispatch_hash"),
+          "worker_claim_id" => worker_claim_id(capsule, dispatch)
+        )
+      end
       event = {
         "event_type" => "worker_handoff_started",
         "occurred_at" => now.utc.iso8601,
         "role" => role,
-        "details" => {
-          "material_progress" => false,
-          "note" => "Fresh #{role} dispatched for #{action}."
-        }
+        "details" => details
       }
-      append_prepared(capsule, events, events_path, event, "handoff", capsule_path)
+      receipt = append_prepared(capsule, events, events_path, event, "handoff", capsule_path)
+      if rc11?(capsule)
+        receipt["worker_claim"] = details.select do |key, _value|
+          %w[action worker_role source_dispatch_cursor source_dispatch_sha256 worker_claim_id].include?(key)
+        end
+      end
+      receipt
     end
   end
 
@@ -272,8 +308,123 @@ module HrmSupervisor
                 "all required project API skills are reusable; do not repeat API discovery"
         end
       end
+      if rc11?(capsule)
+        dispatch = verified_current_dispatch!(capsule, events, events_path, capsule_path, "guard")
+        assignment = dispatch.fetch("assignment")
+        unless assignment["action"] == action && assignment["role"] == role
+          raise HrmExperiment::ValidationError,
+                "guard action and role must exactly match the current deterministic assignment"
+        end
+        validate_worker_claim_for_assignment!(
+          capsule,
+          events,
+          events_path,
+          capsule_path,
+          assignment
+        )
+      end
+      if rc11?(capsule) && action == "inventory_runtime_bindings" &&
+         !capsule.dig("function_slice", "required_real_seams").empty?
+        latest_context = events.last
+        implementation_ids = assignment.fetch("dependencies").select do |dependency|
+          dependency["kind"] == "implementation_source"
+        end.map { |dependency| dependency.fetch("dependency_id") }
+        materialized = latest_context&.dig("context", "loaded_artifact_bytes_by_id") || {}
+        unless implementation_ids.any? { |dependency_id| materialized.fetch(dependency_id, 0).positive? }
+          raise HrmExperiment::ValidationError,
+                "inventory_runtime_bindings requires positive materialized bytes from an authorized implementation_source"
+        end
+      end
       event = HrmExperiment.guard_action(capsule, events, action, role, now)
       append_prepared(capsule, events, events_path, event, "guard", capsule_path)
+    end
+  end
+
+  def result(capsule_path, events_path, result_event, now = Time.now.utc)
+    capsule = HrmExperiment.load_yaml(capsule_path)
+    unless rc11?(capsule)
+      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 capsule"
+    end
+    with_run_lock(events_path, capsule) do
+      events = load_and_validate_run(capsule, events_path)
+      ensure_run_writable!(capsule, events)
+      unless result_event.is_a?(Hash)
+        raise HrmExperiment::ValidationError, "result input must be a JSON event object"
+      end
+
+      handoff, context, guard = events.last(3)
+      valid_order = handoff&.dig("event_type") == "worker_handoff_started" &&
+                    context&.dig("event_type") == "context_snapshot" &&
+                    guard&.dig("event_type") == "action_guard_passed"
+      unless valid_order
+        raise HrmExperiment::ValidationError,
+              "result requires an immediate structured handoff, context, and matching guard"
+      end
+      action = guard.dig("details", "action")
+      role = guard.dig("details", "guarded_role")
+      assignment = {"action" => action, "role" => role}
+      validate_worker_claim_for_assignment!(
+        capsule,
+        events,
+        events_path,
+        capsule_path,
+        assignment,
+        recompute_source: false
+      )
+      unless context["role"] == role && handoff["role"] == role
+        raise HrmExperiment::ValidationError, "result role does not match its handoff, context, and guard"
+      end
+
+      expected_value_type = RESULT_EVENT_TYPE_BY_ACTION[action]
+      supplied_type = result_event["event_type"]
+      expected_type = expected_value_type || "worker_result_received"
+      unless supplied_type == expected_type
+        raise HrmExperiment::ValidationError,
+              "result for #{action.inspect} requires #{expected_type}, got #{supplied_type.inspect}"
+      end
+      unless result_event["role"] == role
+        raise HrmExperiment::ValidationError, "result event role must equal guarded role #{role}"
+      end
+      claim = handoff.fetch("details")
+      result_details = result_event.fetch("details", {})
+      binding_matches = result_details["action"] == action &&
+                        result_details["worker_role"] == role &&
+                        result_details["worker_claim_id"] == claim["worker_claim_id"]
+      unless binding_matches
+        raise HrmExperiment::ValidationError,
+              "result must bind the exact pending worker claim, action, and role"
+      end
+
+      prepared_result = prepare_event(capsule, events, result_event)
+      worker_completion = nil
+      if supplied_type != "worker_result_received"
+        completion_time = [now.utc, Time.iso8601(prepared_result.fetch("occurred_at"))].max
+        worker_completion = prepare_event(capsule, events + [prepared_result], {
+          "event_type" => "worker_result_received",
+          "occurred_at" => completion_time.iso8601,
+          "role" => role,
+          "details" => {
+            "action" => action,
+            "worker_role" => role,
+            "worker_claim_id" => claim.fetch("worker_claim_id"),
+            "material_progress" => false,
+            "note" => "Supervisor accepted the bound #{supplied_type} result."
+          }
+        })
+      end
+      receipt = commit_result_events(
+        capsule,
+        events,
+        events_path,
+        [prepared_result, worker_completion].compact,
+        capsule_path
+      )
+      receipt["worker_claim"] = {
+        "action" => action,
+        "worker_role" => role,
+        "worker_claim_id" => claim.fetch("worker_claim_id")
+      }
+      receipt
     end
   end
 
@@ -543,6 +694,14 @@ module HrmSupervisor
     capsule.dig("playbook_pin", "kernel_version") == RC10_KERNEL_VERSION
   end
 
+  def rc11?(capsule)
+    capsule.dig("playbook_pin", "kernel_version") == RC11_KERNEL_VERSION
+  end
+
+  def bounded_context?(capsule)
+    rc10?(capsule) || rc11?(capsule)
+  end
+
   def supervisor_measured_context?(capsule)
     SUPERVISOR_MEASURED_CONTEXT_VERSIONS.include?(capsule.dig("playbook_pin", "kernel_version"))
   end
@@ -607,11 +766,126 @@ module HrmSupervisor
     }
   end
 
+  def verified_current_dispatch!(capsule, events, events_path, capsule_path, operation)
+    paths = artifact_paths(capsule, events_path)
+    dispatch = HrmExperiment.load_json(paths.fetch("dispatch"))
+    validate_dispatch!(dispatch)
+    unless rc11?(capsule)
+      unless dispatch["ledger_cursor"] == events.length
+        raise HrmExperiment::ValidationError, "#{operation} requires the current dispatch cursor"
+      end
+      return dispatch
+    end
+
+    projection = HrmExperiment.load_json(paths.fetch("projection"))
+    validate_projection!(projection)
+
+    capsule_sha = HrmExperiment.object_sha256(capsule)
+    identity_matches = dispatch["session_id"] == capsule["session_id"] &&
+                       dispatch["hrm_id"] == capsule.dig("hrm", "id") &&
+                       dispatch["capsule_sha256"] == capsule_sha &&
+                       dispatch["ledger_cursor"] == events.length &&
+                       projection["session_id"] == capsule["session_id"] &&
+                       projection["hrm_id"] == capsule.dig("hrm", "id") &&
+                       projection["capsule_sha256"] == capsule_sha &&
+                       projection["ledger_cursor"] == events.length &&
+                       projection.dig("dispatch_ref", "sha256") == dispatch["dispatch_hash"] &&
+                       projection.dig("dispatch_ref", "path") ==
+                         project_relative_artifact_path(capsule, paths.fetch("dispatch"), "dispatch")
+    unless identity_matches
+      raise HrmExperiment::ValidationError,
+            "#{operation} requires projection and dispatch identity at the current capsule and ledger cursor"
+    end
+
+    coverage = ProjectApiSkillRegistry.coverage_for_capsule(capsule, capsule_path)
+    expected_projection, expected_dispatch = derive_projection_set(
+      capsule,
+      events,
+      HrmExperiment.derive_session_state(capsule, events),
+      HrmExperiment.evaluate(capsule, events),
+      coverage,
+      paths,
+      capsule_path
+    )
+    unless dispatch == expected_dispatch && projection == expected_projection
+      raise HrmExperiment::ValidationError,
+            "#{operation} refuses a stored dispatch or projection that differs from deterministic supervisor derivation"
+    end
+    dispatch
+  end
+
+  def worker_claim_id(capsule, dispatch)
+    assignment = dispatch.fetch("assignment")
+    HrmExperiment.object_sha256(
+      "session_id" => capsule.fetch("session_id"),
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "action" => assignment.fetch("action"),
+      "role" => assignment.fetch("role"),
+      "source_dispatch_cursor" => dispatch.fetch("ledger_cursor"),
+      "source_dispatch_sha256" => dispatch.fetch("dispatch_hash")
+    )
+  end
+
+  def validate_worker_claim_for_assignment!(
+    capsule,
+    events,
+    events_path,
+    capsule_path,
+    assignment,
+    recompute_source: true
+  )
+    handoff = events.reverse.find do |event|
+      %w[worker_handoff_started worker_result_received].include?(event["event_type"])
+    end
+    unless handoff && handoff["event_type"] == "worker_handoff_started"
+      raise HrmExperiment::ValidationError, "guard requires a pending structured worker handoff"
+    end
+    details = handoff.fetch("details", {})
+    expected_claim = HrmExperiment.object_sha256(
+      "session_id" => capsule.fetch("session_id"),
+      "hrm_id" => capsule.dig("hrm", "id"),
+      "action" => details["action"],
+      "role" => details["worker_role"],
+      "source_dispatch_cursor" => details["source_dispatch_cursor"],
+      "source_dispatch_sha256" => details["source_dispatch_sha256"]
+    )
+    source_cursor = details["source_dispatch_cursor"]
+    source_dispatch_hash = if recompute_source && source_cursor.is_a?(Integer) && source_cursor >= 0
+                             source_events = events.first(source_cursor)
+                             paths = artifact_paths(capsule, events_path)
+                             coverage = ProjectApiSkillRegistry.coverage_for_capsule(capsule, capsule_path)
+                             _projection, source_dispatch = derive_projection_set(
+                               capsule,
+                               source_events,
+                               HrmExperiment.derive_session_state(capsule, source_events),
+                               HrmExperiment.evaluate(capsule, source_events),
+                               coverage,
+                               paths,
+                               capsule_path
+                             )
+                             source_dispatch["dispatch_hash"]
+                           else
+                             details["source_dispatch_sha256"]
+                           end
+    valid = details["action"] == assignment["action"] &&
+            details["worker_role"] == assignment["role"] &&
+            handoff["role"] == assignment["role"] &&
+            details["source_dispatch_cursor"] == handoff["sequence"] - 1 &&
+            details["source_dispatch_sha256"].is_a?(String) &&
+            details["source_dispatch_sha256"] == source_dispatch_hash &&
+            details["worker_claim_id"] == expected_claim
+    unless valid
+      raise HrmExperiment::ValidationError,
+            "pending worker claim does not bind the current deterministic assignment"
+    end
+    true
+  end
+
   def normalize_context_report!(report, capsule)
     unless report.is_a?(Hash)
       raise HrmExperiment::ValidationError, "context report must be a JSON object"
     end
-    dependency_field = rc10?(capsule) ? "loaded_artifact_bytes_by_id" : "loaded_dependency_ids"
+    dependency_field = bounded_context?(capsule) ? "loaded_artifact_bytes_by_id" : "loaded_dependency_ids"
     allowed = ["turn_id", dependency_field] + CONTEXT_REPORT_INTEGER_FIELDS
     unknown = report.keys - allowed
     unless unknown.empty?
@@ -622,7 +896,7 @@ module HrmSupervisor
       raise HrmExperiment::ValidationError, "context report requires a non-empty turn_id"
     end
     normalized = {"turn_id" => turn_id}
-    if rc10?(capsule)
+    if bounded_context?(capsule)
       loaded = report["loaded_artifact_bytes_by_id"]
       valid = loaded.is_a?(Hash) && loaded.all? do |dependency_id, bytes|
         dependency_id.is_a?(String) && !dependency_id.empty? && bytes.is_a?(Integer) && bytes >= 0
@@ -789,6 +1063,51 @@ module HrmSupervisor
     receipt
   end
 
+  def commit_result_events(capsule, events, events_path, prepared_events, capsule_path)
+    updated_events = events + prepared_events
+    validate_run_identity!(capsule, updated_events)
+    prospective_scorecard = HrmExperiment.evaluate(capsule, updated_events)
+    unless prospective_scorecard.dig("verdict", "run_valid")
+      raise HrmExperiment::ValidationError,
+            "supervisor refuses a worker result that makes the ledger run-invalid"
+    end
+
+    appended = prepared_events.dup
+    if prospective_scorecard.dig("verdict", "process_envelope") == "fail"
+      terminal_time = [Time.now.utc, Time.iso8601(appended.last.fetch("occurred_at"))].max
+      terminal = process_failure_stop_event(
+        capsule,
+        updated_events,
+        prospective_scorecard,
+        terminal_time
+      )
+      updated_events << terminal
+      appended << terminal
+      validate_run_identity!(capsule, updated_events)
+      unless HrmExperiment.evaluate(capsule, updated_events).dig("verdict", "run_valid")
+        raise HrmExperiment::ValidationError,
+              "supervisor refuses result terminalization that makes the ledger run-invalid"
+      end
+    end
+
+    File.open(events_path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
+      file.write(appended.map { |item| JSON.generate(item) }.join("\n") + "\n")
+      file.flush
+      file.fsync
+    end
+    File.chmod(0o600, events_path)
+
+    receipt = refresh(capsule, updated_events, events_path, "result", capsule_path).merge(
+      "event_sequence" => appended.last["sequence"],
+      "event_type" => appended.last["event_type"],
+      "accepted_result_event_sequence" => prepared_events.first["sequence"],
+      "accepted_result_event_type" => prepared_events.first["event_type"],
+      "worker_result_event_sequence" => prepared_events.last["sequence"]
+    )
+    receipt["auto_terminalized"] = true if appended.length > prepared_events.length
+    receipt
+  end
+
   def refresh(capsule, events, events_path, action, capsule_path)
     paths = artifact_paths(capsule, events_path)
     api_skill_coverage = ProjectApiSkillRegistry.coverage_for_capsule(capsule, capsule_path)
@@ -938,18 +1257,16 @@ module HrmSupervisor
   end
 
   def derive_dispatch_envelope(capsule, events, next_action, api_skill_coverage, paths, capsule_path)
-    action_roles = {
-      "discover_missing_project_api_skills" => ["discover_project_api_skills", "provider_observer"],
-      "inventory_runtime_bindings" => ["inventory_runtime_bindings", "provider_observer"],
-      "prepare_private_inputs" => ["prepare_private_inputs", "provider_observer"],
-      "inspect_provider_read_only" => ["inspect_provider_read_only", "provider_observer"],
-      "record_operational_evidence" => ["record_operational_evidence", "provider_observer"],
-      "implement_frozen_slice" => ["implement_frozen_slice", "builder"],
-      "freeze_candidate" => [nil, "orchestrator"],
-      "run_declared_checks" => ["run_declared_checks", "checker"],
-      "prepare_review" => [nil, "reviewer"]
-    }
-    action, role = action_roles.fetch(next_action, [nil, nil])
+    action = if next_action == "discover_missing_project_api_skills"
+               "discover_project_api_skills"
+             elsif HrmExperiment::WORKER_REQUIRED_ACTIONS.key?(next_action)
+               next_action
+             end
+    role = if action
+             HrmExperiment::WORKER_REQUIRED_ACTIONS.fetch(action)
+           else
+             {"freeze_candidate" => "orchestrator", "prepare_review" => "reviewer"}[next_action]
+           end
     dependency_kinds_by_action = {
       "discover_project_api_skills" => %w[project_api_skill_registry],
       "inventory_runtime_bindings" => %w[implementation_source],
@@ -989,8 +1306,14 @@ module HrmSupervisor
       "capsule_sha256" => HrmExperiment.object_sha256(capsule)
     )
     role_context_budget = role ? capsule.dig("budgets", "context_bytes_by_role", role) : 0
-    loaded_artifact_budget = role_context_budget / 2
-    tool_output_reserve = role_context_budget - loaded_artifact_budget
+    loaded_artifact_budget, tool_output_reserve = if rc11?(capsule) &&
+                                                     action == "inventory_runtime_bindings" &&
+                                                     role == "provider_observer"
+                                                    [10_000, 2_000]
+                                                  else
+                                                    artifact_budget = role_context_budget / 2
+                                                    [artifact_budget, role_context_budget - artifact_budget]
+                                                  end
     dispatch = {
       "schema_version" => "agent_playbooks.hrm_dispatch_envelope.v0.3",
       "session_id" => capsule["session_id"],
@@ -1055,6 +1378,13 @@ module HrmSupervisor
           paths.fetch("events"),
           action,
           role
+        ] : nil,
+        "result_command" => action && rc11?(capsule) ? [
+          "ruby",
+          File.expand_path(__FILE__),
+          "result",
+          File.expand_path(capsule_path),
+          paths.fetch("events")
         ] : nil,
         "context_report" => {
           "stdin" => "json",
@@ -1251,6 +1581,7 @@ module HrmSupervisor
         ruby scripts/hrm_supervisor.rb resume CAPSULE.yaml EVENTS.jsonl
         ruby scripts/hrm_supervisor.rb handoff CAPSULE.yaml EVENTS.jsonl [ISO8601_NOW]
         ruby scripts/hrm_supervisor.rb context CAPSULE.yaml EVENTS.jsonl ROLE < CONTEXT-REPORT.json
+        ruby scripts/hrm_supervisor.rb result CAPSULE.yaml EVENTS.jsonl < RESULT-EVENT.json
         ruby scripts/hrm_supervisor.rb append CAPSULE.yaml EVENTS.jsonl < EVENT.json
         ruby scripts/hrm_supervisor.rb guard CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
         ruby scripts/hrm_supervisor.rb supersede PREDECESSOR.yaml EVENTS.jsonl SUCCESSOR.yaml [ISO8601_NOW]
@@ -1289,6 +1620,10 @@ if $PROGRAM_NAME == __FILE__
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 HrmSupervisor.append(capsule_path, events_path, JSON.parse($stdin.read))
+              when "result"
+                capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                HrmSupervisor.result(capsule_path, events_path, JSON.parse($stdin.read))
               when "guard"
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage

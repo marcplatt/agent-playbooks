@@ -193,6 +193,12 @@
         "guarded_role": {
           "enum": ["orchestrator", "builder", "checker", "provider_observer", "reviewer"]
         },
+        "worker_role": {
+          "enum": ["builder", "checker", "provider_observer"]
+        },
+        "source_dispatch_cursor": {"type": "integer", "minimum": 0},
+        "source_dispatch_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "worker_claim_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "grant_id": {"type": "string", "minLength": 1},
         "integration_verified": {"type": "boolean"},
         "after_non_disposable_work": {"type": "boolean"},

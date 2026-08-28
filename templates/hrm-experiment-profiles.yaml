@@ -16,6 +16,13 @@ profiles:
       max_startup_to_worker_handoff_seconds: 30
       max_inline_raw_log_bytes: 2000
       max_state_artifact_echo_bytes: 1000
+      context_bytes_by_role:
+        orchestrator: 32000
+        builder: 20000
+        checker: 12000
+        provider_observer: 12000
+        reviewer: 20000
+        operator: 8000
     workflow_lease:
       objective: advance_to_next_human_gate
       routine_implementation_and_publication: authorized
@@ -67,6 +74,13 @@ profiles:
       max_startup_to_worker_handoff_seconds: 30
       max_inline_raw_log_bytes: 2000
       max_state_artifact_echo_bytes: 1000
+      context_bytes_by_role:
+        orchestrator: 32000
+        builder: 20000
+        checker: 12000
+        provider_observer: 12000
+        reviewer: 20000
+        operator: 8000
     workflow_lease:
       objective: advance_to_next_human_gate
       routine_evidence_preparation: authorized

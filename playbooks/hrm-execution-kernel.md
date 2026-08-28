@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.10"
+version: "0.1.0-rc.11"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -156,7 +156,7 @@ guarded actions. A root-orchestrator compaction before `first_executable_delta` 
 capsule budget rather than treated as free. A governance record, state projection, capsule,
 or receipt never counts as executable or operational value.
 
-Every rc.10 context snapshot maps each loaded dependency ID to the exact source bytes actually
+Every rc.11 context snapshot maps each loaded dependency ID to the exact source bytes actually
 materialized through bounded queries or slices. A declared dependency authorizes targeted access;
 it neither requires nor authorizes a full-source read. Dependency-derived query output is charged
 once in `loaded_artifact_bytes_by_id` and excluded from `tool_output_bytes`, which covers only
@@ -168,6 +168,14 @@ the capsule declaration must also appear in
 contract, API-skill registry, run state, implementation sources, and declared checks are not
 scope escapes when explicitly bound there. An unidentifiable positive count is invalid
 instrumentation rather than a terminal assumption.
+
+The `inventory_runtime_bindings` provider observer has a 10,000-byte loaded-artifact ceiling
+and a 2,000-byte minimum tool-output reserve within its unchanged 12,000-byte role budget.
+Tool output may consume unused artifact headroom, but artifacts never consume the reserve and
+the combined active total never exceeds 12,000 bytes. The 20,000-byte builder allocation remains
+10,000 loaded-artifact bytes plus a 10,000-byte nominal tool-output reserve. Other actions retain
+an even split. When real seams are declared, the inventory guard requires positive materialized
+bytes from at least one implementation-source dependency authorized by the assignment.
 
 The root context is coordination-only. It resolves meaning, owns the decision frontier, emits
 bounded worker projections, and receives compact results. A fresh builder owns implementation
@@ -182,7 +190,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.10 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.11 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -198,10 +206,26 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.10 append, handoff receipt, context receipt, guarded action, and transition goes through
+the ledger before continuation. Every rc.11 append, handoff receipt, context receipt, guarded action, and transition goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
 and only then binds the predecessor's terminal supersession event.
+
+Before handoff, context receipt, or guard, the supervisor recomputes the assignment from the
+current capsule, ledger, API-skill coverage, and cursor. The stored dispatch must equal that
+deterministic result exactly, and the current projection must bind its capsule, session, cursor,
+path, and digest. A merely self-rehashed dispatch edit cannot authorize work. Each handoff event
+records the action, role, source dispatch cursor and digest, and a deterministic worker-claim ID;
+the receipt proves a claim was issued for a fresh worker but does not claim the supervisor spawned
+the model. Named profiles pin their complete role-budget map; use `custom` for an intentional
+override.
+
+Worker-owned lifecycle events are not generic appends in rc.11. A worker first presents its
+claim through the handoff receipt, records bounded context, and passes the matching action guard.
+The `result` command then accepts only the action's expected value event with the same claim ID,
+action, and role; it atomically appends that value and a bound `worker_result_received`. Direct
+or replayed handoff, context, guard, change-unit, runtime inventory, executable/operational value,
+check, or worker-result appends fail without changing the ledger.
 
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
@@ -271,7 +295,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.10.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.11.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -471,6 +495,12 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.11 — 2026-08-28:** Widens only the runtime-binding inventory observer's artifact
+  ceiling to 10,000 bytes while retaining its 12,000-byte total budget and a 2,000-byte reserve.
+  Recomputes dispatches before handoff, context, and guard; binds structured worker claims to the
+  exact source assignment; pins named-profile role budgets; requires implementation-source bytes
+  before an inventory guard; derives worker roles from the canonical isolation contract; and
+  closes generic lifecycle appends behind an ordered, claim-bound, replay-safe result protocol.
 - **0.1.0-rc.10 — 2026-08-28:** Makes cold startup command-first from the compact repository
   dispatcher and compiles per-role context, loaded-artifact, and tool-output budgets. Declared
   dependency IDs authorize bounded queries rather than full reads. Context receipts count exact

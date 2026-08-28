@@ -28,15 +28,16 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal "silent", projection.dig("operator_projection", "visibility")
       assert_equal "inventory_runtime_bindings", dispatch.dig("assignment", "action")
       assert_equal "provider_observer", dispatch.dig("assignment", "role")
-      assert_equal [], dispatch.dig("assignment", "required_dependency_ids")
+      assert_equal ["example.runtime-source"], dispatch.dig("assignment", "required_dependency_ids")
       assert_equal "agent_playbooks.hrm_dispatch_envelope.v0.3", dispatch["schema_version"]
       assert_equal 12_000, dispatch.dig("assignment", "role_context_budget_bytes")
-      assert_equal 6_000, dispatch.dig("assignment", "loaded_artifact_budget_bytes")
-      assert_equal 6_000, dispatch.dig("assignment", "tool_output_reserve_bytes")
+      assert_equal 10_000, dispatch.dig("assignment", "loaded_artifact_budget_bytes")
+      assert_equal 2_000, dispatch.dig("assignment", "tool_output_reserve_bytes")
       assert_equal "bounded_queries_never_full_source", dispatch.dig("assignment", "load_policy")
       assert_equal "handoff", dispatch.dig("protocol", "handoff_command", 2)
       assert_equal "context", dispatch.dig("protocol", "context_command", 2)
       assert_equal "guard", dispatch.dig("protocol", "guard_command", 2)
+      assert_equal "result", dispatch.dig("protocol", "result_command", 2)
       assert_equal 0, dispatch.dig("protocol", "context_report", "machine_parsed_dispatch_echo_bytes")
     end
   end
@@ -50,6 +51,7 @@ class HrmSupervisorTest < Minitest::Test
       local_capsule.dig("metrics")["event_log_path"] = ".codex/hrm-runs/release.events.jsonl"
       local_capsule.dig("metrics")["session_state_path"] = ".codex/hrm-runs/release.state.yaml"
       local_capsule.dig("metrics")["scorecard_path"] = ".codex/hrm-runs/release.scorecard.yaml"
+      copy_relative_dependencies(local_capsule, directory)
       capsule_path = File.join(directory, "capsule.yaml")
       File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
       events_path = File.join(directory, ".codex/hrm-runs/release.events.jsonl")
@@ -76,10 +78,12 @@ class HrmSupervisorTest < Minitest::Test
       local_capsule.dig("metrics")["event_log_path"] = "context.events.jsonl"
       local_capsule.dig("metrics")["session_state_path"] = "context.state.yaml"
       local_capsule.dig("metrics")["scorecard_path"] = "context.scorecard.yaml"
+      copy_relative_dependencies(local_capsule, directory)
       capsule_path = File.join(directory, "capsule.yaml")
       File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
       events_path = File.join(directory, "context.events.jsonl")
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
 
       receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-1",
@@ -92,9 +96,10 @@ class HrmSupervisorTest < Minitest::Test
       assert receipt["auto_terminalized"]
       assert_equal "context_snapshot", receipt["accepted_event_type"]
       assert_equal "stop_reason", receipt["event_type"]
-      assert_equal %w[session_started context_snapshot stop_reason], events.map { |event| event["event_type"] }
-      assert_equal 0, events[1].dig("context", "artifact_bytes")
-      assert_equal 0, events[1].dig("context", "state_artifact_echo_bytes")
+      assert_equal %w[session_started worker_handoff_started context_snapshot stop_reason],
+                   events.map { |event| event["event_type"] }
+      assert_equal 0, events[2].dig("context", "artifact_bytes")
+      assert_equal 0, events[2].dig("context", "state_artifact_echo_bytes")
       assert_equal "budget_exhausted", events.last.dig("details", "stop_reason")
       assert_equal "blocked", state.dig("terminal", "state")
       assert_raises(HrmExperiment::ValidationError) do
@@ -108,11 +113,12 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
-  def test_rc10_counts_bounded_dependency_bytes_once_and_excludes_them_from_tool_output
+  def test_rc11_counts_bounded_dependency_bytes_once_and_excludes_them_from_tool_output
     capsule = capsule_with_runtime_source
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       dispatch = HrmExperiment.load_json(paths["dispatch"])
       dependency = dispatch.dig("assignment", "dependencies", 0)
 
@@ -133,29 +139,79 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
-  def test_rc10_terminalizes_assignment_artifact_allowance_even_below_role_budget
+  def test_rc11_terminalizes_assignment_artifact_allowance_even_below_role_budget
     capsule = capsule_with_runtime_source
 
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-over-artifact-allowance",
-        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 6001},
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 10_001},
         "tool_output_bytes" => 0
       })
       events = HrmExperiment.load_events(events_path)
 
       assert receipt["auto_terminalized"]
-      assert_equal 6001, events[1].dig("context", "active_context_bytes")
+      assert_equal 10_001, events[2].dig("context", "active_context_bytes")
       assert_equal "budget_exhausted", events.last.dig("details", "stop_reason")
     end
   end
 
-  def test_rc10_rejects_reported_dependency_bytes_above_source_size
+  def test_rc11_provider_accepts_observed_9482_bytes_inside_adaptive_allocation
+    capsule = capsule_with_runtime_source
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-observed-9482",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+        "tool_output_bytes" => 2000
+      })
+      context = HrmExperiment.load_events(events_path).last.fetch("context")
+
+      refute receipt["auto_terminalized"]
+      assert_equal 9482, context["artifact_bytes"]
+      assert_equal 11_482, context["active_context_bytes"]
+      assert_equal 10_000, context["loaded_artifact_budget_bytes"]
+      assert_equal 2_000, context["tool_output_reserve_bytes"]
+    end
+  end
+
+  def test_rc11_tool_output_can_use_unused_artifact_headroom_but_not_exceed_role_total
+    capsule = capsule_with_runtime_source
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      accepted = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-one-way-headroom",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 4000},
+        "tool_output_bytes" => 8000
+      })
+      refute accepted["auto_terminalized"]
+    end
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      stopped = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-over-total",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 4000},
+        "tool_output_bytes" => 8001
+      })
+      assert stopped["auto_terminalized"]
+      assert_equal "budget_exhausted", HrmExperiment.load_events(events_path).last.dig("details", "stop_reason")
+    end
+  end
+
+  def test_rc11_rejects_reported_dependency_bytes_above_source_size
     capsule = capsule_with_runtime_source
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       source_size = HrmExperiment.load_json(paths["dispatch"]).dig(
         "assignment", "dependencies", 0, "source_size_bytes"
       )
@@ -168,7 +224,7 @@ class HrmSupervisorTest < Minitest::Test
         })
       end
       assert_includes error.message, "exceed source size"
-      assert_equal 1, HrmExperiment.load_events(events_path).length
+      assert_equal 2, HrmExperiment.load_events(events_path).length
     end
   end
 
@@ -187,10 +243,237 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal "handoff", receipt["action"]
       assert_equal "worker_handoff_started", event["event_type"]
       assert_equal "provider_observer", event["role"]
+      assert_equal "inventory_runtime_bindings", event.dig("details", "action")
+      assert_equal "provider_observer", event.dig("details", "worker_role")
+      assert_equal 1, event.dig("details", "source_dispatch_cursor")
+      assert_match(/\A[0-9a-f]{64}\z/, event.dig("details", "source_dispatch_sha256"))
+      assert_match(/\A[0-9a-f]{64}\z/, event.dig("details", "worker_claim_id"))
+      assert_equal event.dig("details", "worker_claim_id"), receipt.dig("worker_claim", "worker_claim_id")
+      assert_equal event.dig("details", "source_dispatch_sha256"),
+                   receipt.dig("worker_claim", "source_dispatch_sha256")
       assert_includes event.dig("details", "note"), "inventory_runtime_bindings"
       assert_raises(HrmExperiment::ValidationError) do
         HrmSupervisor.handoff(capsule_path, events_path)
       end
+    end
+  end
+
+  def test_rc11_rejects_unbound_worker_handoff_append
+    with_run(capsule_with_runtime_source, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.append(capsule_path, events_path, {
+          "event_type" => "worker_handoff_started",
+          "occurred_at" => "2026-08-27T22:00:05Z",
+          "role" => "provider_observer",
+          "details" => {"material_progress" => false, "note" => "Unbound handoff."}
+        })
+      end
+      assert_includes error.message, "supervisor-bound"
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_rc11_context_requires_a_live_structured_handoff_claim
+    with_run(capsule_with_runtime_source, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+          "turn_id" => "unclaimed-context",
+          "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 100},
+          "tool_output_bytes" => 0
+        })
+      end
+      assert_includes error.message, "pending structured worker handoff"
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_rc11_direct_worker_lifecycle_appends_cannot_reach_builder
+    blocked_types = %w[
+      action_guard_passed
+      change_unit_started
+      runtime_binding_inventory
+      first_executable_delta
+      first_operational_evidence
+      check_started
+      check_completed
+      worker_result_received
+    ]
+
+    with_run(capsule_with_runtime_source, []) do |capsule_path, events_path, paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      blocked_types.each do |event_type|
+        error = assert_raises(HrmExperiment::ValidationError, event_type) do
+          HrmSupervisor.append(capsule_path, events_path, {
+            "event_type" => event_type,
+            "occurred_at" => "2026-08-27T22:00:05Z",
+            "role" => "provider_observer",
+            "details" => {}
+          })
+        end
+        assert_includes error.message, "supervisor-bound"
+      end
+
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+      assert_equal "inventory_runtime_bindings",
+                   HrmExperiment.load_json(paths["dispatch"]).dig("assignment", "action")
+    end
+  end
+
+  def test_rc11_rejects_self_rehashed_dispatch_tampering_across_write_protocol
+    mutations = {
+      "role" => lambda { |dispatch|
+        dispatch.dig("assignment")["role"] = "builder"
+      },
+      "budget" => lambda { |dispatch|
+        dispatch.dig("assignment")["loaded_artifact_budget_bytes"] = 9999
+        dispatch.dig("assignment")["tool_output_reserve_bytes"] = 2001
+      },
+      "action" => lambda { |dispatch|
+        dispatch.dig("assignment")["action"] = "implement_frozen_slice"
+      },
+      "dependency" => lambda { |dispatch|
+        dispatch.dig("assignment")["required_dependency_ids"] = []
+        dispatch.dig("assignment")["dependencies"] = []
+      }
+    }
+    operations = {
+      "handoff" => lambda { |capsule_path, events_path, _dispatch|
+        HrmSupervisor.handoff(capsule_path, events_path)
+      },
+      "context" => lambda { |capsule_path, events_path, dispatch|
+        ids = dispatch.dig("assignment", "required_dependency_ids")
+        HrmSupervisor.record_context(capsule_path, events_path, dispatch.dig("assignment", "role"), {
+          "turn_id" => "tampered-context",
+          "loaded_artifact_bytes_by_id" => ids.to_h { |dependency_id| [dependency_id, 0] },
+          "tool_output_bytes" => 0
+        })
+      },
+      "guard" => lambda { |capsule_path, events_path, dispatch|
+        HrmSupervisor.guard(
+          capsule_path,
+          events_path,
+          dispatch.dig("assignment", "action"),
+          dispatch.dig("assignment", "role")
+        )
+      }
+    }
+
+    mutations.each do |mutation_name, mutation|
+      operations.each do |operation_name, operation|
+        with_run(capsule_with_runtime_source, []) do |capsule_path, events_path, paths|
+          HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+          tampered = rewrite_dispatch_and_projection(paths, &mutation)
+
+          error = assert_raises(HrmExperiment::ValidationError, "#{mutation_name}/#{operation_name}") do
+            operation.call(capsule_path, events_path, tampered)
+          end
+          assert_includes error.message, "differs from deterministic supervisor derivation"
+          assert_equal 1, HrmExperiment.load_events(events_path).length
+        end
+      end
+    end
+  end
+
+  def test_rc11_inventory_guard_requires_positive_implementation_source_bytes
+    capsule = capsule_with_runtime_source
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
+      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-zero-source",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 0},
+        "tool_output_bytes" => 100
+      })
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.guard(capsule_path, events_path, "inventory_runtime_bindings", "provider_observer")
+      end
+      assert_includes error.message, "positive materialized bytes"
+      assert_equal 3, HrmExperiment.load_events(events_path).length
+    end
+  end
+
+  def test_rc11_provider_inventory_result_dispatches_fresh_builder_with_unchanged_allocation
+    capsule = capsule_with_runtime_source
+    seams = capsule.dig("function_slice", "required_real_seams")
+
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      base = Time.now.utc
+      HrmSupervisor.resume(capsule_path, events_path, base - 10)
+      HrmSupervisor.handoff(capsule_path, events_path, base - 5)
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-inventory",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+        "tool_output_bytes" => 2000
+      })
+      HrmSupervisor.guard(
+        capsule_path,
+        events_path,
+        "inventory_runtime_bindings",
+        "provider_observer",
+        base + 5
+      )
+      claim_id = HrmExperiment.load_events(events_path)[1].dig("details", "worker_claim_id")
+      result_event = {
+        "event_type" => "runtime_binding_inventory",
+        "occurred_at" => (base + 6).iso8601,
+        "role" => "provider_observer",
+        "details" => {
+          "action" => "inventory_runtime_bindings",
+          "worker_role" => "provider_observer",
+          "worker_claim_id" => claim_id,
+          "material_progress" => true,
+          "runtime_readiness" => {
+            "required_real_seams" => seams,
+            "bound_real_seams" => seams,
+            "zero_effect_construction_verified" => false,
+            "evidence_sha256" => "a" * 64
+          }
+        }
+      }
+      tampered_results = {
+        "claim" => lambda { |event| event.dig("details")["worker_claim_id"] = "f" * 64 },
+        "action" => lambda { |event| event.dig("details")["action"] = "implement_frozen_slice" },
+        "worker_role" => lambda { |event| event.dig("details")["worker_role"] = "builder" },
+        "event_role" => lambda { |event| event["role"] = "builder" }
+      }
+      tampered_results.each do |name, mutation|
+        tampered_result = Marshal.load(Marshal.dump(result_event))
+        mutation.call(tampered_result)
+        error = assert_raises(HrmExperiment::ValidationError, name) do
+          HrmSupervisor.result(capsule_path, events_path, tampered_result, base + 7)
+        end
+        assert_match(/exact pending worker claim|role must equal/, error.message)
+        assert_equal 4, HrmExperiment.load_events(events_path).length
+      end
+
+      receipt = HrmSupervisor.result(capsule_path, events_path, result_event, base + 7)
+      dispatch = HrmExperiment.load_json(paths["dispatch"])
+
+      assert_equal "implement_frozen_slice", receipt["next_action"]
+      assert_equal claim_id, receipt.dig("worker_claim", "worker_claim_id")
+      assert_equal "inventory_runtime_bindings", receipt.dig("worker_claim", "action")
+      assert_equal "provider_observer", receipt.dig("worker_claim", "worker_role")
+      assert_equal "implement_frozen_slice", dispatch.dig("assignment", "action")
+      assert_equal "builder", dispatch.dig("assignment", "role")
+      assert_equal 20_000, dispatch.dig("assignment", "role_context_budget_bytes")
+      assert_equal 10_000, dispatch.dig("assignment", "loaded_artifact_budget_bytes")
+      assert_equal 10_000, dispatch.dig("assignment", "tool_output_reserve_bytes")
+      events = HrmExperiment.load_events(events_path)
+      assert_equal %w[runtime_binding_inventory worker_result_received],
+                   events.last(2).map { |event| event["event_type"] }
+      assert_equal claim_id, events.last.dig("details", "worker_claim_id")
+
+      replay = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.result(capsule_path, events_path, result_event, base + 8)
+      end
+      assert_includes replay.message, "immediate structured handoff"
+      assert_equal 6, HrmExperiment.load_events(events_path).length
     end
   end
 
@@ -222,7 +505,7 @@ class HrmSupervisorTest < Minitest::Test
       error = assert_raises(HrmExperiment::ValidationError) do
         HrmSupervisor.append(capsule_path, events_path, context)
       end
-      assert_includes error.message, "supervisor-measured"
+      assert_includes error.message, "supervisor-bound"
       assert_equal 1, HrmExperiment.load_events(events_path).length
     end
   end
@@ -402,8 +685,8 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal "hashes_only_unless_changed", dispatch.dig("cache", "load_policy")
       assert_equal "bounded_queries_never_full_source", dispatch.dig("assignment", "load_policy")
       assert_equal 12_000, dispatch.dig("assignment", "role_context_budget_bytes")
-      assert_equal 6_000, dispatch.dig("assignment", "loaded_artifact_budget_bytes")
-      assert_equal 6_000, dispatch.dig("assignment", "tool_output_reserve_bytes")
+      assert_equal 10_000, dispatch.dig("assignment", "loaded_artifact_budget_bytes")
+      assert_equal 2_000, dispatch.dig("assignment", "tool_output_reserve_bytes")
       assert_equal dispatch["dispatch_hash"], projection.dig("dispatch_ref", "sha256")
       assert_operator receipt["dispatch_bytes"], :<=, HrmSupervisor::MAX_DISPATCH_BYTES
       assert HrmSupervisor.validate_dispatch!(dispatch)
@@ -459,7 +742,7 @@ class HrmSupervisorTest < Minitest::Test
           }
         })
       end
-      assert_includes error.message, "run-invalid"
+      assert_includes error.message, "supervisor-bound"
       assert_equal 1, HrmExperiment.load_events(events_path).length
     end
   end
@@ -535,6 +818,7 @@ class HrmSupervisorTest < Minitest::Test
       FileUtils.mkdir_p(File.dirname(registry_path))
       FileUtils.cp(File.join(ROOT, "examples/project-api-skill-registry.example.yaml"), registry_path)
       capsule_path = File.join(directory, "capsule.yaml")
+      copy_relative_dependencies(capsule, directory)
       File.write(capsule_path, YAML.dump(capsule), mode: "w", perm: 0o600)
       events_path = File.join(directory, File.basename(capsule.dig("metrics", "event_log_path")))
       File.write(events_path, "#{JSON.generate(session_started)}\n", mode: "w", perm: 0o600)
@@ -670,6 +954,7 @@ class HrmSupervisorTest < Minitest::Test
       capsule.dig("metrics")["event_log_path"] = "successor.events.jsonl"
       capsule.dig("metrics")["session_state_path"] = "successor.state.yaml"
       capsule.dig("metrics")["scorecard_path"] = "successor.scorecard.yaml"
+      copy_relative_dependencies(capsule, directory)
       capsule_path = File.join(directory, "capsule.yaml")
       File.write(capsule_path, YAML.dump(capsule), mode: "w", perm: 0o600)
 
@@ -718,13 +1003,43 @@ class HrmSupervisorTest < Minitest::Test
 
   def capsule_with_runtime_source
     capsule = HrmExperiment.load_yaml(CAPSULE)
-    capsule.fetch("context_dependencies") << {
-      "dependency_id" => "example.runtime-source",
-      "kind" => "implementation_source",
-      "source_path" => File.join(ROOT, "scripts/hrm_supervisor.rb"),
-      "binding" => "test-source"
-    }
+    source = capsule.fetch("context_dependencies").find do |dependency|
+      dependency["dependency_id"] == "example.runtime-source"
+    end
+    source["source_path"] = File.join(ROOT, "scripts/hrm_supervisor.rb")
+    source["binding"] = "test-source"
     capsule
+  end
+
+  def copy_relative_dependencies(capsule, directory)
+    capsule.fetch("context_dependencies").each do |dependency|
+      source = dependency.fetch("source_path").split("#", 2).first
+      next if source == "verification.exact_checks" || Pathname.new(source).absolute?
+
+      original = File.join(ROOT, source)
+      next unless File.file?(original)
+
+      copy = File.join(directory, source)
+      FileUtils.mkdir_p(File.dirname(copy))
+      FileUtils.cp(original, copy)
+    end
+  end
+
+  def rewrite_dispatch_and_projection(paths)
+    dispatch = HrmExperiment.load_json(paths.fetch("dispatch"))
+    yield dispatch
+    dispatch["dispatch_hash"] = HrmExperiment.object_sha256(
+      dispatch.reject { |key, _value| key == "dispatch_hash" }
+    )
+    File.write(paths.fetch("dispatch"), "#{JSON.generate(dispatch)}\n", mode: "w", perm: 0o600)
+
+    projection = HrmExperiment.load_json(paths.fetch("projection"))
+    projection.dig("dispatch_ref")["sha256"] = dispatch.fetch("dispatch_hash")
+    projection["projection_hash"] = HrmExperiment.object_sha256(
+      projection.reject { |key, _value| key == "projection_hash" }
+    )
+    File.write(paths.fetch("projection"), "#{JSON.generate(projection)}\n", mode: "w", perm: 0o600)
+    dispatch
   end
 
   def append_event(capsule_path, events_path, event_type, occurred_at, details)
@@ -744,17 +1059,7 @@ class HrmSupervisorTest < Minitest::Test
       local_capsule.dig("metrics")["event_log_path"] = File.basename(capsule.dig("metrics", "event_log_path"))
       local_capsule.dig("metrics")["session_state_path"] = File.basename(capsule.dig("metrics", "session_state_path"))
       local_capsule.dig("metrics")["scorecard_path"] = File.basename(capsule.dig("metrics", "scorecard_path"))
-      local_capsule.fetch("context_dependencies").each do |dependency|
-        source = dependency.fetch("source_path").split("#", 2).first
-        next if source == "verification.exact_checks" || Pathname.new(source).absolute?
-
-        original = File.join(ROOT, source)
-        next unless File.file?(original)
-
-        copy = File.join(directory, source)
-        FileUtils.mkdir_p(File.dirname(copy))
-        FileUtils.cp(original, copy)
-      end
+      copy_relative_dependencies(local_capsule, directory)
       capsule_path = File.join(directory, "capsule.yaml")
       File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
       events_path = File.join(directory, local_capsule.dig("metrics", "event_log_path"))

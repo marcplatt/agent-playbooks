@@ -210,7 +210,7 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "newly missing deliverable"
   end
 
-  def test_legacy_supersede_cli_fails_closed_for_rc8_without_advancing_the_ledger
+  def test_legacy_supersede_cli_fails_closed_for_rc11_without_advancing_the_ledger
     predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
     successor = runtime_successor_for(predecessor)
 
@@ -233,12 +233,12 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.10"
+      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.11"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
 
-  def test_legacy_guard_cli_fails_closed_for_rc8_without_advancing_the_ledger
+  def test_legacy_guard_cli_fails_closed_for_rc11_without_advancing_the_ledger
     events = HrmExperiment.load_events(EVENTS).first(2)
 
     Dir.mktmpdir do |directory|
@@ -259,7 +259,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.10"
+      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.11"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -282,7 +282,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.10"
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.11"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -294,6 +294,35 @@ class HrmExperimentTest < Minitest::Test
       HrmExperiment.reject_legacy_mutation_cli!("guard-action", rc6_capsule)
     end
     assert_includes error.message, "disabled for 0.1.0-rc.6"
+  end
+
+  def test_rc10_legacy_mutation_paths_remain_fail_closed
+    rc10_capsule = {"playbook_pin" => {"kernel_version" => "0.1.0-rc.10"}}
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.reject_legacy_mutation_cli!("append-event", rc10_capsule)
+    end
+    assert_includes error.message, "disabled for 0.1.0-rc.10"
+  end
+
+  def test_named_profile_rejects_role_budget_override
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule.dig("budgets", "context_bytes_by_role")["provider_observer"] = 12_001
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "budgets.context_bytes_by_role"
+    assert_includes error.message, "use custom for an intentional override"
+  end
+
+  def test_profile_template_preregisters_the_runtime_role_budget_contract
+    template = HrmExperiment.load_yaml(File.join(ROOT, "templates/hrm-experiment-profiles.yaml"))
+
+    HrmExperiment::PROFILE_CONTRACTS.each do |profile_name, contract|
+      assert_equal contract.dig("budgets", "context_bytes_by_role"),
+                   template.dig("profiles", profile_name, "budgets", "context_bytes_by_role")
+    end
   end
 
   def test_superseded_stop_requires_machine_readable_successor_binding
