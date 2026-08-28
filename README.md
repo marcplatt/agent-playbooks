@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.12` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.13` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -104,8 +104,15 @@ ruby scripts/hrm_supervisor.rb resume \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ruby scripts/hrm_supervisor.rb handoff \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
+ruby scripts/hrm_supervisor.rb activate \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
+  WORKER_CLAIM_ID DISPATCH_CURSOR DISPATCH_SHA256
+ruby scripts/hrm_supervisor.rb context \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl ROLE \
+  BASE64URL_CANONICAL_JSON_CONTEXT
 ruby scripts/hrm_supervisor.rb result \
-  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl < result-event.json
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
+  BASE64URL_CANONICAL_JSON_DOMAIN_DETAILS
 ruby scripts/hrm_supervisor.rb append \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl < event.json
 ruby scripts/hrm_supervisor.rb guard \
@@ -117,14 +124,14 @@ ruby scripts/hrm_supervisor.rb transition \
   path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.12, use the non-LLM supervisor for release checks, run writes, handoff and context receipts, and continuation reads. It serializes
+During rc.13, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
 envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
 when the bound ledger is empty, then emits the first worker assignment. `transition`
 mechanically derives and binds runtime-build/production-observation successors. The legacy
 `hrm_experiment.rb` append, guard,
-and supersede commands fail closed for rc.6 through rc.12 so
+and supersede commands fail closed for rc.6 through rc.13 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
@@ -141,7 +148,7 @@ Handoff, context, and guard commands recompute the exact current assignment and 
 self-rehashed dispatch edit. Structured handoff claims bind the assigned action and role to the
 source dispatch cursor and digest. Named experiment profiles pin the complete role-budget map;
 `custom` remains the explicit override path.
-RC.11 and RC.12 worker-owned lifecycle events cannot enter through the generic append path. `result`
+RC.11 through RC.13 worker-owned lifecycle events cannot enter through the generic append path. `result`
 accepts them only after the exact pending worker claim, context receipt, and matching immediate
 guard, then records the value and claim-bound worker completion atomically. A replay or edited
 claim, action, role, order, or result type leaves the ledger unchanged.
@@ -157,8 +164,25 @@ state, scorecard, projection, or dispatch itself and never empty-waits before sp
 execute protocol command arrays directly, without shell wrappers that can hide exit status or
 an already-appended receipt.
 
-Worker order is source materialization through bounded queries, one cumulative context receipt,
-guard, then result. Optional zero-byte preflight receipts are normalized to empty dependency maps:
+RC.13 extends that compact receipt with a claim/cursor/current-dispatch-digest-bound
+`activation_command`, a fresh `fork_turns: none` launch instruction, the exact worker order, and
+minimal action-specific result keys and templates. The child worker's first tool must execute the
+activation command. It then verifies the activated dispatch digest without dumping the file,
+materializes bounded source, submits one cumulative context report, guards, and submits its result.
+Context and result payloads are canonical JSON encoded as one unpadded base64url argv value; they
+never depend on stdin, a TTY, a pipe, a shell wrapper, or EOF. The supervisor derives the result
+event type, action, role, and claim from the live protocol and accepts only the declared domain
+details. Every action in the canonical worker-required action map has a compact valid payload
+template; unsupported reachable actions fail closed before launch. After guard, the compiled
+dispatch binds the exact handoff-through-guard lifecycle. Result acceptance checks that stable
+supervisor-compiled binding, so lifecycle edits fail without a ledger write while a legitimate
+worker may change its assigned implementation source or resolve its assigned API-skill registry
+after the guard and still report the bound result. Exact deterministic source dispatch
+recomputation remains mandatory through activation, context, and guard. The root performs no
+derived-artifact read or wait before the spawn and waits exactly once afterward. The runtime-build profile measures
+session-to-activation and handoff-to-activation against preregistered 20-second and 10-second gates.
+
+Optional zero-byte preflight receipts are normalized to empty dependency maps:
 they do not count as loaded files, artifact identity, or repetition. RC.12 result validation may
 cross any number of same-role zero-artifact preflights, but rejects an intervening business event
 or a prior positive context before the final cumulative receipt.

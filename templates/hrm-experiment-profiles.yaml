@@ -14,6 +14,8 @@ profiles:
       max_context_compactions_before_expected_value: 0
       max_semantic_readiness_seconds: 30
       max_startup_to_worker_handoff_seconds: 30
+      max_startup_to_worker_activation_seconds: 20
+      max_handoff_to_worker_activation_seconds: 10
       max_inline_raw_log_bytes: 2000
       max_state_artifact_echo_bytes: 1000
       context_bytes_by_role:
@@ -44,6 +46,8 @@ profiles:
       - run_identity.capsule_sequence
       - semantic_readiness_seconds
       - startup_to_first_worker_handoff_seconds
+      - startup_to_first_worker_activation_seconds
+      - handoff_to_first_worker_activation_seconds
       - first_executable_delta_from_semantic_ready_seconds
       - review_ready_from_semantic_ready_seconds
       - maximum_no_progress_seconds

@@ -12,7 +12,7 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.12"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.13"
   SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[
     0.1.0-rc.6
     0.1.0-rc.7
@@ -21,6 +21,7 @@ module HrmExperiment
     0.1.0-rc.10
     0.1.0-rc.11
     0.1.0-rc.12
+    0.1.0-rc.13
   ].freeze
 
   PINNED_CONTEXT_BYTES_BY_ROLE = {
@@ -486,6 +487,17 @@ module HrmExperiment
     end
 
     profile = capsule["experiment_profile"]
+    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13" &&
+       capsule["execution_mode"] == "runtime_build"
+      startup_activation = capsule.dig("budgets", "max_startup_to_worker_activation_seconds")
+      handoff_activation = capsule.dig("budgets", "max_handoff_to_worker_activation_seconds")
+      unless startup_activation.is_a?(Integer) && startup_activation.positive? && startup_activation <= 20
+        raise ValidationError, "rc.13 runtime build requires max_startup_to_worker_activation_seconds <= 20"
+      end
+      unless handoff_activation.is_a?(Integer) && handoff_activation.positive? && handoff_activation <= 10
+        raise ValidationError, "rc.13 runtime build requires max_handoff_to_worker_activation_seconds <= 10"
+      end
+    end
     contract = PROFILE_CONTRACTS[profile]
     return true unless contract
 
@@ -561,6 +573,19 @@ module HrmExperiment
       when "context_snapshot"
         raise ValidationError, "context_snapshot requires context" unless event["context"]
         raise ValidationError, "context_snapshot requires a role" if event["role"].nil?
+      when "worker_started"
+        missing = %w[
+          action
+          worker_role
+          worker_claim_id
+          activation_dispatch_cursor
+          activation_dispatch_sha256
+        ].reject { |key| details.key?(key) }
+        raise ValidationError, "worker_started missing #{missing.join(', ')}" unless missing.empty?
+        unless event["role"] == details["worker_role"] &&
+               WORKER_REQUIRED_ACTIONS[details["action"]] == event["role"]
+          raise ValidationError, "worker_started role and action must match the worker isolation contract"
+        end
       when "action_guard_passed"
         missing = %w[action guarded_role].reject { |key| details.key?(key) }
         raise ValidationError, "action_guard_passed missing #{missing.join(', ')}" unless missing.empty?
@@ -882,7 +907,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -978,7 +1003,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1076,6 +1101,13 @@ module HrmExperiment
     when "blocked", "deferred"
       required_event_types.concat(["hrm_closed", "stop_reason"])
     end
+    structured_handoff = Array(by_type["worker_handoff_started"]).any? do |event|
+      event.dig("details", "worker_claim_id")
+    end
+    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13" &&
+       structured_handoff && terminal_event
+      required_event_types << "worker_started"
+    end
     missing_required_events = required_event_types.uniq.reject { |type| by_type.key?(type) }
 
     conclusive_checks_without_identity = Array(by_type["check_completed"]).select do |event|
@@ -1088,6 +1120,7 @@ module HrmExperiment
     session_started = first.call("session_started")
     semantic_ready = first.call("semantic_ready")
     first_worker_handoff = first.call("worker_handoff_started")
+    first_worker_activation = first.call("worker_started")
     first_executable = first.call("first_executable_delta")
     first_operational = first.call("first_operational_evidence")
     expected_value = capsule["deliverable_type"] == "runtime_change" ? first_executable : first_operational
@@ -1140,7 +1173,7 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
-      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12].include?(capsule.dig("playbook_pin", "kernel_version")) &&
+      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13].include?(capsule.dig("playbook_pin", "kernel_version")) &&
                   event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
 
       loaded_bytes = context["loaded_artifact_bytes_by_id"]
@@ -1264,6 +1297,8 @@ module HrmExperiment
     process_reasons = []
     semantic_readiness_seconds = duration.call(session_started, semantic_ready)
     startup_to_handoff_seconds = duration.call(session_started, first_worker_handoff)
+    startup_to_activation_seconds = duration.call(session_started, first_worker_activation)
+    handoff_to_activation_seconds = duration.call(first_worker_handoff, first_worker_activation)
     operator_interrupt_sequences = Array(by_type["decision_requested"]).map { |event| event["sequence"] } +
                                    Array(by_type["operator_action_required"]).map { |event| event["sequence"] }
     semantic_interrupted = semantic_ready && operator_interrupt_sequences.any? { |sequence| sequence < semantic_ready["sequence"] }
@@ -1275,6 +1310,16 @@ module HrmExperiment
     if startup_to_handoff_seconds && !handoff_interrupted &&
        startup_to_handoff_seconds > capsule.dig("budgets", "max_startup_to_worker_handoff_seconds")
       process_reasons << "worker-handoff startup budget exceeded"
+    end
+    rc13_runtime_build = capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13" &&
+                         capsule["execution_mode"] == "runtime_build"
+    if rc13_runtime_build && startup_to_activation_seconds &&
+       startup_to_activation_seconds > capsule.dig("budgets", "max_startup_to_worker_activation_seconds")
+      process_reasons << "worker-activation startup budget exceeded"
+    end
+    if rc13_runtime_build && handoff_to_activation_seconds &&
+       handoff_to_activation_seconds > capsule.dig("budgets", "max_handoff_to_worker_activation_seconds")
+      process_reasons << "worker activation after handoff budget exceeded"
     end
     process_reasons << "late S0/S1 finding" if late_s0_s1.positive?
     if change_units_before_value.length > capsule.dig("budgets", "max_consecutive_nonruntime_units")
@@ -1433,6 +1478,12 @@ module HrmExperiment
         "reasons" => reasons.uniq
       }
     }
+    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13"
+      scorecard.fetch("flow").merge!(
+        "startup_to_first_worker_activation_seconds" => startup_to_activation_seconds,
+        "handoff_to_first_worker_activation_seconds" => handoff_to_activation_seconds
+      )
+    end
 
     validate_scorecard!(scorecard)
     scorecard
@@ -1449,7 +1500,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.12 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.13 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 

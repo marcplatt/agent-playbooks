@@ -102,6 +102,8 @@
       "properties": {
         "semantic_readiness_seconds": {"$ref": "#/$defs/nullable_integer"},
         "startup_to_first_worker_handoff_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "startup_to_first_worker_activation_seconds": {"$ref": "#/$defs/nullable_integer"},
+        "handoff_to_first_worker_activation_seconds": {"$ref": "#/$defs/nullable_integer"},
         "first_executable_delta_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
         "first_operational_evidence_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},
         "review_ready_from_semantic_ready_seconds": {"$ref": "#/$defs/nullable_integer"},

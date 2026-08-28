@@ -123,16 +123,29 @@
         "guard_command": {"$ref": "#/$defs/nullable_command"},
         "result_command": {"$ref": "#/$defs/nullable_command"},
         "worker_execution_order": {
-          "const": ["bounded_source_materialization", "context", "guard", "result"]
+          "anyOf": [
+            {"const": ["bounded_source_materialization", "context", "guard", "result"]},
+            {
+              "const": [
+                "activate",
+                "verify_dispatch_digest_without_dump",
+                "bounded_source_materialization",
+                "context",
+                "guard",
+                "result"
+              ]
+            }
+          ]
         },
         "zero_artifact_preflight": {
           "const": "optional_and_ignored_for_artifact_identity_and_redundancy"
         },
+        "one_shot_argument_encoding": {"const": "unpadded_base64url_canonical_json"},
+        "result_lifecycle_sha256": {"$ref": "#/$defs/sha256"},
         "context_report": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "stdin",
             "required_fields",
             "optional_nonnegative_integer_fields",
             "measurement_scope",
@@ -143,6 +156,7 @@
           ],
           "properties": {
             "stdin": {"const": "json"},
+            "argument": {"const": "base64url_canonical_json"},
             "required_fields": {"$ref": "#/$defs/string_array"},
             "optional_nonnegative_integer_fields": {"$ref": "#/$defs/string_array"},
             "measurement_scope": {"const": "nonoverlapping_loaded_artifact_and_nondependency_tool_output_bytes"},
@@ -150,9 +164,24 @@
             "source_size_bounds_enforced": {"const": true},
             "platform_instructions": {"const": "excluded"},
             "machine_parsed_dispatch_echo_bytes": {"const": 0}
-          }
+          },
+          "oneOf": [
+            {
+              "required": ["stdin"],
+              "not": {"required": ["argument"]}
+            },
+            {
+              "required": ["argument"],
+              "not": {"required": ["stdin"]}
+            }
+          ]
         },
-        "result_contract": {"const": "append_compact_events_only"}
+        "result_contract": {
+          "enum": [
+            "append_compact_events_only",
+            "supervisor_derived_action_specific_domain_details"
+          ]
+        }
       }
     },
     "dispatch_hash": {"$ref": "#/$defs/sha256"}

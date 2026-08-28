@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.12"
+version: "0.1.0-rc.13"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -156,8 +156,8 @@ guarded actions. A root-orchestrator compaction before `first_executable_delta` 
 capsule budget rather than treated as free. A governance record, state projection, capsule,
 or receipt never counts as executable or operational value.
 
-Every rc.12 context snapshot maps each loaded dependency ID to the exact source bytes actually
-materialized through bounded queries or slices. A declared dependency authorizes targeted access;
+Every rc.12-or-later context snapshot maps each loaded dependency ID to the exact source bytes
+actually materialized through bounded queries or slices. A declared dependency authorizes targeted access;
 it neither requires nor authorizes a full-source read. Dependency-derived query output is charged
 once in `loaded_artifact_bytes_by_id` and excluded from `tool_output_bytes`, which covers only
 non-dependency output. The supervisor rejects negative counts, counts above the bound source size,
@@ -170,7 +170,7 @@ scope escapes when explicitly bound there. An unidentifiable positive count is i
 instrumentation rather than a terminal assumption.
 
 Zero-byte dependency reports are accepted as optional preflight evidence but normalized away in
-rc.12. They do not appear in `loaded_dependency_ids` or `loaded_artifact_bytes_by_id`, do not
+rc.12 or later. They do not appear in `loaded_dependency_ids` or `loaded_artifact_bytes_by_id`, do not
 increase `files_loaded`, and never seed repeated-artifact accounting. The worker performs bounded
 source inspection and materialization first, then emits one cumulative context snapshot, executes
 the exact guard command, and submits the exact result command. One or more same-role zero-artifact
@@ -198,7 +198,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.12 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.13 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -214,8 +214,9 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.12 append, handoff receipt, context receipt, guarded action, and transition goes through
-`scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
+the ledger before continuation. Every rc.13 append, handoff receipt, activation, context receipt,
+guarded action, and transition goes through `scripts/hrm_supervisor.rb`; direct event appends are
+legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
 and only then binds the predecessor's terminal supersession event.
 
@@ -246,6 +247,29 @@ The `result` command then accepts only the action's expected value event with th
 action, and role; it atomically appends that value and a bound `worker_result_received`. Direct
 or replayed handoff, context, guard, change-unit, runtime inventory, executable/operational value,
 check, or worker-result appends fail without changing the ledger.
+
+RC.13 makes activation an explicit supervisor-owned lifecycle boundary. After the root executes
+the receipt's handoff command, it spawns the assigned fresh worker immediately with
+`fork_turns: none`, no intervening derived-artifact read, and no wait. The worker's first tool is
+the receipt's `activation_command`, bound to the pending claim, current ledger cursor, and current
+dispatch-file digest. A mismatch, forgery, or replay leaves the ledger unchanged. The activation
+receipt provides the refreshed dispatch path, cursor, and file digest so the worker can verify the
+compiled dispatch without dumping it. The root performs exactly one wait after the spawn.
+
+The worker then performs bounded source inspection, encodes its single cumulative context report
+as canonical JSON in one unpadded base64url argv value, executes the exact guard array, and submits
+one action-specific domain payload through the result command in the same encoding. It does not use
+stdin, a TTY, a pipe, a shell wrapper, or EOF as protocol. The supervisor derives the event type,
+action, role, claim, and completion envelope from the live lifecycle. The launch receipt publishes
+only the minimal action-specific result keys and valid template needed for every reachable action
+in the canonical worker-required action map and remains subject to the complete 4,096-byte
+preappend cap. After the guard, the compiled dispatch binds the exact handoff-through-guard event
+slice. Result acceptance verifies that stable supervisor-compiled lifecycle binding without
+recomputing inputs that the assigned work may legitimately change after the guard. Lifecycle edits
+therefore fail without a ledger write, while a legitimate worker can change an implementation
+source or resolve an API-skill registry after its guard and still submit the bound result. Exact
+deterministic source dispatch recomputation remains mandatory through activation, context, and
+guard. A valid provider inventory result refresh exposes the next builder launch immediately.
 
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
@@ -315,7 +339,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.12.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.13.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -346,14 +370,19 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    command. It must contain no artifacts for the new session. Start or resume only inside the
    actual HRM task through `scripts/hrm_supervisor.rb resume`. On an empty bound ledger, `resume`
    creates the ignored artifact directory if needed and atomically writes `session_started`
-   before compiling the first assignment. Use its
-   cursor-bound compact projection
-   and compiled dispatch envelope as active model state. Validate hashes mechanically; do not
-   reread the complete kernel, project map, capsule, or ledger when their cache keys are unchanged.
-   The dispatch names only the dependencies authorized for its current assignment and carries the
+   before compiling the first assignment. Use the compact receipt as root active state; the root
+   does not open the projection or dispatch during uninterrupted launch. After activation, the
+   child verifies the supplied dispatch-file digest mechanically and consumes the compiled
+   assignment without rereading the complete kernel, project map, capsule, or ledger when their
+   cache keys are unchanged. The dispatch names only the dependencies authorized for its current
+   assignment and carries the
    role context budget, a smaller loaded-artifact allowance, a tool-output reserve, source-size
-   bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, context, and guard
-   commands. Machine-parsed dispatch bytes are not conversation echo. The worker reports exact
+   bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, activation, context,
+   guard, and result commands. Execute the resume receipt's handoff command directly. On its
+   `launch_ready` receipt, spawn the assigned role immediately with `fork_turns: none`; do not open
+   state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
+   exactly once after spawning. Machine-parsed dispatch bytes are not conversation echo. The
+   worker reports exact
    materialized dependency bytes by ID and non-dependency tool-output bytes without double counting.
    A process-failing accepted event and its terminal stop are written under the same lock.
    The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not
@@ -362,7 +391,13 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    check, operator-review boundary, finding disposition, and terminal reason; append it through
    the supervisor without replaying the ledger or derived artifacts into context.
 
-3. Load only the compiled assignment and role projection and execute worker-owned work in fresh contexts:
+3. Load only the compiled assignment and role projection and execute worker-owned work in fresh contexts.
+   The child's first tool is the exact claim/cursor/dispatch-digest-bound `activation_command`.
+   It verifies the refreshed dispatch digest without dumping the dispatch, performs bounded source
+   inspection, emits one cumulative context snapshot with the provided one-shot argv command,
+   executes the guard array, and submits only action-specific domain details with the provided
+   one-shot result array. Do not use stdin, a TTY, a pipe, a shell wrapper, or EOF for context or
+   result protocol. Then apply these role boundaries:
    - orchestrator: outcome, decision frontier, phase, active units, blockers, budgets, next
      transition;
    - builder: function slice, scenarios, allowed paths, non-goals, dependencies, exact checks,
@@ -515,6 +550,18 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.13 — 2026-08-28:** Adds an atomic claim/cursor/current-dispatch-digest-bound
+  worker activation as the child's required first tool and measures session-to-activation and
+  handoff-to-activation against 20-second and 10-second runtime-build gates. Launch receipts carry
+  the fresh-fork and one-wait root protocol plus compact action-specific input keys/templates.
+  Context and result become argv-safe one-shot canonical-JSON base64url commands with no stdin,
+  TTY, pipe, wrapper, or EOF dependency. The supervisor derives result lifecycle identity from the
+  pending assignment, rejects malformed, tampered, oversized, replayed, or out-of-order inputs
+  without mutation, publishes valid compact contracts for every reachable worker action, and
+  exposes the next builder launch after an accepted provider inventory. A post-guard lifecycle
+  digest preserves tamper detection without rehashing source files that a legitimate builder has
+  just changed.
+  All additions are version-gated so rc.11 and rc.12 dispatches and pending claims remain stable.
 - **0.1.0-rc.12 — 2026-08-28:** Adds compact receipt-driven worker launch data so the root can
   hand off and spawn without opening derived artifacts. Normalizes zero-byte preflight reports
   away from artifact identity, file counts, and repetition; permits multiple same-role zero

@@ -131,6 +131,23 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "verification.exact_checks"
   end
 
+  def test_rc13_runtime_build_requires_preregistered_activation_gates
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule.dig("budgets")["max_startup_to_worker_activation_seconds"] = 21
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "must be <= 20"
+
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule.dig("budgets").delete("max_handoff_to_worker_activation_seconds")
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "max_handoff_to_worker_activation_seconds <= 10"
+  end
+
   def test_named_profile_rejects_a_silent_aftercare_override
     capsule = HrmExperiment.load_yaml(CAPSULE)
     capsule.dig("metrics")["aftercare_window_days"] = 0
@@ -210,7 +227,7 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "newly missing deliverable"
   end
 
-  def test_legacy_supersede_cli_fails_closed_for_rc12_without_advancing_the_ledger
+  def test_legacy_supersede_cli_fails_closed_for_rc13_without_advancing_the_ledger
     predecessor = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
     successor = runtime_successor_for(predecessor)
 
@@ -233,12 +250,12 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.12"
+      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.13"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
 
-  def test_legacy_guard_cli_fails_closed_for_rc12_without_advancing_the_ledger
+  def test_legacy_guard_cli_fails_closed_for_rc13_without_advancing_the_ledger
     events = HrmExperiment.load_events(EVENTS).first(2)
 
     Dir.mktmpdir do |directory|
@@ -259,7 +276,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.12"
+      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.13"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -282,7 +299,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.12"
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.13"
       assert_equal ledger_before, File.binread(events_path)
     end
   end

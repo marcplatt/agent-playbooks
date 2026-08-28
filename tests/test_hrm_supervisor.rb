@@ -41,7 +41,14 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal "guard", dispatch.dig("protocol", "guard_command", 2)
       assert_equal "result", dispatch.dig("protocol", "result_command", 2)
       assert_equal File.dirname(capsule_path), dispatch.dig("protocol", "working_directory")
-      assert_equal %w[bounded_source_materialization context guard result],
+      assert_equal %w[
+        activate
+        verify_dispatch_digest_without_dump
+        bounded_source_materialization
+        context
+        guard
+        result
+      ],
                    dispatch.dig("protocol", "worker_execution_order")
       assert_equal "optional_and_ignored_for_artifact_identity_and_redundancy",
                    dispatch.dig("protocol", "zero_artifact_preflight")
@@ -60,14 +67,22 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal expected_prefix + ["handoff", File.basename(capsule_path), File.basename(events_path)],
                    receipt.dig("worker_launch", "handoff_command")
       assert_equal expected_prefix + [
-        "context", File.basename(capsule_path), File.basename(events_path), "provider_observer"
+        "context", File.basename(capsule_path), File.basename(events_path), "provider_observer",
+        "__BASE64URL_CANONICAL_JSON_CONTEXT__"
       ], receipt.dig("worker_launch", "context_command")
       assert_equal expected_prefix + [
         "guard", File.basename(capsule_path), File.basename(events_path),
         "inventory_runtime_bindings", "provider_observer"
       ], receipt.dig("worker_launch", "guard_command")
-      assert_equal expected_prefix + ["result", File.basename(capsule_path), File.basename(events_path)],
+      assert_equal expected_prefix + [
+        "result", File.basename(capsule_path), File.basename(events_path),
+        "__BASE64URL_CANONICAL_JSON_DETAILS__"
+      ],
                    receipt.dig("worker_launch", "result_command")
+      assert_equal "base64url_canonical_json", dispatch.dig("protocol", "context_report", "argument")
+      assert_nil dispatch.dig("protocol", "context_report", "stdin")
+      assert_equal "supervisor_derived_action_specific_domain_details",
+                   dispatch.dig("protocol", "result_contract")
       assert_equal dispatch.dig("assignment", "required_dependency_ids"),
                    receipt.dig("worker_launch", "required_dependency_ids")
       assert_equal 12_000, receipt.dig("worker_launch", "role_context_budget_bytes")
@@ -148,7 +163,9 @@ class HrmSupervisorTest < Minitest::Test
       )
       assert_equal Digest::SHA256.file(paths["dispatch"]).hexdigest,
                    handoff_receipt.dig("worker_launch", "dispatch_sha256")
-      assert_equal handoff_receipt["worker_claim"], handoff_receipt.dig("worker_launch", "worker_claim")
+      assert_nil handoff_receipt["worker_claim"]
+      assert_equal handoff_receipt.dig("worker_launch", "worker_claim", "worker_claim_id"),
+                   handoff_receipt.dig("worker_launch", "activation_command", -3)
     end
   end
 
@@ -198,15 +215,11 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, [], min_project_root_bytes: 940) do |capsule_path, events_path, _paths|
       base = Time.now.utc
-      HrmSupervisor.resume(capsule_path, events_path, base)
-      before = File.binread(events_path)
-
       error = assert_raises(HrmExperiment::ValidationError) do
-        HrmSupervisor.handoff(capsule_path, events_path, base + 1)
+        HrmSupervisor.resume(capsule_path, events_path, base)
       end
       assert_includes error.message, "worker launch receipt exceeds"
-      assert_equal before, File.binread(events_path)
-      assert_equal 1, HrmExperiment.load_events(events_path).length
+      assert_empty HrmExperiment.load_events(events_path)
     end
   end
 
@@ -224,7 +237,7 @@ class HrmSupervisorTest < Minitest::Test
       File.write(capsule_path, YAML.dump(local_capsule), mode: "w", perm: 0o600)
       events_path = File.join(directory, "context.events.jsonl")
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
 
       receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-1",
@@ -237,10 +250,11 @@ class HrmSupervisorTest < Minitest::Test
       assert receipt["auto_terminalized"]
       assert_equal "context_snapshot", receipt["accepted_event_type"]
       assert_equal "stop_reason", receipt["event_type"]
-      assert_equal %w[session_started worker_handoff_started context_snapshot stop_reason],
+      assert_equal %w[session_started worker_handoff_started worker_started context_snapshot stop_reason],
                    events.map { |event| event["event_type"] }
-      assert_equal 0, events[2].dig("context", "artifact_bytes")
-      assert_equal 0, events[2].dig("context", "state_artifact_echo_bytes")
+      context = events.find { |event| event["event_type"] == "context_snapshot" }
+      assert_equal 0, context.dig("context", "artifact_bytes")
+      assert_equal 0, context.dig("context", "state_artifact_echo_bytes")
       assert_equal "budget_exhausted", events.last.dig("details", "stop_reason")
       assert_equal "blocked", state.dig("terminal", "state")
       assert_raises(HrmExperiment::ValidationError) do
@@ -259,7 +273,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       dispatch = HrmExperiment.load_json(paths["dispatch"])
       dependency = dispatch.dig("assignment", "dependencies", 0)
 
@@ -285,7 +299,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-over-artifact-allowance",
         "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 10_001},
@@ -294,7 +308,8 @@ class HrmSupervisorTest < Minitest::Test
       events = HrmExperiment.load_events(events_path)
 
       assert receipt["auto_terminalized"]
-      assert_equal 10_001, events[2].dig("context", "active_context_bytes")
+      context = events.find { |event| event["event_type"] == "context_snapshot" }
+      assert_equal 10_001, context.dig("context", "active_context_bytes")
       assert_equal "budget_exhausted", events.last.dig("details", "stop_reason")
     end
   end
@@ -304,7 +319,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-observed-9482",
         "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
@@ -327,7 +342,7 @@ class HrmSupervisorTest < Minitest::Test
     with_run(capsule, []) do |capsule_path, events_path, paths|
       base = Time.now.utc
       HrmSupervisor.resume(capsule_path, events_path, base - 10)
-      HrmSupervisor.handoff(capsule_path, events_path, base - 5)
+      handoff_and_activate(capsule_path, events_path, base - 5)
       2.times do |index|
         receipt = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
           "turn_id" => "provider-zero-preflight-#{index + 1}",
@@ -370,24 +385,12 @@ class HrmSupervisorTest < Minitest::Test
         "provider_observer",
         base + 5
       )
-      handoff = HrmExperiment.load_events(events_path).find do |event|
-        event["event_type"] == "worker_handoff_started"
-      end
       receipt = HrmSupervisor.result(capsule_path, events_path, {
-        "event_type" => "runtime_binding_inventory",
-        "occurred_at" => (base + 6).iso8601,
-        "role" => "provider_observer",
-        "details" => {
-          "action" => "inventory_runtime_bindings",
-          "worker_role" => "provider_observer",
-          "worker_claim_id" => handoff.dig("details", "worker_claim_id"),
-          "material_progress" => true,
-          "runtime_readiness" => {
-            "required_real_seams" => seams,
-            "bound_real_seams" => seams,
-            "zero_effect_construction_verified" => false,
-            "evidence_sha256" => "c" * 64
-          }
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => false,
+          "evidence_sha256" => "c" * 64
         }
       }, base + 7)
       dispatch = HrmExperiment.load_json(paths["dispatch"])
@@ -411,7 +414,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       2.times do |index|
         HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
           "turn_id" => "positive-repeat-#{index + 1}",
@@ -437,7 +440,7 @@ class HrmSupervisorTest < Minitest::Test
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       base = Time.now.utc
       HrmSupervisor.resume(capsule_path, events_path, base - 10)
-      HrmSupervisor.handoff(capsule_path, events_path, base - 5)
+      handoff_and_activate(capsule_path, events_path, base - 5)
       [100, 9928].each_with_index do |bytes, index|
         HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
           "turn_id" => "positive-before-final-#{index + 1}",
@@ -474,7 +477,7 @@ class HrmSupervisorTest < Minitest::Test
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       base = Time.now.utc
       HrmSupervisor.resume(capsule_path, events_path, base - 10)
-      HrmSupervisor.handoff(capsule_path, events_path, base - 5)
+      handoff_and_activate(capsule_path, events_path, base - 5)
       HrmSupervisor.append(capsule_path, events_path, {
         "event_type" => "finding_opened",
         "occurred_at" => (base - 4).iso8601,
@@ -598,12 +601,53 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
+  def test_rc12_dispatch_and_pending_claim_semantics_remain_unchanged
+    capsule = capsule_with_runtime_source
+    capsule.dig("playbook_pin")["kernel_version"] = "0.1.0-rc.12"
+    capsule.fetch("context_dependencies").find do |dependency|
+      dependency["dependency_id"] == "ap.exec.kernel"
+    end["binding"] = "AP-EXEC-001/0.1.0-rc.12@#{'2' * 40}"
+    capsule.fetch("context_dependencies").find do |dependency|
+      dependency["dependency_id"] == "example.runtime-source"
+    end["binding"] = "rc12-example-source"
+
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      base = Time.iso8601("2026-08-27T22:00:00Z")
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      dispatch = HrmExperiment.load_json(paths["dispatch"])
+
+      assert_equal %w[bounded_source_materialization context guard result],
+                   dispatch.dig("protocol", "worker_execution_order")
+      assert_equal "json", dispatch.dig("protocol", "context_report", "stdin")
+      assert_nil dispatch.dig("protocol", "context_report", "argument")
+      assert_nil dispatch.dig("protocol", "one_shot_argument_encoding")
+      assert_equal "append_compact_events_only", dispatch.dig("protocol", "result_contract")
+      assert_equal "provider_observer", dispatch.dig("assignment", "role")
+      assert HrmSupervisor.validate_dispatch!(dispatch, HrmExperiment.load_yaml(capsule_path))
+
+      handoff = HrmSupervisor.handoff(capsule_path, events_path, base + 5)
+      assert_equal handoff["worker_claim"], handoff.dig("worker_launch", "worker_claim")
+      assert_nil handoff.dig("worker_launch", "activation_command")
+      context = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "rc12-no-activation-required",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+        "tool_output_bytes" => 1000
+      })
+      assert_equal "context_snapshot", context["event_type"]
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.activate(capsule_path, events_path, "f" * 64, 2, "e" * 64, base + 6)
+      end
+      assert_includes error.message, "requires an rc.13 capsule"
+    end
+  end
+
   def test_rc12_tool_output_can_use_unused_artifact_headroom_but_not_exceed_role_total
     capsule = capsule_with_runtime_source
 
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       accepted = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-one-way-headroom",
         "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 4000},
@@ -614,7 +658,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       stopped = HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-over-total",
         "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 4000},
@@ -630,7 +674,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       source_size = HrmExperiment.load_json(paths["dispatch"]).dig(
         "assignment", "dependencies", 0, "source_size_bytes"
       )
@@ -643,7 +687,7 @@ class HrmSupervisorTest < Minitest::Test
         })
       end
       assert_includes error.message, "exceed source size"
-      assert_equal 2, HrmExperiment.load_events(events_path).length
+      assert_equal 3, HrmExperiment.load_events(events_path).length
     end
   end
 
@@ -667,9 +711,11 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal 1, event.dig("details", "source_dispatch_cursor")
       assert_match(/\A[0-9a-f]{64}\z/, event.dig("details", "source_dispatch_sha256"))
       assert_match(/\A[0-9a-f]{64}\z/, event.dig("details", "worker_claim_id"))
-      assert_equal event.dig("details", "worker_claim_id"), receipt.dig("worker_claim", "worker_claim_id")
+      assert_nil receipt["worker_claim"]
+      assert_equal event.dig("details", "worker_claim_id"),
+                   receipt.dig("worker_launch", "worker_claim", "worker_claim_id")
       assert_equal event.dig("details", "source_dispatch_sha256"),
-                   receipt.dig("worker_claim", "source_dispatch_sha256")
+                   receipt.dig("worker_launch", "worker_claim", "source_dispatch_sha256")
       assert_equal paths["dispatch"], File.expand_path(
         receipt.dig("worker_launch", "dispatch_path"),
         receipt.dig("worker_launch", "working_directory")
@@ -677,16 +723,429 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal 2, receipt.dig("worker_launch", "ledger_cursor")
       assert_equal Digest::SHA256.file(paths["dispatch"]).hexdigest,
                    receipt.dig("worker_launch", "dispatch_sha256")
-      refute_equal receipt.dig("worker_claim", "source_dispatch_sha256"),
+      refute_equal receipt.dig("worker_launch", "worker_claim", "source_dispatch_sha256"),
                    receipt.dig("worker_launch", "dispatch_sha256")
-      assert_equal receipt["worker_claim"], receipt.dig("worker_launch", "worker_claim")
+      assert_equal event.dig("details", "worker_claim_id"),
+                   receipt.dig("worker_launch", "activation_command", -3)
       assert_equal "inventory_runtime_bindings", receipt.dig("worker_launch", "action")
       assert_equal "provider_observer", receipt.dig("worker_launch", "role")
+      assert receipt.dig("worker_launch", "launch_ready")
+      assert_equal "none", receipt.dig("worker_launch", "spawn_fork_turns")
+      assert_equal "none_before_spawn_one_after", receipt.dig("worker_launch", "root_wait_policy")
+      assert_equal %w[
+        activate
+        verify_dispatch_digest_without_dump
+        bounded_source_materialization
+        context
+        guard
+        result
+      ], receipt.dig("worker_launch", "execution_order")
+      assert_equal "runtime_binding_inventory", receipt.dig("worker_launch", "result_input", "domain_event")
+      assert_equal ["runtime_readiness"], receipt.dig("worker_launch", "result_input", "required_keys")
+      assert_equal "unpadded_base64url_canonical_json",
+                   receipt.dig("worker_launch", "result_input", "encoding")
+      assert_equal(-1, receipt.dig("worker_launch", "result_input", "argument_index"))
+      assert_equal HrmSupervisor::MAX_ONE_SHOT_ARGUMENT_BYTES,
+                   receipt.dig("worker_launch", "result_input", "max_encoded_bytes")
+      assert_equal event.dig("details", "worker_claim_id"),
+                   receipt.dig("worker_launch", "activation_command", -3)
+      assert_equal receipt.dig("worker_launch", "ledger_cursor").to_s,
+                   receipt.dig("worker_launch", "activation_command", -2)
+      assert_equal receipt.dig("worker_launch", "dispatch_sha256"),
+                   receipt.dig("worker_launch", "activation_command", -1)
       assert_operator JSON.generate(receipt).bytesize, :<=, HrmSupervisor::MAX_RECEIPT_BYTES
       assert_includes event.dig("details", "note"), "inventory_runtime_bindings"
       assert_raises(HrmExperiment::ValidationError) do
         HrmSupervisor.handoff(capsule_path, events_path)
       end
+    end
+  end
+
+  def test_rc13_activation_is_exactly_bound_atomic_and_replay_safe
+    capsule = capsule_with_runtime_source
+
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      base = Time.iso8601("2026-08-27T22:00:00Z")
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      handoff = HrmSupervisor.handoff(capsule_path, events_path, base + 5)
+      command = handoff.dig("worker_launch", "activation_command")
+      before = File.binread(events_path)
+
+      invalid_bindings = [
+        ["f" * 64, Integer(command[-2], 10), command[-1]],
+        [command[-3], Integer(command[-2], 10) + 1, command[-1]],
+        [command[-3], Integer(command[-2], 10), "e" * 64]
+      ]
+      invalid_bindings.each do |claim_id, cursor, dispatch_sha256|
+        error = assert_raises(HrmExperiment::ValidationError) do
+          HrmSupervisor.activate(
+            capsule_path,
+            events_path,
+            claim_id,
+            cursor,
+            dispatch_sha256,
+            base + 6
+          )
+        end
+        assert_includes error.message, "exact pending claim"
+        assert_equal before, File.binread(events_path)
+      end
+
+      receipt = HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        command[-3],
+        Integer(command[-2], 10),
+        command[-1],
+        base + 6
+      )
+      event = HrmExperiment.load_events(events_path).last
+      assert_equal "worker_started", event["event_type"]
+      assert_equal command[-3], event.dig("details", "worker_claim_id")
+      assert_equal 3, receipt.dig("activated_dispatch", "ledger_cursor")
+      assert_equal Digest::SHA256.file(paths["dispatch"]).hexdigest,
+                   receipt.dig("activated_dispatch", "dispatch_sha256")
+      scorecard = HrmExperiment.evaluate(HrmExperiment.load_yaml(capsule_path), HrmExperiment.load_events(events_path))
+      assert_equal 6, scorecard.dig("flow", "startup_to_first_worker_activation_seconds")
+      assert_equal 1, scorecard.dig("flow", "handoff_to_first_worker_activation_seconds")
+
+      slow_events = Marshal.load(Marshal.dump(HrmExperiment.load_events(events_path)))
+      slow_events.last["occurred_at"] = (base + 21).iso8601
+      slow_scorecard = HrmExperiment.evaluate(HrmExperiment.load_yaml(capsule_path), slow_events)
+      assert_equal "fail", slow_scorecard.dig("verdict", "process_envelope")
+      assert_includes slow_scorecard.dig("verdict", "reasons"),
+                      "worker-activation startup budget exceeded"
+      assert_includes slow_scorecard.dig("verdict", "reasons"),
+                      "worker activation after handoff budget exceeded"
+
+      activated = File.binread(events_path)
+      replay = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.activate(
+          capsule_path,
+          events_path,
+          command[-3],
+          Integer(command[-2], 10),
+          command[-1],
+          base + 7
+        )
+      end
+      assert_includes replay.message, "first tool immediately after handoff"
+      assert_equal activated, File.binread(events_path)
+    end
+  end
+
+  def test_rc13_context_requires_activation_and_generic_append_cannot_forge_it
+    capsule = capsule_with_runtime_source
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      base = Time.iso8601("2026-08-27T22:00:00Z")
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      HrmSupervisor.handoff(capsule_path, events_path, base + 5)
+      before = File.binread(events_path)
+
+      context_error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+          "turn_id" => "must-activate-first",
+          "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 1},
+          "tool_output_bytes" => 0
+        })
+      end
+      assert_includes context_error.message, "supervisor-accepted rc.13 activation"
+      assert_equal before, File.binread(events_path)
+
+      append_error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.append(capsule_path, events_path, {
+          "event_type" => "worker_started",
+          "occurred_at" => (base + 6).iso8601,
+          "role" => "provider_observer",
+          "details" => {}
+        })
+      end
+      assert_includes append_error.message, "supervisor-bound"
+      assert_equal before, File.binread(events_path)
+    end
+  end
+
+  def test_rc13_tampered_activation_digest_is_rejected_by_context_guard_and_result_without_mutation
+    capsule = capsule_with_runtime_source
+    seams = capsule.dig("function_slice", "required_real_seams")
+
+    %w[context guard result].each do |operation|
+      with_run(capsule, []) do |capsule_path, events_path, _paths|
+        base = Time.now.utc - 10
+        HrmSupervisor.resume(capsule_path, events_path, base)
+        handoff_and_activate(capsule_path, events_path, base + 5)
+        if %w[guard result].include?(operation)
+          HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+            "turn_id" => "activation-digest-#{operation}",
+            "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+            "tool_output_bytes" => 1000
+          })
+        end
+        if operation == "result"
+          HrmSupervisor.guard(
+            capsule_path,
+            events_path,
+            "inventory_runtime_bindings",
+            "provider_observer"
+          )
+        end
+        tamper_worker_activation_digest(events_path)
+        before = File.binread(events_path)
+
+        error = assert_raises(HrmExperiment::ValidationError, operation) do
+          case operation
+          when "context"
+            HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+              "turn_id" => "tampered-activation-context",
+              "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+              "tool_output_bytes" => 1000
+            })
+          when "guard"
+            HrmSupervisor.guard(
+              capsule_path,
+              events_path,
+              "inventory_runtime_bindings",
+              "provider_observer"
+            )
+          when "result"
+            HrmSupervisor.result(capsule_path, events_path, {
+              "runtime_readiness" => {
+                "required_real_seams" => seams,
+                "bound_real_seams" => seams,
+                "zero_effect_construction_verified" => false,
+                "evidence_sha256" => "9" * 64
+              }
+            })
+          end
+        end
+        if operation == "result"
+          assert_includes error.message, "supervisor-bound post-guard dispatch"
+        else
+          assert_includes error.message, "exact deterministic activation dispatch digest"
+        end
+        assert_equal before, File.binread(events_path)
+      end
+    end
+  end
+
+  def test_rc13_rebound_handoff_action_role_and_claim_fail_all_lifecycle_paths_without_mutation
+    capsule = capsule_with_runtime_source
+    forgeries = {
+      "same-role-action" => ["record_operational_evidence", "provider_observer"],
+      "action-and-role" => ["implement_frozen_slice", "builder"]
+    }
+
+    forgeries.each do |forgery, (forged_action, forged_role)|
+      %w[context guard result].each do |operation|
+        with_run(capsule, []) do |capsule_path, events_path, _paths|
+          base = Time.now.utc - 10
+          HrmSupervisor.resume(capsule_path, events_path, base)
+          handoff_and_activate(capsule_path, events_path, base + 5)
+          if %w[guard result].include?(operation)
+            HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+              "turn_id" => "rebound-#{forgery}-#{operation}",
+              "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+              "tool_output_bytes" => 1000
+            })
+          end
+          if operation == "result"
+            HrmSupervisor.guard(
+              capsule_path,
+              events_path,
+              "inventory_runtime_bindings",
+              "provider_observer"
+            )
+          end
+          tamper_worker_claim_binding(events_path, forged_action, forged_role)
+          before = File.binread(events_path)
+
+          error = assert_raises(HrmExperiment::ValidationError, "#{forgery}/#{operation}") do
+            case operation
+            when "context"
+              HrmSupervisor.record_context(capsule_path, events_path, forged_role, {
+                "turn_id" => "forged-context",
+                "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+                "tool_output_bytes" => 1000
+              })
+            when "guard"
+              HrmSupervisor.guard(capsule_path, events_path, forged_action, forged_role)
+            when "result"
+              HrmSupervisor.result(capsule_path, events_path, {"note" => "forged completion"})
+            end
+          end
+          assert_match(
+            /deterministic assignment|exact current deterministic assignment|does not match dispatched role|supervisor-bound post-guard dispatch/,
+            error.message
+          )
+          assert_equal before, File.binread(events_path)
+        end
+      end
+    end
+  end
+
+  def test_rc13_result_contracts_exhaust_every_reachable_worker_action_with_valid_templates
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    claim = {"worker_claim_id" => "a" * 64}
+
+    HrmExperiment::WORKER_REQUIRED_ACTIONS.each do |action, role|
+      contract = HrmSupervisor.rc13_result_input_contract(action, capsule)
+      template = contract.fetch("template")
+      assert_equal contract.fetch("required_keys").sort, template.keys.sort, action
+      assert_operator HrmSupervisor.encode_one_shot_argument(template).bytesize,
+                      :<=,
+                      HrmSupervisor::MAX_ONE_SHOT_ARGUMENT_BYTES,
+                      action
+      event = HrmSupervisor.derive_rc13_result_event!(
+        capsule,
+        action,
+        role,
+        claim,
+        template,
+        Time.iso8601("2026-08-27T22:00:00Z")
+      )
+      prepared = HrmSupervisor.prepare_event(capsule, [], event)
+      assert HrmExperiment.validate_events!([prepared]), action
+    end
+  end
+
+  def test_rc13_launch_commands_execute_one_shot_without_stdin_and_expose_builder
+    capsule = capsule_with_runtime_source
+    seams = capsule.dig("function_slice", "required_real_seams")
+
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      resume = HrmSupervisor.resume(capsule_path, events_path, Time.now.utc)
+      working_directory = resume.dig("worker_launch", "working_directory")
+
+      handoff_stdout, handoff_stderr, handoff_status = Open3.capture3(
+        *resume.dig("worker_launch", "handoff_command"),
+        chdir: working_directory
+      )
+      assert handoff_status.success?, handoff_stderr
+      handoff = JSON.parse(handoff_stdout)
+      launch = handoff.fetch("worker_launch")
+
+      activation_stdout, activation_stderr, activation_status = Open3.capture3(
+        *launch.fetch("activation_command"),
+        chdir: working_directory
+      )
+      assert activation_status.success?, activation_stderr
+      activation = JSON.parse(activation_stdout)
+      assert_equal Digest::SHA256.file(paths["dispatch"]).hexdigest,
+                   activation.dig("activated_dispatch", "dispatch_sha256")
+
+      before_context = File.binread(events_path)
+      ["not*base64url", "A" * (HrmSupervisor::MAX_ONE_SHOT_ARGUMENT_BYTES + 1)].each do |bad_argument|
+        bad_command = launch.fetch("context_command").dup
+        bad_command[-1] = bad_argument
+        bad_stdout, bad_stderr, bad_status = Open3.capture3(*bad_command, chdir: working_directory)
+        refute bad_status.success?
+        assert_empty bad_stdout
+        assert_includes bad_stderr, "requires one bounded unpadded base64url canonical-JSON argument"
+        assert_equal before_context, File.binread(events_path)
+      end
+
+      context_command = launch.fetch("context_command").dup
+      context_command[-1] = HrmSupervisor.encode_one_shot_argument(
+        "turn_id" => "provider-one-shot",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+        "tool_output_bytes" => 2000
+      )
+      context_stdout, context_stderr, context_status = Open3.capture3(
+        *context_command,
+        chdir: working_directory
+      )
+      assert context_status.success?, context_stderr
+      assert_equal "context_snapshot", JSON.parse(context_stdout)["event_type"]
+
+      guard_stdout, guard_stderr, guard_status = Open3.capture3(
+        *launch.fetch("guard_command"),
+        chdir: working_directory
+      )
+      assert guard_status.success?, guard_stderr
+      assert_equal "action_guard_passed", JSON.parse(guard_stdout)["event_type"]
+
+      result_command = launch.fetch("result_command").dup
+      result_command[-1] = HrmSupervisor.encode_one_shot_argument(
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => false,
+          "evidence_sha256" => "b" * 64
+        }
+      )
+      result_stdout, result_stderr, result_status = Open3.capture3(
+        *result_command,
+        chdir: working_directory
+      )
+      assert result_status.success?, result_stderr
+      result = JSON.parse(result_stdout)
+      assert_equal "implement_frozen_slice", result.dig("worker_launch", "action")
+      assert_equal "builder", result.dig("worker_launch", "role")
+      assert_equal "first_executable_delta", result.dig("worker_launch", "result_input", "domain_event")
+      assert_operator JSON.generate(result).bytesize, :<=, HrmSupervisor::MAX_RECEIPT_BYTES
+    end
+  end
+
+  def test_rc13_builder_result_accepts_post_guard_implementation_size_change
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    seams = capsule.dig("function_slice", "required_real_seams")
+    base = Time.now.utc - 20
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      handoff_and_activate(capsule_path, events_path, base + 2)
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "provider-before-builder-mutation",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
+        "tool_output_bytes" => 1000
+      })
+      HrmSupervisor.guard(
+        capsule_path,
+        events_path,
+        "inventory_runtime_bindings",
+        "provider_observer"
+      )
+      builder_receipt = HrmSupervisor.result(capsule_path, events_path, {
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => false,
+          "evidence_sha256" => "8" * 64
+        }
+      })
+      assert_equal "implement_frozen_slice", builder_receipt.dig("worker_launch", "action")
+
+      handoff_and_activate(capsule_path, events_path, Time.now.utc, activation_offset: 0)
+      HrmSupervisor.record_context(capsule_path, events_path, "builder", {
+        "turn_id" => "builder-before-source-size-change",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9000},
+        "tool_output_bytes" => 1000
+      })
+      HrmSupervisor.guard(capsule_path, events_path, "implement_frozen_slice", "builder")
+
+      local_capsule = HrmExperiment.load_yaml(capsule_path)
+      source = local_capsule.fetch("context_dependencies").find do |dependency|
+        dependency["dependency_id"] == "example.runtime-source"
+      end
+      source_path = File.expand_path(source.fetch("source_path"), local_capsule.fetch("project_root"))
+      File.open(source_path, "a") { |file| file.write("\n# post-guard builder result fixture\n") }
+
+      receipt = HrmSupervisor.result(capsule_path, events_path, {
+        "change_unit_id" => "RC13-POST-GUARD-SOURCE-MUTATION-001",
+        "candidate_sha" => "7" * 40,
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => true,
+          "evidence_sha256" => "6" * 64
+        }
+      })
+      events = HrmExperiment.load_events(events_path)
+
+      assert_equal "freeze_candidate", receipt["next_action"]
+      assert events.any? { |event| event["event_type"] == "first_executable_delta" }
+      assert_equal "worker_result_received", events.last["event_type"]
     end
   end
 
@@ -732,6 +1191,7 @@ class HrmSupervisorTest < Minitest::Test
       first_operational_evidence
       check_started
       check_completed
+      worker_started
       worker_result_received
     ]
 
@@ -815,7 +1275,7 @@ class HrmSupervisorTest < Minitest::Test
 
     with_run(capsule, []) do |capsule_path, events_path, _paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
-      HrmSupervisor.handoff(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
+      handoff_and_activate(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:05Z"))
       HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-zero-source",
         "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 0},
@@ -826,18 +1286,18 @@ class HrmSupervisorTest < Minitest::Test
         HrmSupervisor.guard(capsule_path, events_path, "inventory_runtime_bindings", "provider_observer")
       end
       assert_includes error.message, "positive materialized bytes"
-      assert_equal 3, HrmExperiment.load_events(events_path).length
+      assert_equal 4, HrmExperiment.load_events(events_path).length
     end
   end
 
-  def test_rc12_provider_inventory_result_dispatches_fresh_builder_with_unchanged_allocation
+  def test_rc13_provider_domain_result_dispatches_fresh_builder_with_unchanged_allocation
     capsule = capsule_with_runtime_source
     seams = capsule.dig("function_slice", "required_real_seams")
 
     with_run(capsule, []) do |capsule_path, events_path, paths|
       base = Time.now.utc
       HrmSupervisor.resume(capsule_path, events_path, base - 10)
-      HrmSupervisor.handoff(capsule_path, events_path, base - 5)
+      handoff_and_activate(capsule_path, events_path, base - 5)
       HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
         "turn_id" => "provider-inventory",
         "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 9482},
@@ -851,40 +1311,30 @@ class HrmSupervisorTest < Minitest::Test
         base + 5
       )
       claim_id = HrmExperiment.load_events(events_path)[1].dig("details", "worker_claim_id")
-      result_event = {
-        "event_type" => "runtime_binding_inventory",
-        "occurred_at" => (base + 6).iso8601,
-        "role" => "provider_observer",
-        "details" => {
-          "action" => "inventory_runtime_bindings",
-          "worker_role" => "provider_observer",
-          "worker_claim_id" => claim_id,
-          "material_progress" => true,
-          "runtime_readiness" => {
-            "required_real_seams" => seams,
-            "bound_real_seams" => seams,
-            "zero_effect_construction_verified" => false,
-            "evidence_sha256" => "a" * 64
-          }
+      result_domain = {
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => false,
+          "evidence_sha256" => "a" * 64
         }
       }
       tampered_results = {
-        "claim" => lambda { |event| event.dig("details")["worker_claim_id"] = "f" * 64 },
-        "action" => lambda { |event| event.dig("details")["action"] = "implement_frozen_slice" },
-        "worker_role" => lambda { |event| event.dig("details")["worker_role"] = "builder" },
-        "event_role" => lambda { |event| event["role"] = "builder" }
+        "claim" => lambda { |domain| domain["worker_claim_id"] = "f" * 64 },
+        "action" => lambda { |domain| domain["action"] = "implement_frozen_slice" },
+        "role" => lambda { |domain| domain["role"] = "builder" }
       }
       tampered_results.each do |name, mutation|
-        tampered_result = Marshal.load(Marshal.dump(result_event))
+        tampered_result = Marshal.load(Marshal.dump(result_domain))
         mutation.call(tampered_result)
         error = assert_raises(HrmExperiment::ValidationError, name) do
           HrmSupervisor.result(capsule_path, events_path, tampered_result, base + 7)
         end
-        assert_match(/exact pending worker claim|role must equal/, error.message)
-        assert_equal 4, HrmExperiment.load_events(events_path).length
+        assert_includes error.message, "requires only domain keys runtime_readiness"
+        assert_equal 5, HrmExperiment.load_events(events_path).length
       end
 
-      receipt = HrmSupervisor.result(capsule_path, events_path, result_event, base + 7)
+      receipt = HrmSupervisor.result(capsule_path, events_path, result_domain, base + 7)
       dispatch = HrmExperiment.load_json(paths["dispatch"])
 
       assert_equal "implement_frozen_slice", receipt["next_action"]
@@ -902,10 +1352,10 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal claim_id, events.last.dig("details", "worker_claim_id")
 
       replay = assert_raises(HrmExperiment::ValidationError) do
-        HrmSupervisor.result(capsule_path, events_path, result_event, base + 8)
+        HrmSupervisor.result(capsule_path, events_path, result_domain, base + 8)
       end
       assert_includes replay.message, "matching guard"
-      assert_equal 6, HrmExperiment.load_events(events_path).length
+      assert_equal 7, HrmExperiment.load_events(events_path).length
     end
   end
 
@@ -1213,26 +1663,43 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
-  def test_production_observation_dispatches_private_preparation_without_kernel_reread
+  def test_production_observation_runs_every_reachable_worker_contract_to_review
     capsule = HrmExperiment.load_yaml(File.join(ROOT, "examples/hrm-production-observation-capsule.example.yaml"))
-    session_started = {
-      "schema_version" => "agent_playbooks.hrm_run_event.v0.5",
-      "session_id" => capsule["session_id"],
-      "hrm_id" => capsule.dig("hrm", "id"),
-      "sequence" => 1,
-      "event_type" => "session_started",
-      "occurred_at" => "2026-08-25T00:00:00Z",
-      "role" => "orchestrator"
-    }
 
-    with_run(capsule, [session_started]) do |capsule_path, events_path, paths|
-      receipt = HrmSupervisor.resume(capsule_path, events_path)
-      dispatch = HrmExperiment.load_json(paths["dispatch"])
+    with_run(capsule, []) do |capsule_path, events_path, paths|
+      receipt = HrmSupervisor.resume(capsule_path, events_path, Time.now.utc - 10)
+      actions = %w[prepare_private_inputs inspect_provider_read_only record_operational_evidence]
 
-      assert_equal "prepare_private_inputs", receipt["next_action"]
-      assert_equal "prepare_private_inputs", dispatch.dig("assignment", "action")
-      assert_equal "provider_observer", dispatch.dig("assignment", "role")
-      assert_equal "hashes_only_unless_changed", dispatch.dig("cache", "load_policy")
+      actions.each_with_index do |action, index|
+        dispatch = HrmExperiment.load_json(paths["dispatch"])
+        assert_equal action, receipt["next_action"]
+        assert_equal action, dispatch.dig("assignment", "action")
+        assert_equal "provider_observer", dispatch.dig("assignment", "role")
+        assert_equal "hashes_only_unless_changed", dispatch.dig("cache", "load_policy")
+        assert_equal "worker_result_received", receipt.dig("worker_launch", "result_input", "domain_event") if index < 2
+        assert_equal "first_operational_evidence",
+                     receipt.dig("worker_launch", "result_input", "domain_event") if index == 2
+        assert receipt.dig("worker_launch", "result_input", "template")
+        assert_operator JSON.generate(receipt).bytesize, :<=, HrmSupervisor::MAX_RECEIPT_BYTES
+
+        handoff_and_activate(capsule_path, events_path, Time.now.utc, activation_offset: 0)
+        HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+          "turn_id" => "production-observation-#{action}",
+          "loaded_artifact_bytes_by_id" => {},
+          "tool_output_bytes" => 256
+        })
+        HrmSupervisor.guard(capsule_path, events_path, action, "provider_observer")
+        receipt = HrmSupervisor.result(
+          capsule_path,
+          events_path,
+          {"note" => "completed bounded #{action}"}
+        )
+      end
+
+      assert_equal "prepare_review", receipt["next_action"]
+      assert HrmExperiment.load_events(events_path).any? do |event|
+        event["event_type"] == "first_operational_evidence"
+      end
     end
   end
 
@@ -1242,6 +1709,7 @@ class HrmSupervisorTest < Minitest::Test
     session_started = HrmExperiment.load_events(EVENTS).first
 
     Dir.mktmpdir("hrm-supervisor", ROOT) do |directory|
+      FileUtils.mkdir_p(File.join(directory, ".git"))
       capsule["project_root"] = directory
       capsule.dig("metrics")["event_log_path"] = File.basename(capsule.dig("metrics", "event_log_path"))
       capsule.dig("metrics")["session_state_path"] = File.basename(capsule.dig("metrics", "session_state_path"))
@@ -1259,6 +1727,57 @@ class HrmSupervisorTest < Minitest::Test
       assert_equal 0, receipt["reusable_api_skill_count"]
       assert_equal 1, receipt["missing_api_skill_count"]
       assert_equal "discover_missing_project_api_skills", receipt["next_action"]
+    end
+  end
+
+  def test_rc13_discovery_result_accepts_registry_resolution_after_guard
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    registry = HrmExperiment.load_yaml(File.join(ROOT, "examples/project-api-skill-registry.example.yaml"))
+    resolved_record = Marshal.load(Marshal.dump(registry.fetch("skills").first))
+    resolved_record["contract_version"] = "public-config-v3"
+    resolved_fingerprint = ProjectApiSkillRegistry.contract_fingerprint(resolved_record)
+    capsule.dig("project_api_skills", "required_skills", 0)["contract_fingerprint"] = resolved_fingerprint
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      base = Time.now.utc - 10
+      receipt = HrmSupervisor.resume(capsule_path, events_path, base)
+      assert_equal "discover_missing_project_api_skills", receipt["next_action"]
+
+      handoff_and_activate(capsule_path, events_path, base + 2)
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "api-skill-resolution",
+        "loaded_artifact_bytes_by_id" => {"example.api-skill-registry" => 512},
+        "tool_output_bytes" => 256
+      })
+      HrmSupervisor.guard(
+        capsule_path,
+        events_path,
+        "discover_project_api_skills",
+        "provider_observer"
+      )
+
+      local_capsule = HrmExperiment.load_yaml(capsule_path)
+      registry_path = ProjectApiSkillRegistry.registry_path(local_capsule, capsule_path)
+      updated_registry = HrmExperiment.load_yaml(registry_path)
+      updated_record = updated_registry.fetch("skills").first
+      updated_record["contract_version"] = resolved_record.fetch("contract_version")
+      updated_record["contract_fingerprint"] = resolved_fingerprint
+      updated_registry["registry_version"] += 1
+      updated_registry["updated_at"] = Time.now.utc.iso8601
+      updated_registry["registry_hash"] = ProjectApiSkillRegistry.registry_hash(updated_registry)
+      ProjectApiSkillRegistry.validate_registry!(updated_registry)
+      File.write(registry_path, YAML.dump(updated_registry), mode: "w", perm: 0o600)
+
+      receipt = HrmSupervisor.result(
+        capsule_path,
+        events_path,
+        {"note" => "published the verified API skill contract"}
+      )
+
+      assert_equal "inventory_runtime_bindings", receipt["next_action"]
+      assert_equal 1, receipt["reusable_api_skill_count"]
+      assert_equal 0, receipt["missing_api_skill_count"]
+      assert_equal "worker_result_received", HrmExperiment.load_events(events_path).last["event_type"]
     end
   end
 
@@ -1480,6 +1999,68 @@ class HrmSupervisorTest < Minitest::Test
     }
   end
 
+  def handoff_and_activate(capsule_path, events_path, occurred_at, activation_offset: 1)
+    handoff_receipt = HrmSupervisor.handoff(capsule_path, events_path, occurred_at)
+    command = handoff_receipt.dig("worker_launch", "activation_command")
+    raise "expected an rc.13 activation command" unless command
+
+    activation_receipt = HrmSupervisor.activate(
+      capsule_path,
+      events_path,
+      command.fetch(-3),
+      Integer(command.fetch(-2), 10),
+      command.fetch(-1),
+      occurred_at + activation_offset
+    )
+    [handoff_receipt, activation_receipt]
+  end
+
+  def tamper_worker_activation_digest(events_path)
+    events = HrmExperiment.load_events(events_path)
+    activation = events.find { |event| event["event_type"] == "worker_started" }
+    activation.fetch("details")["activation_dispatch_sha256"] = "f" * 64
+    write_events(events_path, events)
+  end
+
+  def tamper_worker_claim_binding(events_path, action, role)
+    events = HrmExperiment.load_events(events_path)
+    handoff = events.find { |event| event["event_type"] == "worker_handoff_started" }
+    handoff["role"] = role
+    handoff.fetch("details").merge!("action" => action, "worker_role" => role)
+    claim_id = HrmExperiment.object_sha256(
+      "session_id" => handoff.fetch("session_id"),
+      "hrm_id" => handoff.fetch("hrm_id"),
+      "action" => action,
+      "role" => role,
+      "source_dispatch_cursor" => handoff.dig("details", "source_dispatch_cursor"),
+      "source_dispatch_sha256" => handoff.dig("details", "source_dispatch_sha256")
+    )
+    handoff.fetch("details")["worker_claim_id"] = claim_id
+
+    activation = events.find { |event| event["event_type"] == "worker_started" }
+    activation["role"] = role
+    activation.fetch("details").merge!(
+      "action" => action,
+      "worker_role" => role,
+      "worker_claim_id" => claim_id
+    )
+    context = events.find { |event| event["event_type"] == "context_snapshot" }
+    context["role"] = role if context && role != "provider_observer"
+    guard = events.find { |event| event["event_type"] == "action_guard_passed" }
+    guard["role"] = role if guard
+    guard.fetch("details").merge!("action" => action, "guarded_role" => role) if guard
+    write_events(events_path, events)
+  end
+
+  def write_events(events_path, events)
+    File.write(
+      events_path,
+      events.map { |event| JSON.generate(event) }.join("\n") + "\n",
+      mode: "w",
+      perm: 0o600
+    )
+  end
+
   def rewrite_dispatch_and_projection(paths)
     dispatch = HrmExperiment.load_json(paths.fetch("dispatch"))
     yield dispatch
@@ -1518,6 +2099,7 @@ class HrmSupervisorTest < Minitest::Test
         FileUtils.mkdir_p(directory)
         component_index += 1
       end
+      FileUtils.mkdir_p(File.join(directory, ".git"))
       local_capsule = Marshal.load(Marshal.dump(capsule))
       local_capsule["project_root"] = directory
       local_capsule.dig("metrics")["event_log_path"] = File.basename(capsule.dig("metrics", "event_log_path"))
