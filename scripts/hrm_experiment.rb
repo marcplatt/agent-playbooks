@@ -12,7 +12,7 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.15"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.16"
   SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[
     0.1.0-rc.6
     0.1.0-rc.7
@@ -24,12 +24,18 @@ module HrmExperiment
     0.1.0-rc.13
     0.1.0-rc.14
     0.1.0-rc.15
+    0.1.0-rc.16
   ].freeze
-  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15].freeze
+  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].freeze
   RC15_KERNEL_VERSION = "0.1.0-rc.15"
+  RC16_KERNEL_VERSION = "0.1.0-rc.16"
   RC15_ACTIVATION_BUDGETS = {
     "max_startup_to_worker_activation_seconds" => 30,
     "max_handoff_to_worker_activation_seconds" => 20
+  }.freeze
+  RC16_ACTIVATION_BUDGETS = {
+    "max_startup_to_worker_activation_seconds" => 30,
+    "max_handoff_to_worker_activation_seconds" => 25
   }.freeze
 
   PINNED_CONTEXT_BYTES_BY_ROLE = {
@@ -509,16 +515,20 @@ module HrmExperiment
               "rc.13/rc.14 runtime build requires max_handoff_to_worker_activation_seconds <= 10"
       end
     end
-    if kernel_version == RC15_KERNEL_VERSION &&
+    activation_budget_contract = case kernel_version
+                                 when RC15_KERNEL_VERSION then RC15_ACTIVATION_BUDGETS
+                                 when RC16_KERNEL_VERSION then RC16_ACTIVATION_BUDGETS
+                                 end
+    if activation_budget_contract &&
        %w[runtime_build production_observation].include?(capsule["execution_mode"])
-      RC15_ACTIVATION_BUDGETS.each do |key, maximum|
+      activation_budget_contract.each do |key, maximum|
         value = capsule.dig("budgets", key)
         unless value.is_a?(Integer) && value.positive? && value <= maximum
-          raise ValidationError, "rc.15 requires #{key} <= #{maximum}"
+          raise ValidationError, "#{kernel_version.sub('0.1.0-', '')} requires #{key} <= #{maximum}"
         end
         if PROFILE_CONTRACTS.key?(capsule["experiment_profile"]) && value != maximum
           raise ValidationError,
-                "rc.15 named runtime and production profiles require #{key} = #{maximum}"
+                "#{kernel_version.sub('0.1.0-', '')} named runtime and production profiles require #{key} = #{maximum}"
         end
       end
     end
@@ -931,7 +941,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -1027,7 +1037,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1197,7 +1207,7 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
-      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15].include?(capsule.dig("playbook_pin", "kernel_version")) &&
+      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].include?(capsule.dig("playbook_pin", "kernel_version")) &&
                   event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
 
       loaded_bytes = context["loaded_artifact_bytes_by_id"]
@@ -1336,7 +1346,7 @@ module HrmExperiment
       process_reasons << "worker-handoff startup budget exceeded"
     end
     kernel_version = capsule.dig("playbook_pin", "kernel_version")
-    activation_gated = if kernel_version == RC15_KERNEL_VERSION
+    activation_gated = if [RC15_KERNEL_VERSION, RC16_KERNEL_VERSION].include?(kernel_version)
                          %w[runtime_build production_observation].include?(capsule["execution_mode"])
                        else
                          ACTIVATION_KERNEL_VERSIONS.include?(kernel_version) &&
@@ -1529,7 +1539,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.15 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.16 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 

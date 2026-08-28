@@ -15,7 +15,7 @@ profiles:
       max_semantic_readiness_seconds: 30
       max_startup_to_worker_handoff_seconds: 30
       max_startup_to_worker_activation_seconds: 30
-      max_handoff_to_worker_activation_seconds: 20
+      max_handoff_to_worker_activation_seconds: 25
       max_inline_raw_log_bytes: 2000
       max_state_artifact_echo_bytes: 1000
       context_bytes_by_role:
@@ -77,7 +77,7 @@ profiles:
       max_semantic_readiness_seconds: 30
       max_startup_to_worker_handoff_seconds: 30
       max_startup_to_worker_activation_seconds: 30
-      max_handoff_to_worker_activation_seconds: 20
+      max_handoff_to_worker_activation_seconds: 25
       max_inline_raw_log_bytes: 2000
       max_state_artifact_echo_bytes: 1000
       context_bytes_by_role:

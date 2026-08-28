@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.15"
+version: "0.1.0-rc.16"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -198,7 +198,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.15 experiment preserves the rc.14 state-owning process below the LLM orchestrator. The supervisor
+The rc.16 experiment preserves the rc.15 state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -214,7 +214,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.13 through rc.15 append, handoff receipt, activation, context receipt,
+the ledger before continuation. Every rc.13 through rc.16 append, handoff receipt, activation, context receipt,
 guarded action, and transition goes through `scripts/hrm_supervisor.rb`; direct event appends are
 legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
@@ -299,6 +299,14 @@ starts with the process blocker rather than the HRM outcome. No raw or private d
 The dedicated AE-scale fixture pins RC.15 at 2,969-byte resume and 3,695-byte handoff receipts with
 401 bytes of headroom; the exact 30/20 boundary continues, while 31 seconds or 21 seconds terminalizes.
 
+RC.16 changes only the named runtime-build and production-observation post-handoff activation hard
+limit from an inclusive 20 seconds to an inclusive 25 seconds. The total startup limit remains an
+inclusive 30 seconds, and 20/10 remains the optimization target. All RC.15 activation evidence,
+compact receipt, one-shot command, lifecycle, and reason-code semantics are unchanged. The observed
+27-second startup/21-second post-handoff path continues under RC.16, as does the exact 30/25 boundary;
+31 seconds total or 26 seconds post-handoff terminalizes with the corresponding stable code. The
+AE-scale receipt remains under the 4,096-byte cap with more than 300 bytes of headroom.
+
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
 on `run_invalid` or a failed process envelope before any later routine action can be guarded.
@@ -367,7 +375,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.15.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.16.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -406,7 +414,7 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    assignment and carries the
    role context budget, a smaller loaded-artifact allowance, a tool-output reserve, source-size
    bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, activation, context,
-   guard, and result commands. Execute the resume receipt's handoff command directly. For rc.14 and rc.15,
+   guard, and result commands. Execute the resume receipt's handoff command directly. For rc.14 through rc.16,
    spawn the assigned role immediately with `fork_turns: none` when the handoff receipt contains
    its claim-bound `activation_command`; for older receipt formats, use `launch_ready` when
    present. Do not open state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
@@ -575,12 +583,19 @@ the raw events when a metric regresses.
 `done_verified`, `review_ready`, `blocked_input`, `blocked_external`,
 `scope_divergence`, `governance_loop`, `no_progress`, `budget_exhausted`, and
 `superseded` are the only kernel terminal reasons. Detail belongs in evidence, not an
-unbounded vocabulary. RC.15 maps terminal process facts to at most eight stable `reason_codes` for
+unbounded vocabulary. RC.15 and RC.16 map terminal process facts to at most eight stable `reason_codes` for
 the supervisor projection and terminal receipt; the operator summary renders the leading code and
 never copies raw or private evidence.
 
 ## Change note
 
+- **0.1.0-rc.16 — 2026-08-28:** Preserves RC.15 activation evidence, compact receipts, one-shot
+  commands, lifecycle integrity, stable reason codes, and the inclusive 30-second total activation
+  hard limit. Changes only the named runtime-build and production-observation post-handoff hard
+  limit from inclusive 20 seconds to inclusive 25 seconds; 20/10 remains the optimization target.
+  Fixed regressions retain RC.15's terminal 27/21 behavior, allow RC.16 at 27/21 and exactly 30/25,
+  and terminalize at 31 seconds total or 26 seconds post-handoff. RC.11-RC.15 objects, hashes,
+  receipts, pending claims, and version-gated semantics remain unchanged.
 - **0.1.0-rc.15 — 2026-08-28:** Preserves rc.14 compact launch and the full activation/one-shot/
   lifecycle protocol while setting named runtime-build and production-observation activation hard
   limits to inclusive 30-second startup and 20-second post-handoff bounds. The prior 20/10 values

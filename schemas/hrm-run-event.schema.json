@@ -205,7 +205,7 @@
         "observed_activation_dispatch_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
-          "description": "Required by the capsule-aware supervisor for RC.15 worker_started events and must exactly equal activation_dispatch_sha256; optional here to preserve RC.13 and RC.14 event compatibility."
+          "description": "Required by the capsule-aware supervisor for RC.15 and RC.16 worker_started events and must exactly equal activation_dispatch_sha256; optional here to preserve RC.13 and RC.14 event compatibility."
         },
         "grant_id": {"type": "string", "minLength": 1},
         "integration_verified": {"type": "boolean"},

@@ -131,7 +131,7 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "verification.exact_checks"
   end
 
-  def test_rc15_named_profiles_require_preregistered_30_and_20_second_activation_gates
+  def test_rc16_named_profiles_require_preregistered_30_and_25_second_activation_gates
     capsule = HrmExperiment.load_yaml(CAPSULE)
     capsule.dig("budgets")["max_startup_to_worker_activation_seconds"] = 29
 
@@ -141,7 +141,31 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "max_startup_to_worker_activation_seconds = 30"
 
     capsule = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
+    capsule.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 24
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "max_handoff_to_worker_activation_seconds = 25"
+
+    capsule = HrmExperiment.load_yaml(PRODUCTION_CAPSULE)
     capsule.dig("budgets").delete("max_handoff_to_worker_activation_seconds")
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "max_handoff_to_worker_activation_seconds <= 25"
+  end
+
+  def test_rc15_named_profiles_preserve_preregistered_30_and_20_second_activation_gates
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule.dig("playbook_pin")["kernel_version"] = "0.1.0-rc.15"
+    capsule.fetch("context_dependencies").find { |item| item["kind"] == "playbook_kernel" }["binding"] =
+      "AP-EXEC-001/0.1.0-rc.15@1111111111111111111111111111111111111111"
+    capsule.fetch("context_dependencies").find { |item| item["kind"] == "implementation_source" }["binding"] =
+      "rc15-example-source"
+    capsule.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 20
+    assert HrmExperiment.validate_capsule!(capsule)
+
+    capsule.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 21
     error = assert_raises(HrmExperiment::ValidationError) do
       HrmExperiment.validate_capsule!(capsule)
     end
@@ -268,7 +292,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.15"
+      assert_includes stderr, "legacy hrm_experiment.rb supersede-with-successor is disabled for 0.1.0-rc.16"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -294,7 +318,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.15"
+      assert_includes stderr, "legacy hrm_experiment.rb guard-action is disabled for 0.1.0-rc.16"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -317,7 +341,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.15"
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.16"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -367,6 +391,15 @@ class HrmExperimentTest < Minitest::Test
     assert_includes error.message, "disabled for 0.1.0-rc.15"
   end
 
+  def test_rc16_legacy_mutation_paths_remain_fail_closed
+    rc16_capsule = {"playbook_pin" => {"kernel_version" => "0.1.0-rc.16"}}
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.reject_legacy_mutation_cli!("append-event", rc16_capsule)
+    end
+    assert_includes error.message, "disabled for 0.1.0-rc.16"
+  end
+
   def test_named_profile_rejects_role_budget_override
     capsule = HrmExperiment.load_yaml(CAPSULE)
     capsule.dig("budgets", "context_bytes_by_role")["provider_observer"] = 12_001
@@ -384,9 +417,9 @@ class HrmExperimentTest < Minitest::Test
     HrmExperiment::PROFILE_CONTRACTS.each do |profile_name, contract|
       assert_equal contract.dig("budgets", "context_bytes_by_role"),
                    template.dig("profiles", profile_name, "budgets", "context_bytes_by_role")
-      assert_equal HrmExperiment::RC15_ACTIVATION_BUDGETS,
+      assert_equal HrmExperiment::RC16_ACTIVATION_BUDGETS,
                    template.dig("profiles", profile_name, "budgets")
-                           .slice(*HrmExperiment::RC15_ACTIVATION_BUDGETS.keys)
+                           .slice(*HrmExperiment::RC16_ACTIVATION_BUDGETS.keys)
     end
   end
 

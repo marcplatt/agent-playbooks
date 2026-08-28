@@ -26,6 +26,7 @@ module HrmSupervisor
   RC13_KERNEL_VERSION = "0.1.0-rc.13"
   RC14_KERNEL_VERSION = "0.1.0-rc.14"
   RC15_KERNEL_VERSION = "0.1.0-rc.15"
+  RC16_KERNEL_VERSION = "0.1.0-rc.16"
   SUPERVISOR_MEASURED_CONTEXT_VERSIONS = [
     RC9_KERNEL_VERSION,
     RC10_KERNEL_VERSION,
@@ -33,7 +34,8 @@ module HrmSupervisor
     RC12_KERNEL_VERSION,
     RC13_KERNEL_VERSION,
     RC14_KERNEL_VERSION,
-    RC15_KERNEL_VERSION
+    RC15_KERNEL_VERSION,
+    RC16_KERNEL_VERSION
   ].freeze
   MAX_TERMINAL_REASON_CODES = 8
   TERMINAL_REASON_CODE_BY_SCORECARD_REASON = {
@@ -249,7 +251,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless supervisor_measured_context?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor context command requires an rc.9 through rc.15 capsule"
+            "the supervisor context command requires an rc.9 through rc.16 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -386,7 +388,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless activation_protocol?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor activate command requires an rc.13 capsule or its rc.14/rc.15 successor"
+            "the supervisor activate command requires an rc.13 capsule or its rc.14-rc.16 successors"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -427,7 +429,7 @@ module HrmSupervisor
         "material_progress" => false,
         "note" => "Fresh worker activated the exact claim-bound dispatch."
       }
-      if rc15?(capsule)
+      if activation_projection?(capsule)
         activation_details["observed_activation_dispatch_sha256"] = current_file_sha256
       end
       append_prepared(capsule, events, events_path, {
@@ -486,7 +488,7 @@ module HrmSupervisor
   def result(capsule_path, events_path, result_event, now = Time.now.utc)
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless result_protocol?(capsule)
-      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 through rc.15 capsule"
+      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 through rc.16 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -581,7 +583,7 @@ module HrmSupervisor
 
   def derive_rc13_result_event!(capsule, action, role, claim, domain, now)
     unless domain.is_a?(Hash)
-      raise HrmExperiment::ValidationError, "rc.13-rc.15 result domain payload must be a JSON object"
+      raise HrmExperiment::ValidationError, "rc.13-rc.16 result domain payload must be a JSON object"
     end
     binding = {
       "action" => action,
@@ -646,7 +648,7 @@ module HrmSupervisor
       }
     else
       raise HrmExperiment::ValidationError,
-            "rc.13-rc.15 has no action-specific result contract for #{action.inspect}"
+            "rc.13-rc.16 has no action-specific result contract for #{action.inspect}"
     end
   end
 
@@ -655,7 +657,7 @@ module HrmSupervisor
     return true if actual_keys == expected_keys.sort
 
     raise HrmExperiment::ValidationError,
-          "rc.13-rc.15 #{action} result requires only domain keys #{expected_keys.sort.join(', ')}"
+          "rc.13-rc.16 #{action} result requires only domain keys #{expected_keys.sort.join(', ')}"
   end
 
   def result_protocol_prefix!(capsule, events, role)
@@ -786,7 +788,10 @@ module HrmSupervisor
       successor.dig("authority", "operational")[key] = false
     end
     profile.fetch("budgets").each { |key, value| successor.dig("budgets")[key] = value }
-    if rc15?(successor) && %w[runtime_build production_observation].include?(execution_mode)
+    if rc16?(successor) && %w[runtime_build production_observation].include?(execution_mode)
+      successor.dig("budgets")["max_startup_to_worker_activation_seconds"] = 30
+      successor.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 25
+    elsif rc15?(successor) && %w[runtime_build production_observation].include?(execution_mode)
       successor.dig("budgets")["max_startup_to_worker_activation_seconds"] = 30
       successor.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 20
     elsif activation_protocol?(successor) && execution_mode == "runtime_build"
@@ -1005,8 +1010,16 @@ module HrmSupervisor
     capsule.dig("playbook_pin", "kernel_version") == RC15_KERNEL_VERSION
   end
 
+  def rc16?(capsule)
+    capsule.dig("playbook_pin", "kernel_version") == RC16_KERNEL_VERSION
+  end
+
+  def activation_projection?(capsule)
+    rc15?(capsule) || rc16?(capsule)
+  end
+
   def activation_protocol?(capsule)
-    rc13?(capsule) || rc14?(capsule) || rc15?(capsule)
+    rc13?(capsule) || rc14?(capsule) || activation_projection?(capsule)
   end
 
   def result_protocol?(capsule)
@@ -1230,12 +1243,13 @@ module HrmSupervisor
                                          activation_details["activation_dispatch_sha256"].match?(/\A[0-9a-f]{64}\z/)
                                      activation_details["activation_dispatch_sha256"]
                                    end
-      rc15_activation_validation = if rc15?(capsule) && activation&.dig("event_type") == "worker_started"
-                                     validate_rc15_activation_evidence!(
-                                       activation_details,
-                                       activation_dispatch_sha256
-                                     )
-                                   end
+      activation_validation = if activation_projection?(capsule) &&
+                                 activation&.dig("event_type") == "worker_started"
+                                validate_rc15_activation_evidence!(
+                                  activation_details,
+                                  activation_dispatch_sha256
+                                )
+                              end
       activated = activation&.dig("event_type") == "worker_started" &&
                   activation["role"] == assignment["role"] &&
                   activation_details["action"] == assignment["action"] &&
@@ -1243,11 +1257,11 @@ module HrmSupervisor
                   activation_details["worker_claim_id"] == details["worker_claim_id"] &&
                   activation_cursor == handoff["sequence"] &&
                   activation_details["activation_dispatch_sha256"] == activation_dispatch_sha256 &&
-                  (!rc15?(capsule) || rc15_activation_validation&.fetch("matched"))
+                  (!activation_projection?(capsule) || activation_validation&.fetch("matched"))
       unless activated
         raise HrmExperiment::ValidationError,
               "worker claim requires an immediate supervisor-accepted rc.13 activation " \
-              "or its rc.14/rc.15 successor protocol " \
+              "or its rc.14-rc.16 successor protocol " \
               "bound to the exact deterministic activation dispatch digest"
       end
     end
@@ -1275,7 +1289,7 @@ module HrmSupervisor
               validation["claimed_dispatch_sha256"] == expected_dispatch_sha256)
     unless valid
       raise HrmExperiment::ValidationError,
-            "rc.15 worker_started requires matching claimed and observed activation dispatch digests " \
+            "rc.15/rc.16 worker_started requires matching claimed and observed activation dispatch digests " \
             "bound to the exact deterministic activation dispatch digest"
     end
     validation
@@ -1431,7 +1445,7 @@ module HrmSupervisor
 
   def validate_run_identity!(capsule, events)
     HrmExperiment.validate_events!(events)
-    if rc15?(capsule)
+    if activation_projection?(capsule)
       events.each do |event|
         next unless event["event_type"] == "worker_started"
 
@@ -1651,7 +1665,7 @@ module HrmSupervisor
     ))
       receipt["worker_launch"] = worker_launch
     end
-    if rc15?(capsule) && action == "activate"
+    if activation_projection?(capsule) && action == "activate"
       activation_event = events.reverse.find { |event| event["event_type"] == "worker_started" }
       activation = activation_event.fetch("details")
       receipt["claim_validation"] = validate_rc15_activation_evidence!(activation)
@@ -1678,7 +1692,7 @@ module HrmSupervisor
       }
     end
     receipt.merge!(receipt_fields)
-    if rc15?(capsule) && projection["terminal_state"] != "active"
+    if activation_projection?(capsule) && projection["terminal_state"] != "active"
       receipt["reason_codes"] = projection.fetch("reason_codes")
     end
     if action == "handoff" && receipt["worker_launch"] && receipt["worker_claim"]
@@ -1701,7 +1715,7 @@ module HrmSupervisor
         receipt.delete("worker_claim")
       end
     end
-    if (rc14?(capsule) || rc15?(capsule)) && receipt["worker_launch"] &&
+    if (rc14?(capsule) || activation_projection?(capsule)) && receipt["worker_launch"] &&
        %w[start handoff].include?(receipt["action"])
       receipt = compact_rc14_launch_receipt(receipt)
     end
@@ -1756,7 +1770,7 @@ module HrmSupervisor
       "guard_command" => dispatch.dig("protocol", "guard_command"),
       "result_command" => dispatch.dig("protocol", "result_command")
     }
-    if rc14?(capsule) || rc15?(capsule)
+    if rc14?(capsule) || activation_projection?(capsule)
       launch.merge!(
         "launch_policy" => {
           "fork_turns" => "none",
@@ -1877,7 +1891,7 @@ module HrmSupervisor
       }
     else
       raise HrmExperiment::ValidationError,
-            "rc.13-rc.15 has no action-specific result input contract for #{action.inspect}"
+            "rc.13-rc.16 has no action-specific result input contract for #{action.inspect}"
     end
   end
 
@@ -1912,7 +1926,7 @@ module HrmSupervisor
 
     dispatch = derive_dispatch_envelope(capsule, events, next_action, api_skill_coverage, paths, capsule_path)
     relative_dispatch = project_relative_artifact_path(capsule, paths.fetch("dispatch"), "dispatch")
-    reason_codes = rc15?(capsule) ? terminal_reason_codes(state, scorecard) : nil
+    reason_codes = activation_projection?(capsule) ? terminal_reason_codes(state, scorecard) : nil
     operator_projection = derive_operator_projection(
       capsule,
       state,
@@ -1947,7 +1961,7 @@ module HrmSupervisor
         "cache_key" => dispatch.dig("cache", "cache_key")
       }
     }
-    projection["reason_codes"] = reason_codes if rc15?(capsule)
+    projection["reason_codes"] = reason_codes if activation_projection?(capsule)
     projection["projection_hash"] = HrmExperiment.object_sha256(projection)
     validate_projection!(projection)
 
@@ -2265,7 +2279,7 @@ module HrmSupervisor
                  else
                    "silent"
                  end
-    summary = if rc15?(capsule) && terminal
+    summary = if activation_projection?(capsule) && terminal
                 label = process_blocked ? "Process blocker" : "Terminal"
                 "#{label}: #{reason_codes.fetch(0).tr('_', ' ')}."
               else
