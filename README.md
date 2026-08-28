@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.14` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.15` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -124,14 +124,14 @@ ruby scripts/hrm_supervisor.rb transition \
   path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.14, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
+During rc.15, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
 envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
 when the bound ledger is empty, then emits the first worker assignment. `transition`
 mechanically derives and binds runtime-build/production-observation successors. The legacy
 `hrm_experiment.rb` append, guard,
-and supersede commands fail closed for rc.6 through rc.14 so
+and supersede commands fail closed for rc.6 through rc.15 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
@@ -148,7 +148,7 @@ Handoff, context, and guard commands recompute the exact current assignment and 
 self-rehashed dispatch edit. Structured handoff claims bind the assigned action and role to the
 source dispatch cursor and digest. Named experiment profiles pin the complete role-budget map;
 `custom` remains the explicit override path.
-RC.11 through RC.14 worker-owned lifecycle events cannot enter through the generic append path. `result`
+RC.11 through RC.15 worker-owned lifecycle events cannot enter through the generic append path. `result`
 accepts them only after the exact pending worker claim, context receipt, and matching immediate
 guard, then records the value and claim-bound worker completion atomically. A replay or edited
 claim, action, role, order, or result type leaves the ledger unchanged.
@@ -192,6 +192,22 @@ compact launch-ready signal; the preceding resume receipt intentionally has no a
 The 4,096-byte preappend limit is unchanged: the
 realistic seven-seam AE fixture reproduces rc.13's 4,155-byte rejection and measures rc.14 at 2,941
 bytes for resume and 3,660 bytes for claim-bearing handoff, leaving 436 bytes below the hard cap.
+
+RC.15 preserves the compact launch and worker lifecycle but separates claim validation from the
+newly derived post-activation dispatch. Its activation receipt reports the claimed and observed
+pre-activation digest, exact cursor, and a match derived from exact digest equality under
+`claim_validation`; the cursor-after-
+append artifact is labeled `post_activation_dispatch`. Named runtime-build and production-observation
+profiles use inclusive hard limits of 30 seconds from session start and 20 seconds from handoff to
+actual worker activation. The earlier 20/10 figures remain optimization targets, not terminal gates.
+RC.15 terminal projections and receipts expose only bounded stable `reason_codes`; a terminal operator
+summary leads with the actual process blocker instead of the HRM business-outcome prose. The dedicated
+AE-scale fixture pins RC.15 at 2,969-byte resume and 3,695-byte handoff receipts with 401 bytes of
+headroom, and proves that the exact 30/20 boundary continues while 31 seconds or 21 seconds terminalizes.
+Every RC.15 ledger load requires the observed activation digest and rejects a missing or unequal
+value before context, guard, result, or projection work. Context and guard also bind both values to
+the supervisor-recomputed pre-activation dispatch; result preserves legitimate post-guard source or
+API-registry changes by enforcing the same exact pair through the stored supervisor-bound lifecycle.
 
 Optional zero-byte preflight receipts are normalized to empty dependency maps:
 they do not count as loaded files, artifact identity, or repetition. RC.12 result validation may

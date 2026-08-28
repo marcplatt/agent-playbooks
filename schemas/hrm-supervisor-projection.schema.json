@@ -128,6 +128,12 @@
         "summary": {"$ref": "#/$defs/nonempty"}
       }
     },
+    "reason_codes": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9_]+$", "maxLength": 64}
+    },
     "dispatch_ref": {
       "type": "object",
       "additionalProperties": false,

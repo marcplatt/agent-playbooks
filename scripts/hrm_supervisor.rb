@@ -25,14 +25,40 @@ module HrmSupervisor
   RC12_KERNEL_VERSION = "0.1.0-rc.12"
   RC13_KERNEL_VERSION = "0.1.0-rc.13"
   RC14_KERNEL_VERSION = "0.1.0-rc.14"
+  RC15_KERNEL_VERSION = "0.1.0-rc.15"
   SUPERVISOR_MEASURED_CONTEXT_VERSIONS = [
     RC9_KERNEL_VERSION,
     RC10_KERNEL_VERSION,
     RC11_KERNEL_VERSION,
     RC12_KERNEL_VERSION,
     RC13_KERNEL_VERSION,
-    RC14_KERNEL_VERSION
+    RC14_KERNEL_VERSION,
+    RC15_KERNEL_VERSION
   ].freeze
+  MAX_TERMINAL_REASON_CODES = 8
+  TERMINAL_REASON_CODE_BY_SCORECARD_REASON = {
+    "semantic-readiness startup budget exceeded" => "semantic_readiness_startup_budget_exceeded",
+    "worker-handoff startup budget exceeded" => "worker_handoff_startup_budget_exceeded",
+    "worker-activation startup budget exceeded" => "worker_activation_startup_budget_exceeded",
+    "worker activation after handoff budget exceeded" => "worker_activation_handoff_budget_exceeded",
+    "late S0/S1 finding" => "late_interrupt_finding",
+    "non-runtime unit budget exceeded" => "nonruntime_unit_budget_exceeded",
+    "correction-round budget exceeded" => "correction_round_budget_exceeded",
+    "duplicate conclusive CI" => "duplicate_conclusive_ci",
+    "CI-minute budget exceeded" => "ci_minute_budget_exceeded",
+    "no-material-progress budget exceeded" => "no_material_progress_budget_exceeded",
+    "context budget exceeded" => "context_budget_exceeded",
+    "context-redundancy budget exceeded" => "context_redundancy_budget_exceeded",
+    "pre-expected-value context-compaction budget exceeded" => "context_compaction_budget_exceeded",
+    "inline raw-log budget exceeded" => "inline_raw_log_budget_exceeded",
+    "state-artifact echo budget exceeded" => "state_artifact_echo_budget_exceeded",
+    "context scope escape" => "context_scope_escape",
+    "undispositioned scope addition" => "undispositioned_scope_addition",
+    "non-blocking scope absorbed" => "nonblocking_scope_absorbed",
+    "liveness stop triggered" => "liveness_stop_triggered",
+    "outcome or safety gate failed" => "outcome_or_safety_gate_failed",
+    "aftercare pending" => "aftercare_pending"
+  }.freeze
   RESULT_PROTOCOL_SUPERVISOR_BOUND_EVENT_TYPES = %w[
     worker_handoff_started
     worker_started
@@ -223,7 +249,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless supervisor_measured_context?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor context command requires an rc.9 through rc.14 capsule"
+            "the supervisor context command requires an rc.9 through rc.15 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -360,7 +386,7 @@ module HrmSupervisor
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless activation_protocol?(capsule)
       raise HrmExperiment::ValidationError,
-            "the supervisor activate command requires an rc.13 capsule or rc.14 capsule"
+            "the supervisor activate command requires an rc.13 capsule or its rc.14/rc.15 successor"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -392,19 +418,23 @@ module HrmSupervisor
               "worker activation must bind the exact pending claim, current cursor, and dispatch file digest"
       end
 
+      activation_details = {
+        "action" => assignment.fetch("action"),
+        "worker_role" => assignment.fetch("role"),
+        "worker_claim_id" => claim.fetch("worker_claim_id"),
+        "activation_dispatch_cursor" => dispatch_cursor,
+        "activation_dispatch_sha256" => dispatch_sha256,
+        "material_progress" => false,
+        "note" => "Fresh worker activated the exact claim-bound dispatch."
+      }
+      if rc15?(capsule)
+        activation_details["observed_activation_dispatch_sha256"] = current_file_sha256
+      end
       append_prepared(capsule, events, events_path, {
         "event_type" => "worker_started",
         "occurred_at" => now.utc.iso8601,
         "role" => assignment.fetch("role"),
-        "details" => {
-          "action" => assignment.fetch("action"),
-          "worker_role" => assignment.fetch("role"),
-          "worker_claim_id" => claim.fetch("worker_claim_id"),
-          "activation_dispatch_cursor" => dispatch_cursor,
-          "activation_dispatch_sha256" => dispatch_sha256,
-          "material_progress" => false,
-          "note" => "Fresh worker activated the exact claim-bound dispatch."
-        }
+        "details" => activation_details
       }, "activate", capsule_path)
     end
   end
@@ -456,7 +486,7 @@ module HrmSupervisor
   def result(capsule_path, events_path, result_event, now = Time.now.utc)
     capsule = HrmExperiment.load_yaml(capsule_path)
     unless result_protocol?(capsule)
-      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 through rc.14 capsule"
+      raise HrmExperiment::ValidationError, "the supervisor result command requires an rc.11 through rc.15 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -551,7 +581,7 @@ module HrmSupervisor
 
   def derive_rc13_result_event!(capsule, action, role, claim, domain, now)
     unless domain.is_a?(Hash)
-      raise HrmExperiment::ValidationError, "rc.13/rc.14 result domain payload must be a JSON object"
+      raise HrmExperiment::ValidationError, "rc.13-rc.15 result domain payload must be a JSON object"
     end
     binding = {
       "action" => action,
@@ -616,7 +646,7 @@ module HrmSupervisor
       }
     else
       raise HrmExperiment::ValidationError,
-            "rc.13/rc.14 has no action-specific result contract for #{action.inspect}"
+            "rc.13-rc.15 has no action-specific result contract for #{action.inspect}"
     end
   end
 
@@ -625,7 +655,7 @@ module HrmSupervisor
     return true if actual_keys == expected_keys.sort
 
     raise HrmExperiment::ValidationError,
-          "rc.13/rc.14 #{action} result requires only domain keys #{expected_keys.sort.join(', ')}"
+          "rc.13-rc.15 #{action} result requires only domain keys #{expected_keys.sort.join(', ')}"
   end
 
   def result_protocol_prefix!(capsule, events, role)
@@ -756,7 +786,10 @@ module HrmSupervisor
       successor.dig("authority", "operational")[key] = false
     end
     profile.fetch("budgets").each { |key, value| successor.dig("budgets")[key] = value }
-    if activation_protocol?(successor) && execution_mode == "runtime_build"
+    if rc15?(successor) && %w[runtime_build production_observation].include?(execution_mode)
+      successor.dig("budgets")["max_startup_to_worker_activation_seconds"] = 30
+      successor.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 20
+    elsif activation_protocol?(successor) && execution_mode == "runtime_build"
       successor.dig("budgets")["max_startup_to_worker_activation_seconds"] = 20
       successor.dig("budgets")["max_handoff_to_worker_activation_seconds"] = 10
     end
@@ -968,8 +1001,12 @@ module HrmSupervisor
     capsule.dig("playbook_pin", "kernel_version") == RC14_KERNEL_VERSION
   end
 
+  def rc15?(capsule)
+    capsule.dig("playbook_pin", "kernel_version") == RC15_KERNEL_VERSION
+  end
+
   def activation_protocol?(capsule)
-    rc13?(capsule) || rc14?(capsule)
+    rc13?(capsule) || rc14?(capsule) || rc15?(capsule)
   end
 
   def result_protocol?(capsule)
@@ -1193,20 +1230,55 @@ module HrmSupervisor
                                          activation_details["activation_dispatch_sha256"].match?(/\A[0-9a-f]{64}\z/)
                                      activation_details["activation_dispatch_sha256"]
                                    end
+      rc15_activation_validation = if rc15?(capsule) && activation&.dig("event_type") == "worker_started"
+                                     validate_rc15_activation_evidence!(
+                                       activation_details,
+                                       activation_dispatch_sha256
+                                     )
+                                   end
       activated = activation&.dig("event_type") == "worker_started" &&
                   activation["role"] == assignment["role"] &&
                   activation_details["action"] == assignment["action"] &&
                   activation_details["worker_role"] == assignment["role"] &&
                   activation_details["worker_claim_id"] == details["worker_claim_id"] &&
                   activation_cursor == handoff["sequence"] &&
-                  activation_details["activation_dispatch_sha256"] == activation_dispatch_sha256
+                  activation_details["activation_dispatch_sha256"] == activation_dispatch_sha256 &&
+                  (!rc15?(capsule) || rc15_activation_validation&.fetch("matched"))
       unless activated
         raise HrmExperiment::ValidationError,
-              "worker claim requires an immediate supervisor-accepted rc.13 activation or rc.14 activation " \
+              "worker claim requires an immediate supervisor-accepted rc.13 activation " \
+              "or its rc.14/rc.15 successor protocol " \
               "bound to the exact deterministic activation dispatch digest"
       end
     end
     true
+  end
+
+  def activation_claim_validation(activation_details)
+    claimed = activation_details["activation_dispatch_sha256"]
+    observed = activation_details["observed_activation_dispatch_sha256"]
+    valid_digest = lambda do |value|
+      value.is_a?(String) && value.match?(/\A[0-9a-f]{64}\z/)
+    end
+    {
+      "claimed_dispatch_sha256" => claimed,
+      "observed_dispatch_sha256" => observed,
+      "matched" => valid_digest.call(claimed) && valid_digest.call(observed) && claimed == observed,
+      "cursor" => activation_details["activation_dispatch_cursor"]
+    }
+  end
+
+  def validate_rc15_activation_evidence!(activation_details, expected_dispatch_sha256 = nil)
+    validation = activation_claim_validation(activation_details)
+    valid = validation["matched"] &&
+            (expected_dispatch_sha256.nil? ||
+              validation["claimed_dispatch_sha256"] == expected_dispatch_sha256)
+    unless valid
+      raise HrmExperiment::ValidationError,
+            "rc.15 worker_started requires matching claimed and observed activation dispatch digests " \
+            "bound to the exact deterministic activation dispatch digest"
+    end
+    validation
   end
 
   def verified_stored_result_lifecycle!(capsule, events, events_path)
@@ -1359,6 +1431,13 @@ module HrmSupervisor
 
   def validate_run_identity!(capsule, events)
     HrmExperiment.validate_events!(events)
+    if rc15?(capsule)
+      events.each do |event|
+        next unless event["event_type"] == "worker_started"
+
+        validate_rc15_activation_evidence!(event.fetch("details", {}))
+      end
+    end
     expected_sequences = (1..events.length).to_a
     actual_sequences = events.map { |event| event["sequence"] }
     unless actual_sequences == expected_sequences
@@ -1572,7 +1651,21 @@ module HrmSupervisor
     ))
       receipt["worker_launch"] = worker_launch
     end
-    if activation_protocol?(capsule) && action == "activate"
+    if rc15?(capsule) && action == "activate"
+      activation_event = events.reverse.find { |event| event["event_type"] == "worker_started" }
+      activation = activation_event.fetch("details")
+      receipt["claim_validation"] = validate_rc15_activation_evidence!(activation)
+      receipt["post_activation_dispatch"] = {
+        "ledger_cursor" => dispatch.fetch("ledger_cursor"),
+        "working_directory" => dispatch.dig("protocol", "working_directory"),
+        "dispatch_path" => project_relative_artifact_path(
+          capsule,
+          paths.fetch("dispatch"),
+          "post-activation dispatch"
+        ),
+        "dispatch_sha256" => Digest::SHA256.hexdigest("#{JSON.generate(dispatch)}\n")
+      }
+    elsif activation_protocol?(capsule) && action == "activate"
       receipt["activated_dispatch"] = {
         "ledger_cursor" => dispatch.fetch("ledger_cursor"),
         "working_directory" => dispatch.dig("protocol", "working_directory"),
@@ -1585,6 +1678,9 @@ module HrmSupervisor
       }
     end
     receipt.merge!(receipt_fields)
+    if rc15?(capsule) && projection["terminal_state"] != "active"
+      receipt["reason_codes"] = projection.fetch("reason_codes")
+    end
     if action == "handoff" && receipt["worker_launch"] && receipt["worker_claim"]
       receipt["worker_launch"]["worker_claim"] = receipt["worker_claim"]
       if activation_protocol?(capsule)
@@ -1605,7 +1701,8 @@ module HrmSupervisor
         receipt.delete("worker_claim")
       end
     end
-    if rc14?(capsule) && receipt["worker_launch"] && %w[start handoff].include?(receipt["action"])
+    if (rc14?(capsule) || rc15?(capsule)) && receipt["worker_launch"] &&
+       %w[start handoff].include?(receipt["action"])
       receipt = compact_rc14_launch_receipt(receipt)
     end
     validate_receipt_size!(capsule, receipt)
@@ -1659,7 +1756,7 @@ module HrmSupervisor
       "guard_command" => dispatch.dig("protocol", "guard_command"),
       "result_command" => dispatch.dig("protocol", "result_command")
     }
-    if rc14?(capsule)
+    if rc14?(capsule) || rc15?(capsule)
       launch.merge!(
         "launch_policy" => {
           "fork_turns" => "none",
@@ -1780,7 +1877,7 @@ module HrmSupervisor
       }
     else
       raise HrmExperiment::ValidationError,
-            "rc.13/rc.14 has no action-specific result input contract for #{action.inspect}"
+            "rc.13-rc.15 has no action-specific result input contract for #{action.inspect}"
     end
   end
 
@@ -1815,7 +1912,14 @@ module HrmSupervisor
 
     dispatch = derive_dispatch_envelope(capsule, events, next_action, api_skill_coverage, paths, capsule_path)
     relative_dispatch = project_relative_artifact_path(capsule, paths.fetch("dispatch"), "dispatch")
-    operator_projection = derive_operator_projection(capsule, state, attention)
+    reason_codes = rc15?(capsule) ? terminal_reason_codes(state, scorecard) : nil
+    operator_projection = derive_operator_projection(
+      capsule,
+      state,
+      attention,
+      reason_codes,
+      verdict["process_envelope"] == "fail"
+    )
 
     projection = {
       "schema_version" => "agent_playbooks.hrm_supervisor_projection.v0.4",
@@ -1843,6 +1947,7 @@ module HrmSupervisor
         "cache_key" => dispatch.dig("cache", "cache_key")
       }
     }
+    projection["reason_codes"] = reason_codes if rc15?(capsule)
     projection["projection_hash"] = HrmExperiment.object_sha256(projection)
     validate_projection!(projection)
 
@@ -2131,7 +2236,25 @@ module HrmSupervisor
     HrmExperiment.object_sha256(events[handoff_index..guard_index])
   end
 
-  def derive_operator_projection(capsule, state, attention)
+  def terminal_reason_codes(state, scorecard)
+    return [] if state.dig("terminal", "state") == "active"
+
+    codes = Array(scorecard.dig("verdict", "reasons")).map do |reason|
+      TERMINAL_REASON_CODE_BY_SCORECARD_REASON[reason]
+    end.compact
+    if scorecard.dig("verdict", "process_envelope") == "fail" && codes.empty?
+      codes << "process_envelope_failed"
+    end
+    if codes.empty? && state.dig("terminal", "stop_reason")
+      codes << "stop_#{state.dig('terminal', 'stop_reason')}"
+    end
+    if codes.empty?
+      codes << "terminal_#{state.dig('terminal', 'state')}"
+    end
+    codes.uniq.first(MAX_TERMINAL_REASON_CODES)
+  end
+
+  def derive_operator_projection(capsule, state, attention, reason_codes = nil, process_blocked = false)
     terminal = state.dig("terminal", "state") != "active"
     visibility = if terminal
                    "terminal"
@@ -2142,7 +2265,12 @@ module HrmSupervisor
                  else
                    "silent"
                  end
-    summary = capsule.dig("hrm", "outcome").to_s.gsub(/\s+/, " ").strip
+    summary = if rc15?(capsule) && terminal
+                label = process_blocked ? "Process blocker" : "Terminal"
+                "#{label}: #{reason_codes.fetch(0).tr('_', ' ')}."
+              else
+                capsule.dig("hrm", "outcome").to_s.gsub(/\s+/, " ").strip
+              end
     summary = "#{summary[0, 237]}..." if summary.length > 240
     {"visibility" => visibility, "status" => state["phase"], "summary" => summary}
   end

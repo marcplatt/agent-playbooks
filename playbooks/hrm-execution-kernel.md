@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.14"
+version: "0.1.0-rc.15"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -198,7 +198,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.14 experiment preserves the rc.13 state-owning process below the LLM orchestrator. The supervisor
+The rc.15 experiment preserves the rc.14 state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -214,7 +214,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.13 or rc.14 append, handoff receipt, activation, context receipt,
+the ledger before continuation. Every rc.13 through rc.15 append, handoff receipt, activation, context receipt,
 guarded action, and transition goes through `scripts/hrm_supervisor.rb`; direct event appends are
 legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
@@ -284,6 +284,21 @@ cap is unchanged. The AE-scale seven-seam fixture
 that produced a 4,155-byte rc.13 claim-bearing handoff is 2,941 bytes at rc.14 resume and 3,660
 bytes at rc.14 handoff, leaving 436 bytes below the hard cap.
 
+RC.15 keeps the rc.14 compact launch representation and makes activation evidence unambiguous.
+`claim_validation` binds the claim's pre-activation dispatch digest to the digest actually observed
+at that cursor and derives `matched` from exact equality rather than asserting it. Every RC.15
+ledger load requires both digests to be present and equal. Context and guard additionally compare
+them with the supervisor-recomputed pre-activation dispatch; result validates the unchanged pair
+through the stored supervisor-bound post-guard lifecycle so assigned source and API-registry
+mutations remain valid. `post_activation_dispatch` identifies the distinct dispatch derived after
+`worker_started` is appended. Named runtime-build and production-observation profiles preregister
+inclusive hard limits of 30 seconds from session start and 20 seconds from handoff to worker
+activation. The 20-second/10-second figures remain optimization targets, never hard stops inside
+30/20. A failed hard gate projects bounded stable `reason_codes`, and the terminal operator summary
+starts with the process blocker rather than the HRM outcome. No raw or private detail enters either.
+The dedicated AE-scale fixture pins RC.15 at 2,969-byte resume and 3,695-byte handoff receipts with
+401 bytes of headroom; the exact 30/20 boundary continues, while 31 seconds or 21 seconds terminalizes.
+
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
 on `run_invalid` or a failed process envelope before any later routine action can be guarded.
@@ -352,7 +367,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.14.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.15.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -391,7 +406,7 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    assignment and carries the
    role context budget, a smaller loaded-artifact allowance, a tool-output reserve, source-size
    bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, activation, context,
-   guard, and result commands. Execute the resume receipt's handoff command directly. For rc.14,
+   guard, and result commands. Execute the resume receipt's handoff command directly. For rc.14 and rc.15,
    spawn the assigned role immediately with `fork_turns: none` when the handoff receipt contains
    its claim-bound `activation_command`; for older receipt formats, use `launch_ready` when
    present. Do not open state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
@@ -560,10 +575,21 @@ the raw events when a metric regresses.
 `done_verified`, `review_ready`, `blocked_input`, `blocked_external`,
 `scope_divergence`, `governance_loop`, `no_progress`, `budget_exhausted`, and
 `superseded` are the only kernel terminal reasons. Detail belongs in evidence, not an
-unbounded vocabulary.
+unbounded vocabulary. RC.15 maps terminal process facts to at most eight stable `reason_codes` for
+the supervisor projection and terminal receipt; the operator summary renders the leading code and
+never copies raw or private evidence.
 
 ## Change note
 
+- **0.1.0-rc.15 — 2026-08-28:** Preserves rc.14 compact launch and the full activation/one-shot/
+  lifecycle protocol while setting named runtime-build and production-observation activation hard
+  limits to inclusive 30-second startup and 20-second post-handoff bounds. The prior 20/10 values
+  remain optimization targets. Activation receipts now distinguish exact pre-activation
+  `claim_validation` from the newly derived `post_activation_dispatch`. Terminal projections and
+  receipts carry bounded stable reason codes, and terminal operator summaries lead with the actual
+  process blocker. The RC.15 AE-scale fixture is pinned at 2,969-byte resume, 3,695-byte handoff,
+  and 401-byte headroom, with exact inclusive 30/20 and failing 31/21 timing regressions.
+  RC.11-RC.14 capsule, dispatch, claim, and receipt behavior remains version-gated.
 - **0.1.0-rc.14 — 2026-08-28:** Compacts only start and claim-bearing handoff receipts while
   preserving rc.13 activation, one-shot commands, result contracts, lifecycle integrity, and
   20-second/10-second gates. Deduplicates one-shot metadata and launch policy, and removes
