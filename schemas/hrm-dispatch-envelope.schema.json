@@ -17,6 +17,24 @@
     "protocol",
     "dispatch_hash"
   ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "assignment": {
+            "properties": {"load_policy": {"const": "supervisor_context_pack_only"}},
+            "required": ["load_policy"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "assignment": {"required": ["worker_context_manifest_sha256"]},
+          "protocol": {"required": ["worker_context"]}
+        }
+      }
+    }
+  ],
   "properties": {
     "schema_version": {"const": "agent_playbooks.hrm_dispatch_envelope.v0.3"},
     "session_id": {"$ref": "#/$defs/nonempty"},
@@ -63,7 +81,10 @@
         "role_context_budget_bytes": {"type": "integer", "minimum": 0},
         "loaded_artifact_budget_bytes": {"type": "integer", "minimum": 0},
         "tool_output_reserve_bytes": {"type": "integer", "minimum": 0},
-        "load_policy": {"const": "bounded_queries_never_full_source"}
+        "load_policy": {
+          "enum": ["bounded_queries_never_full_source", "supervisor_context_pack_only"]
+        },
+        "worker_context_manifest_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
     "scope": {
@@ -134,6 +155,17 @@
                 "guard",
                 "result"
               ]
+            },
+            {
+              "const": [
+                "activate",
+                "verify_dispatch_digest_without_dump",
+                "read_worker_context_pack",
+                "request_preapproved_context_expansion_if_needed",
+                "context",
+                "guard",
+                "result"
+              ]
             }
           ]
         },
@@ -142,6 +174,22 @@
         },
         "one_shot_argument_encoding": {"const": "unpadded_base64url_canonical_json"},
         "result_lifecycle_sha256": {"$ref": "#/$defs/sha256"},
+        "worker_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "direct_filesystem_reads",
+            "expansion_policy",
+            "receipt_transport_max_bytes",
+            "receipt_design_target_bytes"
+          ],
+          "properties": {
+            "direct_filesystem_reads": {"const": "policy_violation_never_authorizes_guard"},
+            "expansion_policy": {"const": "capsule_preapproved_adjacency_only"},
+            "receipt_transport_max_bytes": {"const": 4096},
+            "receipt_design_target_bytes": {"const": 3072}
+          }
+        },
         "context_report": {
           "type": "object",
           "additionalProperties": false,
@@ -213,7 +261,9 @@
         "kind": {"$ref": "#/$defs/nonempty"},
         "source_path": {"$ref": "#/$defs/nonempty"},
         "source_size_bytes": {"type": "integer", "minimum": 0},
-        "access_policy": {"const": "targeted_queries_and_bounded_slices"}
+        "access_policy": {
+          "enum": ["targeted_queries_and_bounded_slices", "supervisor_context_pack_only"]
+        }
       }
     }
   }

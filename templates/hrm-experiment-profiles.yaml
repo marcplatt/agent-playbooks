@@ -20,9 +20,9 @@ profiles:
       max_state_artifact_echo_bytes: 1000
       context_bytes_by_role:
         orchestrator: 32000
-        builder: 20000
+        builder: 327680
         checker: 12000
-        provider_observer: 12000
+        provider_observer: 131072
         reviewer: 20000
         operator: 8000
     workflow_lease:
@@ -82,9 +82,9 @@ profiles:
       max_state_artifact_echo_bytes: 1000
       context_bytes_by_role:
         orchestrator: 32000
-        builder: 20000
+        builder: 327680
         checker: 12000
-        provider_observer: 12000
+        provider_observer: 131072
         reviewer: 20000
         operator: 8000
     workflow_lease:

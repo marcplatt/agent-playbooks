@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.16"
+version: "0.1.0-rc.18"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -169,6 +169,12 @@ contract, API-skill registry, run state, implementation sources, and declared ch
 scope escapes when explicitly bound there. An unidentifiable positive count is invalid
 instrumentation rather than a terminal assumption.
 
+RC.18 builder assignments are the explicit exception to the legacy query/slice transport above:
+their capsule manifest requires the complete relevant primary source inside one separately
+accounted context pack so the model can reason about interfaces, invariants, and consequences.
+The compact receipt remains only a locator. Provider observers and RC.11-RC.16 workers retain the
+query/slice accounting described in this section.
+
 Zero-byte dependency reports are accepted as optional preflight evidence but normalized away in
 rc.12 or later. They do not appear in `loaded_dependency_ids` or `loaded_artifact_bytes_by_id`, do not
 increase `files_loaded`, and never seed repeated-artifact accounting. The worker performs bounded
@@ -198,7 +204,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.16 experiment preserves the rc.15 state-owning process below the LLM orchestrator. The supervisor
+The rc.18 experiment preserves the rc.16 state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -214,7 +220,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.13 through rc.16 append, handoff receipt, activation, context receipt,
+the ledger before continuation. Every rc.13 through rc.18 append, handoff receipt, activation, context receipt,
 guarded action, and transition goes through `scripts/hrm_supervisor.rb`; direct event appends are
 legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
@@ -307,6 +313,39 @@ compact receipt, one-shot command, lifecycle, and reason-code semantics are unch
 31 seconds total or 26 seconds post-handoff terminalizes with the corresponding stable code. The
 AE-scale receipt remains under the 4,096-byte cap with more than 300 bytes of headroom.
 
+RC.18 separates protocol transport from model context. The coordination plane retains a 4,096-byte
+hard cap but targets no more than 3,072 bytes under realistic identifiers and paths, preserving at
+least 1,024 bytes of margin. Its receipt carries only action/role, cursor and claim, dispatch and
+worker-context-pack references, budgets, and exact lifecycle commands. Selectors, API contracts,
+output targets, result schemas, and source content remain in the claim-bound dispatch or the
+separate worker data plane; the root never loads the pack.
+
+For a builder handoff the supervisor constructs one ignored, mode-0600 JSON context pack from the
+capsule's explicit manifest before appending the handoff. It contains the complete primary source,
+direct imported interface bodies with their decorators, focused tests, registered API skill/call
+contracts, a canonical supervisor-generated task capsule, the exact target contract, kernel rules,
+output target, result schema, and
+per-section path/selector/digest/byte accounting. The pack binds capsule, source dispatch, claim,
+source snapshot, API-registry digest, and construction-manifest digest. Activation, context, and
+guard independently rederive and rehash it; drift fails closed. Context accounting charges the
+serialized pack bytes, not its compact locator, against the builder's 256-KiB artifact allowance.
+The provider observer has a 96-KiB artifact allowance. Their separate tool-output reserves are
+64 KiB and 32 KiB. These budgets are evidence-seeded but provisional until two representative
+builder runs measure pack use, compaction, and implementation quality.
+
+Initial scope is capsule-defined. A reasoned builder expansion request may mechanically add only a
+named preapproved adjacency class within allowed paths, repository-safe privacy, and its remaining
+byte allowance. Acceptance writes a digest-chained delta pack containing only the added sections
+plus an append-only accounting event. Context and guard revalidate the complete chain and charge
+the retained base plus every delivered delta against the artifact allowance; a replacement pack
+never hides bytes that the model has already loaded.
+Any request that changes task boundary, authority, privacy/provider surface, business meaning, or
+material budget returns an orchestrator escalation without changing ledger or pack state. Direct
+filesystem reads are policy violations and never authorize advancement; RC.18 provides provenance,
+authorization, and accounting, not filesystem isolation. Builder result acceptance reads back the
+exact outside-repository regular artifact, binds its byte count and digest to the ledger, and
+rejects later artifact drift.
+
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
 on `run_invalid` or a failed process envelope before any later routine action can be guarded.
@@ -375,7 +414,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.16.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.18.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -412,15 +451,15 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    assignment without rereading the complete kernel, project map, capsule, or ledger when their
    cache keys are unchanged. The dispatch names only the dependencies authorized for its current
    assignment and carries the
-   role context budget, a smaller loaded-artifact allowance, a tool-output reserve, source-size
-   bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, activation, context,
-   guard, and result commands. Execute the resume receipt's handoff command directly. For rc.14 through rc.16,
-   spawn the assigned role immediately with `fork_turns: none` when the handoff receipt contains
-   its claim-bound `activation_command`; for older receipt formats, use `launch_ready` when
+   role context budget, loaded-artifact allowance, tool-output reserve, and exact supervisor
+   handoff, activation, context, expansion, guard, and result commands. Execute the resume
+   receipt's handoff command directly. For rc.18, spawn the assigned role immediately with
+   `fork_turns: none` when the claim-bearing handoff receipt contains `commands.activate`; for
+   rc.14 through rc.16 use the claim-bound `activation_command`, and for older formats use `launch_ready` when
    present. Do not open state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
    exactly once after spawning. Machine-parsed dispatch bytes are not conversation echo. The
-   worker reports exact
-   materialized dependency bytes by ID and non-dependency tool-output bytes without double counting.
+   provider reports exact materialized dependency bytes by ID. An rc.18 builder instead acknowledges
+   the exact worker-context-pack digest; the supervisor accounts the pack's serialized bytes.
    A process-failing accepted event and its terminal stop are written under the same lock.
    The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not
    authoritative state. A generic reply can accept only the last prepared exact decision. Emit
@@ -430,8 +469,12 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
 
 3. Load only the compiled assignment and role projection and execute worker-owned work in fresh contexts.
    The child's first tool is the exact claim/cursor/dispatch-digest-bound `activation_command`.
-   It verifies the refreshed dispatch digest without dumping the dispatch, performs bounded source
-   inspection, emits one cumulative context snapshot with the provided one-shot argv command,
+   It verifies the refreshed dispatch digest without dumping the dispatch. An rc.18 builder reads
+   only the supplied ignored base context pack and any accepted digest-chained delta packs. If a necessary adjacent interface is absent, it may use
+   the supplied expansion command for one capsule-preapproved adjacency class; an escalation
+   disposition returns to the root and authorizes no wider read. The builder then emits one
+   cumulative context snapshot with the latest supplied pack digest and one-shot argv command;
+   the supervisor accounts all retained packs in the chain,
    executes the guard array, and submits only action-specific domain details with the provided
    one-shot result array. Do not use stdin, a TTY, a pipe, a shell wrapper, or EOF for context or
    result protocol. Then apply these role boundaries:
@@ -583,12 +626,25 @@ the raw events when a metric regresses.
 `done_verified`, `review_ready`, `blocked_input`, `blocked_external`,
 `scope_divergence`, `governance_loop`, `no_progress`, `budget_exhausted`, and
 `superseded` are the only kernel terminal reasons. Detail belongs in evidence, not an
-unbounded vocabulary. RC.15 and RC.16 map terminal process facts to at most eight stable `reason_codes` for
+unbounded vocabulary. RC.15, RC.16, and RC.18 map terminal process facts to at most eight stable `reason_codes` for
 the supervisor projection and terminal receipt; the operator summary renders the leading code and
 never copies raw or private evidence.
 
 ## Change note
 
+- **0.1.0-rc.18 — 2026-08-28:** Preserves RC.11-RC.16 version-gated capsule, dispatch,
+  claim, receipt, and ledger behavior while separating compact coordination transport from
+  builder reasoning context. Claim-bearing launch receipts target at most 3,072 bytes under the
+  unchanged 4,096-byte cap and carry a hash/locator rather than source or result contracts.
+  The supervisor builds and revalidates a capsule-manifested ignored context pack, accounts exact
+  serialized bytes against provisional 256-KiB builder and 96-KiB provider artifact allowances,
+  supports only preapproved adjacent expansion, and binds result read-back to the exact safe-off
+  outside artifact. The demonstration fixture observes an approximately 2.45-KiB handoff receipt
+  with more than 1.6 KiB of hard-cap headroom, an approximately 230-KiB base pack, and an
+  approximately 15.5-KiB delta carrying a 12.5-KiB adjacent section. The cumulative retained load
+  remains more than 11 KiB below the provisional builder allowance. Final tuning remains
+  provisional pending two representative live
+  builder runs.
 - **0.1.0-rc.16 — 2026-08-28:** Preserves RC.15 activation evidence, compact receipts, one-shot
   commands, lifecycle integrity, stable reason codes, and the inclusive 30-second total activation
   hard limit. Changes only the named runtime-build and production-observation post-handoff hard

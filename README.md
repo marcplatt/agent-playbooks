@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.16` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.18` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -80,6 +80,9 @@ This is intentionally an experiment rather than a new default. Pin the exact Age
 commit in each capsule, keep the event log append-only, and derive the scorecard with the
 repository script. Compare the resulting flow, context, CI, scope, safety, and operator-review
 measures with the preregistered budgets; do not infer success from agent self-report.
+The capsule template publishes RC.18. The two checked-in runnable example capsules remain pinned
+to RC.16 as exact compatibility fixtures; RC.18 behavior is exercised by the supervisor's
+generated-context demonstration tests.
 
 The operator invocation is deliberately short: “Run the current HRM under the
 repository-pinned AP-EXEC kernel.” The repository dispatcher derives the target, contract,
@@ -110,6 +113,9 @@ ruby scripts/hrm_supervisor.rb activate \
 ruby scripts/hrm_supervisor.rb context \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl ROLE \
   BASE64URL_CANONICAL_JSON_CONTEXT
+ruby scripts/hrm_supervisor.rb expand-context \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
+  WORKER_CLAIM_ID BASE64URL_CANONICAL_JSON_EXPANSION
 ruby scripts/hrm_supervisor.rb result \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl \
   BASE64URL_CANONICAL_JSON_DOMAIN_DETAILS
@@ -124,31 +130,46 @@ ruby scripts/hrm_supervisor.rb transition \
   path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.16, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
+During rc.18, use the non-LLM supervisor for release checks, run writes, handoff, activation and context receipts, and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
 envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
 when the bound ledger is empty, then emits the first worker assignment. `transition`
 mechanically derives and binds runtime-build/production-observation successors. The legacy
 `hrm_experiment.rb` append, guard,
-and supersede commands fail closed for rc.6 through rc.16 so
+and supersede commands fail closed for rc.6 through rc.18 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
 must carry a request receipt verified against the exact immutable predecessor event log.
-Compiled assignments authorize bounded dependency queries, publish source-size bounds, split the
-role budget into a loaded-artifact ceiling and minimum tool-output reserve, and prohibit full-source
-dumps. The inventory observer receives a 10,000-byte artifact ceiling and 2,000-byte minimum
-tool-output reserve inside its unchanged 12,000-byte role budget; the builder remains 10,000/10,000.
-Context snapshots map dependency IDs to exact materialized bytes and exclude those bytes
-from non-dependency tool output, preventing duplicate accounting.
+RC.18 separates the coordination plane from the worker data plane. Durable root receipts remain
+under the 4,096-byte hard cap and target at most 3,072 bytes, leaving at least 1,024 bytes of
+transport margin. They carry only the claim, action/role, cursor, dispatch and context-pack
+references, budgets, and lifecycle commands. Source, interface, test, API-call, target, and result
+contracts live in a supervisor-built ignored worker-context pack, never in root context. The task
+capsule section is canonical supervisor-generated JSON, so comments or alternate YAML bytes cannot
+inject semantically invisible worker instructions.
+The capsule manifest fixes the pack's initial sections; every section records its source,
+selection, digest, and byte count. The pack binds the capsule, dispatch, claim, source snapshot,
+API registry, and construction manifest and is rehashed at activation, context, and guard.
+RC.18 assigns builders 256 KiB of loaded artifacts plus a 64 KiB tool reserve and provider
+observers 96 KiB plus 32 KiB. These allocations are provisional until at least two representative
+builder runs measure context use, compaction, and implementation quality.
+
+A builder may request only capsule-preapproved adjacent context. A mechanical acceptance writes a
+digest-chained delta pack containing only the added sections and a compact accounting event. The
+supervisor charges the retained base plus every delivered delta because model context cannot unload
+earlier packs. A request that changes task, authority,
+privacy/provider surface, business meaning, or material budget returns an orchestrator escalation
+without a ledger or pack write. Direct filesystem reads are policy violations and never authorize
+guard advancement; this is protocol authorization and accounting, not a security sandbox.
 Runtime-build dispatch begins with a zero-effect binding inventory. A runtime delta is not
 executable until every frozen real seam is bound and construction is proven without effects.
 Handoff, context, and guard commands recompute the exact current assignment and reject even a
 self-rehashed dispatch edit. Structured handoff claims bind the assigned action and role to the
 source dispatch cursor and digest. Named experiment profiles pin the complete role-budget map;
 `custom` remains the explicit override path.
-RC.11 through RC.16 worker-owned lifecycle events cannot enter through the generic append path. `result`
+RC.11 through RC.18 worker-owned lifecycle events cannot enter through the generic append path. `result`
 accepts them only after the exact pending worker claim, context receipt, and matching immediate
 guard, then records the value and claim-bound worker completion atomically. A replay or edited
 claim, action, role, order, or result type leaves the ledger unchanged.

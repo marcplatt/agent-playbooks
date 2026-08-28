@@ -1754,6 +1754,342 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
+  def test_rc18_compact_root_receipt_delivers_accounted_pack_and_preapproved_expansion
+    capsule = rc18_capsule
+    seams = capsule.dig("function_slice", "required_real_seams")
+    output_path = capsule.dig("worker_context", "output_target_path")
+    FileUtils.rm_f(output_path)
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      base = Time.now.utc - 10
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      handoff_and_activate(capsule_path, events_path, base + 1)
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "rc18-provider",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 80_000},
+        "tool_output_bytes" => 4_000
+      })
+      HrmSupervisor.guard(capsule_path, events_path, "inventory_runtime_bindings", "provider_observer")
+      provider_result = HrmSupervisor.result(capsule_path, events_path, {
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => false,
+          "evidence_sha256" => "7" * 64
+        }
+      })
+      assert_equal "implement_frozen_slice", provider_result.dig("worker_launch", "action")
+
+      handoff = HrmSupervisor.handoff(capsule_path, events_path)
+      receipt_bytes = JSON.generate(handoff).bytesize
+      assert_operator receipt_bytes, :<=, HrmSupervisor::RC18_RECEIPT_TARGET_BYTES
+      assert_operator HrmSupervisor::MAX_RECEIPT_BYTES - receipt_bytes, :>=, 1024
+      refute_includes JSON.generate(handoff), '"sections"'
+      refute_includes JSON.generate(handoff), '"result_input"'
+
+      pack_ref = handoff.dig("worker_launch", "worker_context_pack")
+      pack_path = File.join(File.dirname(capsule_path), pack_ref.fetch("path"))
+      pack = JSON.parse(File.binread(pack_path))
+      assert_equal pack_ref.fetch("sha256"), Digest::SHA256.file(pack_path).hexdigest
+      assert_equal 0o600, File.stat(pack_path).mode & 0o777
+      assert_operator pack_ref.fetch("bytes"), :>, 200_000
+      assert_operator pack_ref.fetch("bytes"), :<=, 262_144
+      assert_equal %w[
+        api_contract focused_test imported_interface kernel_contract
+        primary_source target_contract task_capsule
+      ], pack.fetch("sections").map { |section| section["purpose"] }.compact.uniq.sort
+      task_capsule = pack.fetch("sections").find { |section| section["purpose"] == "task_capsule" }
+      assert_equal "canonical_capsule", task_capsule.fetch("selection")
+      assert_equal "capsule://active-canonical", task_capsule.fetch("source_path")
+      assert task_capsule.fetch("content").start_with?("{\n")
+
+      activation_command = handoff.dig("worker_launch", "commands", "activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        activation_command.fetch(-3),
+        Integer(activation_command.fetch(-2), 10),
+        activation_command.fetch(-1)
+      )
+      before_direct_read_claim = File.binread(events_path)
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.record_context(capsule_path, events_path, "builder", {
+          "turn_id" => "rc18-direct-read-does-not-authorize",
+          "worker_context_pack_sha256" => pack_ref.fetch("sha256"),
+          "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 1},
+          "tool_output_bytes" => 0
+        })
+      end
+      assert_includes error.message, "unsupported fields"
+      assert_equal before_direct_read_claim, File.binread(events_path)
+      claim_id = HrmExperiment.load_events(events_path).reverse.find do |event|
+        event["event_type"] == "worker_handoff_started"
+      end.dig("details", "worker_claim_id")
+      expansion = HrmSupervisor.expand_context(capsule_path, events_path, claim_id, {
+        "adjacency_class" => "direct_event_contract",
+        "section_ids" => ["adjacent-event-contract"],
+        "reason" => "The result event must preserve the exact output-artifact binding."
+      })
+      assert_equal "accepted_preapproved_adjacency",
+                   expansion.dig("context_expansion", "context_expansion_disposition")
+      expanded_ref = expansion.dig("context_expansion")
+      assert_operator expanded_ref.fetch("worker_context_pack_bytes"), :<, pack_ref.fetch("bytes")
+      delta_path = File.join(File.dirname(capsule_path), expanded_ref.fetch("worker_context_pack_path"))
+      delta_pack = JSON.parse(File.binread(delta_path))
+      assert_equal "delta", delta_pack.fetch("pack_kind")
+      assert_equal ["adjacent-event-contract"], delta_pack.fetch("sections").map { |section| section["section_id"] }
+      cumulative_pack_bytes = pack_ref.fetch("bytes") + expanded_ref.fetch("worker_context_pack_bytes")
+      assert_operator cumulative_pack_bytes, :<=, 262_144
+
+      HrmSupervisor.record_context(capsule_path, events_path, "builder", {
+        "turn_id" => "rc18-builder-expanded",
+        "worker_context_pack_sha256" => expanded_ref.fetch("worker_context_pack_sha256"),
+        "tool_output_bytes" => 8_000
+      })
+      context_event = HrmExperiment.load_events(events_path).reverse.find do |event|
+        event["event_type"] == "context_snapshot" && event["role"] == "builder"
+      end
+      assert_equal cumulative_pack_bytes, context_event.dig("context", "artifact_bytes")
+      assert_equal cumulative_pack_bytes,
+                   context_event.dig("context", "loaded_artifact_bytes_by_id", "ap.worker-context-pack")
+      HrmSupervisor.guard(capsule_path, events_path, "implement_frozen_slice", "builder")
+      File.write(output_path, "# owner-private safe-off RC18 artifact\n", mode: "w", perm: 0o600)
+      output_sha = Digest::SHA256.file(output_path).hexdigest
+      result = HrmSupervisor.result(capsule_path, events_path, {
+        "candidate_sha" => "a" * 40,
+        "change_unit_id" => "CU-RC18-CONTEXT-PACK",
+        "output_artifact_sha256" => output_sha,
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => true,
+          "evidence_sha256" => "8" * 64
+        }
+      })
+      assert_equal "first_executable_delta", result["accepted_result_event_type"]
+      executable = HrmExperiment.load_events(events_path).find do |event|
+        event["event_type"] == "first_executable_delta"
+      end
+      assert_equal output_sha, executable.dig("details", "output_artifact_sha256")
+      File.open(output_path, "ab") { |file| file.write("# drift\n") }
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.resume(capsule_path, events_path)
+      end
+      assert_includes error.message, "digest does not match"
+    end
+  ensure
+    FileUtils.rm_f(output_path) if output_path
+  end
+
+  def test_rc18_manifest_purposes_are_bound_to_authoritative_dependency_kinds
+    capsule = rc18_capsule
+    primary = capsule.dig("worker_context", "initial_sections").find do |section|
+      section["purpose"] == "primary_source"
+    end
+    api = capsule.dig("worker_context", "initial_sections").find do |section|
+      section["purpose"] == "api_contract"
+    end
+    primary["dependency_id"], api["dependency_id"] = api["dependency_id"], primary["dependency_id"]
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "primary_source requires dependency kind implementation_source"
+  end
+
+  def test_rc18_task_capsule_content_is_supervisor_canonical_not_dependency_file_bytes
+    capsule = rc18_capsule
+    dependency = capsule.fetch("context_dependencies").find do |candidate|
+      candidate["kind"] == "execution_capsule"
+    end
+    dependency["source_path"] = "alternate-capsule-with-comments.yaml"
+    section = capsule.dig("worker_context", "initial_sections").find do |candidate|
+      candidate["purpose"] == "task_capsule"
+    end
+
+    materialized = HrmSupervisor.worker_context_section(capsule, section)
+    expected = "#{JSON.pretty_generate(HrmExperiment.canonical_value(capsule))}\n"
+    assert_equal "capsule://active-canonical", materialized.fetch("source_path")
+    assert_equal expected, materialized.fetch("content")
+    refute_includes materialized.fetch("content"), "misleading comment"
+  end
+
+  def test_rc18_rejects_a_second_semantic_singleton_dependency
+    capsule = rc18_capsule
+    capsule.fetch("context_dependencies") << {
+      "dependency_id" => "spoofed.api-contract",
+      "kind" => "project_api_skill_registry",
+      "source_path" => "README.md",
+      "binding" => "not-a-registry"
+    }
+    capsule.dig("worker_context", "initial_sections") <<
+      rc18_context_section("spoofed-api-contract", "spoofed.api-contract", "api_contract", true)
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "exactly one authoritative project_api_skill_registry dependency"
+  end
+
+  def test_rc18_rejects_canonical_capsule_selection_on_an_adjacent_interface
+    capsule = rc18_capsule
+    adjacent = capsule.dig("worker_context", "initial_sections").find do |section|
+      section["section_id"] == "adjacent-event-contract"
+    end
+    adjacent["selection"] = "canonical_capsule"
+
+    error = assert_raises(HrmExperiment::ValidationError) do
+      HrmExperiment.validate_capsule!(capsule)
+    end
+    assert_includes error.message, "required only and always for task_capsule"
+  end
+
+  def test_rc18_out_of_policy_expansion_is_a_no_write_escalation
+    with_rc18_builder_handoff do |capsule_path, events_path, handoff|
+      command = handoff.dig("worker_launch", "commands", "activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        command.fetch(-3),
+        Integer(command.fetch(-2), 10),
+        command.fetch(-1)
+      )
+      before_ledger = File.binread(events_path)
+      before_packs = Dir.glob(File.join(File.dirname(events_path), "*.worker-context-*.json")).sort
+      receipt = HrmSupervisor.expand_context(capsule_path, events_path, command.fetch(-3), {
+        "adjacency_class" => "provider_surface_widening",
+        "section_ids" => ["adjacent-event-contract"],
+        "reason" => "Inspect an unapproved provider surface."
+      })
+      assert_equal "escalate_to_orchestrator", receipt["disposition"]
+      assert_equal "outside_preapproved_adjacency", receipt["reason_code"]
+      assert_equal before_ledger, File.binread(events_path)
+      assert_equal before_packs, Dir.glob(File.join(File.dirname(events_path), "*.worker-context-*.json")).sort
+    end
+  end
+
+  def test_rc18_expansion_that_exceeds_cumulative_retained_budget_is_a_no_write_escalation
+    capsule = rc18_capsule
+    capsule.dig("function_slice", "allowed_paths") << "scripts/hrm_supervisor.rb"
+    adjacent_dependency = capsule.fetch("context_dependencies").find do |dependency|
+      dependency["dependency_id"] == "example.adjacent-event-contract"
+    end
+    adjacent_dependency.merge!(
+      "source_path" => "scripts/hrm_supervisor.rb",
+      "binding" => "rc18-oversize-adjacent-interface"
+    )
+    capsule.dig("worker_context", "preapproved_adjacency", 0)["max_added_bytes"] = 160_000
+
+    with_rc18_builder_handoff(capsule) do |capsule_path, events_path, handoff|
+      command = handoff.dig("worker_launch", "commands", "activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        command.fetch(-3),
+        Integer(command.fetch(-2), 10),
+        command.fetch(-1)
+      )
+      before_ledger = File.binread(events_path)
+      before_packs = Dir.glob(File.join(File.dirname(events_path), "*.worker-context-*.json")).sort
+      receipt = HrmSupervisor.expand_context(capsule_path, events_path, command.fetch(-3), {
+        "adjacency_class" => "direct_event_contract",
+        "section_ids" => ["adjacent-event-contract"],
+        "reason" => "Load a preapproved interface only if cumulative retained context remains bounded."
+      })
+      assert_equal "escalate_to_orchestrator", receipt["disposition"]
+      assert_equal "worker_context_budget_exceeded", receipt["reason_code"]
+      assert_equal before_ledger, File.binread(events_path)
+      assert_equal before_packs, Dir.glob(File.join(File.dirname(events_path), "*.worker-context-*.json")).sort
+    end
+  end
+
+  def test_rc18_expansion_accounting_tamper_is_rejected_before_context_advancement
+    with_rc18_builder_handoff do |capsule_path, events_path, handoff|
+      command = handoff.dig("worker_launch", "commands", "activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        command.fetch(-3),
+        Integer(command.fetch(-2), 10),
+        command.fetch(-1)
+      )
+      expansion = HrmSupervisor.expand_context(capsule_path, events_path, command.fetch(-3), {
+        "adjacency_class" => "direct_event_contract",
+        "section_ids" => ["adjacent-event-contract"],
+        "reason" => "Load the exact preapproved result-event contract."
+      })
+      events = HrmExperiment.load_events(events_path)
+      events.last.fetch("details")["context_expansion_added_bytes"] += 1
+      File.write(
+        events_path,
+        events.map { |event| JSON.generate(event) }.join("\n") + "\n",
+        mode: "w",
+        perm: 0o600
+      )
+      before = File.binread(events_path)
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.record_context(capsule_path, events_path, "builder", {
+          "turn_id" => "rc18-tampered-expansion-accounting",
+          "worker_context_pack_sha256" => expansion.dig(
+            "context_expansion",
+            "worker_context_pack_sha256"
+          ),
+          "tool_output_bytes" => 0
+        })
+      end
+      assert_includes error.message, "expansion accounting"
+      assert_equal before, File.binread(events_path)
+    end
+  end
+
+  def test_rc18_pack_digest_drift_blocks_guard_without_advancing_ledger
+    with_rc18_builder_handoff do |capsule_path, events_path, handoff|
+      command = handoff.dig("worker_launch", "commands", "activate")
+      HrmSupervisor.activate(
+        capsule_path,
+        events_path,
+        command.fetch(-3),
+        Integer(command.fetch(-2), 10),
+        command.fetch(-1)
+      )
+      pack_ref = handoff.dig("worker_launch", "worker_context_pack")
+      HrmSupervisor.record_context(capsule_path, events_path, "builder", {
+        "turn_id" => "rc18-before-pack-drift",
+        "worker_context_pack_sha256" => pack_ref.fetch("sha256"),
+        "tool_output_bytes" => 1_000
+      })
+      pack_path = File.join(File.dirname(capsule_path), pack_ref.fetch("path"))
+      File.open(pack_path, "ab") { |file| file.write(" ") }
+      before = File.binread(events_path)
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.guard(capsule_path, events_path, "implement_frozen_slice", "builder")
+      end
+      assert_includes error.message, "digest drifted"
+      assert_equal before, File.binread(events_path)
+    end
+  end
+
+  def test_rc18_python_symbol_context_keeps_decorators_with_their_definition
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "interfaces.py")
+      File.write(path, <<~PYTHON)
+        @dataclass(frozen=True)
+        class FirstInterface:
+            value: str
+
+        @registered("direct")
+        class SecondInterface:
+            enabled: bool
+      PYTHON
+
+      first = HrmSupervisor.python_symbol_content(path, ["FirstInterface"])
+      second = HrmSupervisor.python_symbol_content(path, ["SecondInterface"])
+      assert first.start_with?("@dataclass(frozen=True)\nclass FirstInterface")
+      refute_includes first, "@registered"
+      assert second.start_with?("@registered(\"direct\")\nclass SecondInterface")
+    end
+  end
+
   def test_rc12_rejects_unbound_worker_handoff_append
     with_run(capsule_with_runtime_source, []) do |capsule_path, events_path, _paths|
       HrmSupervisor.resume(capsule_path, events_path, Time.iso8601("2026-08-27T22:00:00Z"))
@@ -2590,6 +2926,117 @@ class HrmSupervisorTest < Minitest::Test
     capsule
   end
 
+  def rc18_capsule
+    capsule = capsule_for_kernel_version(HrmExperiment.load_yaml(CAPSULE), "0.1.0-rc.18")
+    capsule["session_id"] = AE_SCALE_SESSION_ID
+    capsule.dig("budgets")["context_bytes_by_role"] = HrmExperiment::RC18_CONTEXT_BYTES_BY_ROLE
+    capsule.dig("function_slice", "allowed_paths") << "schemas/hrm-run-event.schema.json"
+    capsule.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "accepted_target_contract"
+    end["source_path"] = "examples/hrm-directed-session.example.yaml"
+    capsule.dig("target_resolution")["source_path"] = "examples/hrm-directed-session.example.yaml"
+    capsule.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "execution_capsule"
+    end["source_path"] = "capsule.yaml"
+    runtime_source = capsule.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "implementation_source"
+    end
+    runtime_source.merge!("source_path" => "scripts/hrm_experiment.rb", "binding" => "rc18-primary-source")
+    capsule.fetch("context_dependencies").concat([
+      {
+        "dependency_id" => "example.imported-interface",
+        "kind" => "playbook_runtime",
+        "source_path" => "scripts/project_api_skill_registry.rb",
+        "binding" => "rc18-interface"
+      },
+      {
+        "dependency_id" => "example.focused-test",
+        "kind" => "declared_check",
+        "source_path" => "tests/test_hrm_experiment.rb",
+        "binding" => "rc18-focused-test"
+      },
+      {
+        "dependency_id" => "example.adjacent-event-contract",
+        "kind" => "playbook_runtime",
+        "source_path" => "schemas/hrm-run-event.schema.json",
+        "binding" => "agent_playbooks.hrm_run_event.v0.5"
+      },
+      {
+        "dependency_id" => "ap.worker-context-pack",
+        "kind" => "worker_context_pack",
+        "source_path" => "supervisor://worker-context-pack",
+        "binding" => "claim-dispatch-manifest-sha256"
+      }
+    ])
+    capsule["worker_context"] = {
+      "schema_version" => "agent_playbooks.worker_context_manifest.v0.1",
+      "coordination_receipt_target_bytes" => 3072,
+      "coordination_receipt_hard_cap_bytes" => 4096,
+      "role_budgets" => {
+        "builder" => {"loaded_artifact_bytes" => 262_144, "tool_output_reserve_bytes" => 65_536},
+        "provider_observer" => {"loaded_artifact_bytes" => 98_304, "tool_output_reserve_bytes" => 32_768}
+      },
+      "initial_sections" => [
+        rc18_context_section("complete-primary-source", "example.runtime-source", "primary_source", true),
+        rc18_context_section("direct-imported-interface", "example.imported-interface", "imported_interface", true),
+        rc18_context_section("focused-interface-test", "example.focused-test", "focused_test", true),
+        rc18_context_section("registered-api-contracts", "example.api-skill-registry", "api_contract", true),
+        rc18_context_section("exact-task-capsule", "example.execution-capsule", "task_capsule", true),
+        rc18_context_section("released-kernel-contract", "ap.exec.kernel", "kernel_contract", true),
+        rc18_context_section("accepted-target-contract", "example.target-contract", "target_contract", true),
+        rc18_context_section("adjacent-event-contract", "example.adjacent-event-contract", "imported_interface", false)
+      ],
+      "preapproved_adjacency" => [{
+        "adjacency_class" => "direct_event_contract",
+        "section_ids" => ["adjacent-event-contract"],
+        "max_added_bytes" => 16_384
+      }],
+      "output_target_path" => "/tmp/agent-playbooks-rc18-test-#{Process.pid}.rb",
+      "tuning_status" => "provisional_until_two_representative_builder_runs"
+    }
+    capsule
+  end
+
+  def rc18_context_section(section_id, dependency_id, purpose, initial)
+    {
+      "section_id" => section_id,
+      "dependency_id" => dependency_id,
+      "purpose" => purpose,
+      "selection" => purpose == "task_capsule" ? "canonical_capsule" : "full_file",
+      "privacy" => "repository_safe",
+      "initial" => initial
+    }
+  end
+
+  def with_rc18_builder_handoff(capsule = rc18_capsule)
+    output_path = capsule.dig("worker_context", "output_target_path")
+    FileUtils.rm_f(output_path)
+    seams = capsule.dig("function_slice", "required_real_seams")
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      base = Time.now.utc - 10
+      HrmSupervisor.resume(capsule_path, events_path, base)
+      handoff_and_activate(capsule_path, events_path, base + 1)
+      HrmSupervisor.record_context(capsule_path, events_path, "provider_observer", {
+        "turn_id" => "rc18-provider-helper",
+        "loaded_artifact_bytes_by_id" => {"example.runtime-source" => 80_000},
+        "tool_output_bytes" => 4_000
+      })
+      HrmSupervisor.guard(capsule_path, events_path, "inventory_runtime_bindings", "provider_observer")
+      HrmSupervisor.result(capsule_path, events_path, {
+        "runtime_readiness" => {
+          "required_real_seams" => seams,
+          "bound_real_seams" => seams,
+          "zero_effect_construction_verified" => false,
+          "evidence_sha256" => "6" * 64
+        }
+      })
+      handoff = HrmSupervisor.handoff(capsule_path, events_path)
+      yield capsule_path, events_path, handoff
+    end
+  ensure
+    FileUtils.rm_f(output_path) if output_path
+  end
+
   def with_ae_scale_run(kernel_version, project_root_bytes:)
     capsule = capsule_for_kernel_version(HrmExperiment.load_yaml(CAPSULE), kernel_version)
     capsule["session_id"] = AE_SCALE_SESSION_ID
@@ -2705,7 +3152,8 @@ class HrmSupervisorTest < Minitest::Test
 
   def handoff_and_activate(capsule_path, events_path, occurred_at, activation_offset: 1)
     handoff_receipt = HrmSupervisor.handoff(capsule_path, events_path, occurred_at)
-    command = handoff_receipt.dig("worker_launch", "activation_command")
+    command = handoff_receipt.dig("worker_launch", "activation_command") ||
+              handoff_receipt.dig("worker_launch", "commands", "activate")
     raise "expected an rc.13 activation command" unless command
 
     activation_receipt = HrmSupervisor.activate(

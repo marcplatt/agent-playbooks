@@ -2,7 +2,7 @@ schema_version: agent_playbooks.hrm_execution_capsule.v0.7
 session_id: "{{stable_session_id}}"
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.16
+  kernel_version: 0.1.0-rc.18
   source_sha: "{{40_character_agent_playbooks_sha}}"
 system_reference: "{{system_reference}}"
 project_root: "{{absolute_project_root}}"
@@ -56,10 +56,35 @@ project_api_skills:
     across_kernel_versions: true
     volatile_runtime_state: action_time_only
 context_dependencies:
-  - dependency_id: "{{stable_dependency_id}}"
-    kind: "repository_dispatcher|execution_capsule|accepted_target_contract|project_api_skill_registry|playbook_kernel|playbook_runtime|run_state|implementation_source|declared_check"
-    source_path: "{{path_or_stable_source_locator}}"
-    binding: "{{version_commit_digest_or_capsule_binding}}"
+  - {dependency_id: task.capsule, kind: execution_capsule, source_path: "{{capsule_path}}", binding: capsule_sha256}
+  - {dependency_id: task.target, kind: accepted_target_contract, source_path: "{{target_contract_path}}", binding: "{{target_contract_version}}"}
+  - {dependency_id: task.api-contracts, kind: project_api_skill_registry, source_path: "{{project_registry_mirror_path}}", binding: "{{registry_sha256}}"}
+  - {dependency_id: task.kernel, kind: playbook_kernel, source_path: "{{kernel_path}}", binding: "{{kernel_pin}}"}
+  - {dependency_id: task.primary-source, kind: implementation_source, source_path: "{{complete_primary_source_path}}", binding: "{{primary_source_sha256}}"}
+  - {dependency_id: task.imported-interface, kind: playbook_runtime, source_path: "{{direct_imported_interface_path}}", binding: "{{interface_sha256}}"}
+  - {dependency_id: task.focused-test, kind: declared_check, source_path: "{{focused_test_path}}", binding: "{{focused_test_sha256}}"}
+  - {dependency_id: task.adjacent-context, kind: playbook_runtime, source_path: "{{preapproved_adjacent_path}}", binding: "{{adjacent_sha256}}"}
+  - {dependency_id: ap.worker-context-pack, kind: worker_context_pack, source_path: "supervisor://worker-context-pack", binding: claim_dispatch_manifest_sha256}
+worker_context:
+  schema_version: agent_playbooks.worker_context_manifest.v0.1
+  coordination_receipt_target_bytes: 3072
+  coordination_receipt_hard_cap_bytes: 4096
+  role_budgets:
+    builder: {loaded_artifact_bytes: 262144, tool_output_reserve_bytes: 65536}
+    provider_observer: {loaded_artifact_bytes: 98304, tool_output_reserve_bytes: 32768}
+  initial_sections:
+    - {section_id: complete-primary-source, dependency_id: task.primary-source, purpose: primary_source, selection: full_file, privacy: repository_safe, initial: true}
+    - {section_id: direct-imported-interface, dependency_id: task.imported-interface, purpose: imported_interface, selection: full_file, privacy: repository_safe, initial: true}
+    - {section_id: focused-test, dependency_id: task.focused-test, purpose: focused_test, selection: full_file, privacy: repository_safe, initial: true}
+    - {section_id: api-contracts, dependency_id: task.api-contracts, purpose: api_contract, selection: full_file, privacy: repository_safe, initial: true}
+    - {section_id: task-capsule, dependency_id: task.capsule, purpose: task_capsule, selection: canonical_capsule, privacy: repository_safe, initial: true}
+    - {section_id: kernel-contract, dependency_id: task.kernel, purpose: kernel_contract, selection: full_file, privacy: repository_safe, initial: true}
+    - {section_id: target-contract, dependency_id: task.target, purpose: target_contract, selection: full_file, privacy: repository_safe, initial: true}
+    - {section_id: preapproved-adjacent, dependency_id: task.adjacent-context, purpose: imported_interface, selection: full_file, privacy: repository_safe, initial: false}
+  preapproved_adjacency:
+    - {adjacency_class: direct_interface, section_ids: [preapproved-adjacent], max_added_bytes: 32768}
+  output_target_path: "{{exact_absolute_outside_repository_output_path}}"
+  tuning_status: provisional_until_two_representative_builder_runs
 workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:
@@ -165,9 +190,9 @@ budgets:
   max_state_artifact_echo_bytes: 1000
   context_bytes_by_role:
     orchestrator: 32000
-    builder: 20000
+    builder: 327680
     checker: 12000
-    provider_observer: 12000
+    provider_observer: 131072
     reviewer: 20000
     operator: 8000
 metrics:

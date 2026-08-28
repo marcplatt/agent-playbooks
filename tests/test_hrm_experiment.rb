@@ -341,7 +341,7 @@ class HrmExperimentTest < Minitest::Test
 
       assert_equal 2, status.exitstatus
       assert_empty stdout
-      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.16"
+      assert_includes stderr, "legacy hrm_experiment.rb append-event is disabled for 0.1.0-rc.18"
       assert_equal ledger_before, File.binread(events_path)
     end
   end
@@ -415,7 +415,7 @@ class HrmExperimentTest < Minitest::Test
     template = HrmExperiment.load_yaml(File.join(ROOT, "templates/hrm-experiment-profiles.yaml"))
 
     HrmExperiment::PROFILE_CONTRACTS.each do |profile_name, contract|
-      assert_equal contract.dig("budgets", "context_bytes_by_role"),
+      assert_equal HrmExperiment::RC18_CONTEXT_BYTES_BY_ROLE,
                    template.dig("profiles", profile_name, "budgets", "context_bytes_by_role")
       assert_equal HrmExperiment::RC16_ACTIVATION_BUDGETS,
                    template.dig("profiles", profile_name, "budgets")

@@ -12,7 +12,7 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.16"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.18"
   SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[
     0.1.0-rc.6
     0.1.0-rc.7
@@ -25,10 +25,12 @@ module HrmExperiment
     0.1.0-rc.14
     0.1.0-rc.15
     0.1.0-rc.16
+    0.1.0-rc.18
   ].freeze
-  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].freeze
+  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].freeze
   RC15_KERNEL_VERSION = "0.1.0-rc.15"
   RC16_KERNEL_VERSION = "0.1.0-rc.16"
+  RC18_KERNEL_VERSION = "0.1.0-rc.18"
   RC15_ACTIVATION_BUDGETS = {
     "max_startup_to_worker_activation_seconds" => 30,
     "max_handoff_to_worker_activation_seconds" => 20
@@ -37,6 +39,7 @@ module HrmExperiment
     "max_startup_to_worker_activation_seconds" => 30,
     "max_handoff_to_worker_activation_seconds" => 25
   }.freeze
+  RC18_ACTIVATION_BUDGETS = RC16_ACTIVATION_BUDGETS
 
   PINNED_CONTEXT_BYTES_BY_ROLE = {
     "orchestrator" => 32_000,
@@ -46,6 +49,11 @@ module HrmExperiment
     "reviewer" => 20_000,
     "operator" => 8_000
   }.freeze
+
+  RC18_CONTEXT_BYTES_BY_ROLE = PINNED_CONTEXT_BYTES_BY_ROLE.merge(
+    "builder" => 327_680,
+    "provider_observer" => 131_072
+  ).freeze
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -453,6 +461,170 @@ module HrmExperiment
       raise ValidationError, "context_dependencies must contain unique dependency_id values"
     end
 
+    if capsule.dig("playbook_pin", "kernel_version") == RC18_KERNEL_VERSION
+      context = capsule.fetch("worker_context")
+      worker_pack_dependency = capsule.fetch("context_dependencies").find do |dependency|
+        dependency["dependency_id"] == "ap.worker-context-pack"
+      end
+      unless worker_pack_dependency == {
+        "dependency_id" => "ap.worker-context-pack",
+        "kind" => "worker_context_pack",
+        "source_path" => "supervisor://worker-context-pack",
+        "binding" => "claim-dispatch-manifest-sha256"
+      }
+        raise ValidationError, "rc.18 requires the supervisor-owned worker-context pack dependency"
+      end
+      unless context.fetch("coordination_receipt_target_bytes") == 3072 &&
+             context.fetch("coordination_receipt_hard_cap_bytes") == 4096
+        raise ValidationError, "rc.18 coordination receipts require a 3072-byte target and 4096-byte hard cap"
+      end
+      unless context.dig("role_budgets", "builder") == {
+        "loaded_artifact_bytes" => 262_144,
+        "tool_output_reserve_bytes" => 65_536
+      } && context.dig("role_budgets", "provider_observer") == {
+        "loaded_artifact_bytes" => 98_304,
+        "tool_output_reserve_bytes" => 32_768
+      }
+        raise ValidationError, "rc.18 worker-context role budgets must equal the measured provisional allocation"
+      end
+      sections = context.fetch("initial_sections")
+      section_ids = sections.map { |section| section.fetch("section_id") }
+      unless section_ids.uniq.length == section_ids.length &&
+             sections.all? { |section| dependency_ids.include?(section.fetch("dependency_id")) }
+        raise ValidationError, "rc.18 worker-context sections require unique IDs and declared dependency IDs"
+      end
+      unless sections.all? { |section| section.fetch("privacy") == "repository_safe" }
+        raise ValidationError, "rc.18 worker-context packs may contain only repository-safe sections"
+      end
+      dependencies_by_id = capsule.fetch("context_dependencies").to_h do |dependency|
+        [dependency.fetch("dependency_id"), dependency]
+      end
+      singleton_kinds = %w[
+        project_api_skill_registry execution_capsule playbook_kernel accepted_target_contract
+      ]
+      singleton_kinds.each do |kind|
+        count = capsule.fetch("context_dependencies").count { |dependency| dependency.fetch("kind") == kind }
+        unless count == 1
+          raise ValidationError, "rc.18 requires exactly one authoritative #{kind} dependency"
+        end
+      end
+      purpose_kinds = {
+        "primary_source" => "implementation_source",
+        "imported_interface" => "playbook_runtime",
+        "focused_test" => "declared_check",
+        "api_contract" => "project_api_skill_registry",
+        "task_capsule" => "execution_capsule",
+        "kernel_contract" => "playbook_kernel",
+        "target_contract" => "accepted_target_contract"
+      }
+      sections.each do |section|
+        dependency = dependencies_by_id.fetch(section.fetch("dependency_id"))
+        expected_kind = purpose_kinds.fetch(section.fetch("purpose"))
+        unless dependency.fetch("kind") == expected_kind
+          raise ValidationError,
+                "rc.18 worker-context purpose #{section.fetch('purpose')} requires dependency kind #{expected_kind}"
+        end
+        canonical_capsule = section.fetch("selection") == "canonical_capsule"
+        task_capsule = section.fetch("purpose") == "task_capsule"
+        unless canonical_capsule == task_capsule
+          raise ValidationError,
+                "rc.18 canonical_capsule selection is required only and always for task_capsule purpose"
+        end
+      end
+      initial_purposes = sections.select { |section| section.fetch("initial") }
+                                 .map { |section| section.fetch("purpose") }
+      required_purposes = %w[
+        primary_source imported_interface focused_test api_contract
+        task_capsule kernel_contract target_contract
+      ]
+      unless (required_purposes - initial_purposes).empty?
+        raise ValidationError,
+              "rc.18 initial worker context must cover source, interfaces, tests, APIs, task, kernel, and target"
+      end
+      full_primary = sections.any? do |section|
+        section.fetch("initial") && section.fetch("purpose") == "primary_source" &&
+          section.fetch("selection") == "full_file"
+      end
+      unless full_primary
+        raise ValidationError, "rc.18 initial worker context requires the complete primary source"
+      end
+      required_full_coverage = {
+        "implementation_source" => ["primary_source", "full_file"],
+        "declared_check" => ["focused_test", "full_file"],
+        "project_api_skill_registry" => ["api_contract", "full_file"],
+        "execution_capsule" => ["task_capsule", "canonical_capsule"],
+        "playbook_kernel" => ["kernel_contract", "full_file"],
+        "accepted_target_contract" => ["target_contract", "full_file"]
+      }
+      required_full_coverage.each do |kind, (purpose, selection)|
+        required_ids = capsule.fetch("context_dependencies").select do |dependency|
+          dependency.fetch("kind") == kind
+        end.map { |dependency| dependency.fetch("dependency_id") }
+        covered_ids = sections.select do |section|
+          section.fetch("initial") && section.fetch("purpose") == purpose &&
+            section.fetch("selection") == selection
+        end.map { |section| section.fetch("dependency_id") }
+        unless required_ids.sort == covered_ids.sort
+          raise ValidationError,
+                "rc.18 initial worker context must cover every #{kind} dependency as #{purpose} using #{selection}"
+        end
+      end
+      api_dependency = capsule.fetch("context_dependencies").find do |dependency|
+        dependency.fetch("kind") == "project_api_skill_registry"
+      end
+      unless api_dependency.fetch("source_path").split("#", 2).first == capsule.dig("project_api_skills", "registry_path")
+        raise ValidationError, "rc.18 API contract section must use project_api_skills.registry_path"
+      end
+      target_dependency = capsule.fetch("context_dependencies").find do |dependency|
+        dependency.fetch("kind") == "accepted_target_contract"
+      end
+      unless target_dependency.fetch("source_path").split("#", 2).first == capsule.dig("target_resolution", "source_path")
+        raise ValidationError, "rc.18 target contract section must use target_resolution.source_path"
+      end
+      kernel_dependency = capsule.fetch("context_dependencies").find do |dependency|
+        dependency.fetch("kind") == "playbook_kernel"
+      end
+      expected_kernel_binding = [
+        capsule.dig("playbook_pin", "kernel_id"),
+        capsule.dig("playbook_pin", "kernel_version")
+      ].join("/") + "@#{capsule.dig('playbook_pin', 'source_sha')}"
+      unless kernel_dependency.fetch("binding") == expected_kernel_binding
+        raise ValidationError, "rc.18 kernel contract dependency must bind the exact playbook pin"
+      end
+      capsule_dependency = capsule.fetch("context_dependencies").find do |dependency|
+        dependency.fetch("kind") == "execution_capsule"
+      end
+      unless capsule_dependency.fetch("binding") == "capsule_sha256"
+        raise ValidationError, "rc.18 task capsule dependency must use capsule_sha256 binding"
+      end
+      expansion_ids = context.fetch("preapproved_adjacency").flat_map do |entry|
+        entry.fetch("section_ids")
+      end
+      unless (expansion_ids - section_ids).empty?
+        raise ValidationError, "rc.18 preapproved adjacency may reference only declared context sections"
+      end
+      adjacency_paths = sections.select { |section| expansion_ids.include?(section.fetch("section_id")) }
+                                .map { |section| dependencies_by_id.fetch(section.fetch("dependency_id"))["source_path"] }
+                                .map { |source| source.split("#", 2).first }
+      allowed_paths = capsule.dig("function_slice", "allowed_paths")
+      unless adjacency_paths.all? do |source|
+        clean_relative_path?(source) && allowed_paths.any? do |pattern|
+          File.fnmatch?(pattern, source, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+        end
+      end
+        raise ValidationError, "rc.18 preapproved adjacency must remain in function_slice.allowed_paths"
+      end
+      unless context.fetch("tuning_status") == "provisional_until_two_representative_builder_runs"
+        raise ValidationError, "rc.18 context tuning must remain explicitly provisional"
+      end
+      target = context.fetch("output_target_path")
+      root = File.expand_path(capsule.fetch("project_root"))
+      unless Pathname.new(target).absolute? && !target.match?(/[?*\[\]]/) &&
+             File.expand_path(target) != root && !File.expand_path(target).start_with?("#{root}/")
+        raise ValidationError, "rc.18 output_target_path must be an exact absolute path outside project_root"
+      end
+    end
+
     lease = capsule.fetch("workflow_lease")
     unless lease["operator_gate_classes"].sort == STANDARD_OPERATOR_GATES.sort
       raise ValidationError, "workflow_lease.operator_gate_classes must equal the five genuine human gates"
@@ -518,6 +690,7 @@ module HrmExperiment
     activation_budget_contract = case kernel_version
                                  when RC15_KERNEL_VERSION then RC15_ACTIVATION_BUDGETS
                                  when RC16_KERNEL_VERSION then RC16_ACTIVATION_BUDGETS
+                                 when RC18_KERNEL_VERSION then RC18_ACTIVATION_BUDGETS
                                  end
     if activation_budget_contract &&
        %w[runtime_build production_observation].include?(capsule["execution_mode"])
@@ -540,6 +713,8 @@ module HrmExperiment
     mismatches << "deliverable_type" unless capsule["deliverable_type"] == contract["deliverable_type"]
     mismatches << "verification.profile" unless capsule.dig("verification", "profile") == contract["verification_profile"]
     contract["budgets"].each do |key, expected|
+      expected = RC18_CONTEXT_BYTES_BY_ROLE if kernel_version == RC18_KERNEL_VERSION &&
+                                               key == "context_bytes_by_role"
       mismatches << "budgets.#{key}" unless capsule.dig("budgets", key) == expected
     end
     mismatches << "workflow_lease.permitted_routine_actions" unless lease["permitted_routine_actions"].sort == contract["routine_actions"].sort
@@ -619,6 +794,21 @@ module HrmExperiment
         unless event["role"] == details["worker_role"] &&
                WORKER_REQUIRED_ACTIONS[details["action"]] == event["role"]
           raise ValidationError, "worker_started role and action must match the worker isolation contract"
+        end
+      when "worker_context_expanded"
+        missing = %w[
+          action worker_role worker_claim_id context_expansion_request_sha256
+          context_expansion_disposition context_expansion_adjacency_class
+          context_expansion_reason context_expansion_requested_section_ids
+          context_expansion_added_section_ids context_expansion_added_bytes
+          previous_worker_context_pack_sha256 worker_context_pack_path
+          worker_context_pack_sha256 worker_context_pack_bytes
+          worker_context_manifest_sha256 worker_context_pack_revision
+        ].reject { |key| details.key?(key) }
+        raise ValidationError, "worker_context_expanded missing #{missing.join(', ')}" unless missing.empty?
+        unless event["role"] == "builder" && details["worker_role"] == "builder" &&
+               details["action"] == "implement_frozen_slice"
+          raise ValidationError, "worker_context_expanded requires the bound builder implementation action"
         end
       when "action_guard_passed"
         missing = %w[action guarded_role].reject { |key| details.key?(key) }
@@ -941,7 +1131,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -1037,7 +1227,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1207,7 +1397,7 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
-      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16].include?(capsule.dig("playbook_pin", "kernel_version")) &&
+      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14 0.1.0-rc.15 0.1.0-rc.16 0.1.0-rc.18].include?(capsule.dig("playbook_pin", "kernel_version")) &&
                   event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
 
       loaded_bytes = context["loaded_artifact_bytes_by_id"]
@@ -1346,7 +1536,7 @@ module HrmExperiment
       process_reasons << "worker-handoff startup budget exceeded"
     end
     kernel_version = capsule.dig("playbook_pin", "kernel_version")
-    activation_gated = if [RC15_KERNEL_VERSION, RC16_KERNEL_VERSION].include?(kernel_version)
+    activation_gated = if [RC15_KERNEL_VERSION, RC16_KERNEL_VERSION, RC18_KERNEL_VERSION].include?(kernel_version)
                          %w[runtime_build production_observation].include?(capsule["execution_mode"])
                        else
                          ACTIVATION_KERNEL_VERSIONS.include?(kernel_version) &&
@@ -1539,7 +1729,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.16 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.18 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 
