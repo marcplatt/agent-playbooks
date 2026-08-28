@@ -96,6 +96,13 @@
           "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
         },
+        "loaded_artifact_bytes_by_id": {
+          "type": "object",
+          "propertyNames": {"type": "string", "minLength": 1},
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "loaded_artifact_budget_bytes": {"type": "integer", "minimum": 0},
+        "tool_output_reserve_bytes": {"type": "integer", "minimum": 0},
         "outside_declared_dependency_ids": {
           "type": "array",
           "uniqueItems": true,

@@ -12,8 +12,8 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.9"
-  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7 0.1.0-rc.8 0.1.0-rc.9].freeze
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.10"
+  SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[0.1.0-rc.6 0.1.0-rc.7 0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10].freeze
 
   STANDARD_OPERATOR_GATES = %w[
     business_meaning
@@ -863,7 +863,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -959,7 +959,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1121,6 +1121,24 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
+      next unless capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.10" &&
+                  event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
+
+      loaded_bytes = context["loaded_artifact_bytes_by_id"]
+      unless loaded_bytes.is_a?(Hash) && loaded_bytes.keys.to_set == loaded_ids
+        identity_errors << "loaded artifact byte evidence mismatch at event #{event['sequence']}"
+        next
+      end
+      unless loaded_bytes.values.sum == context["artifact_bytes"]
+        identity_errors << "loaded artifact byte total mismatch at event #{event['sequence']}"
+      end
+      unless context["files_loaded"] == loaded_bytes.length
+        identity_errors << "loaded artifact count mismatch at event #{event['sequence']}"
+      end
+      expected_active = context["artifact_bytes"] + context["tool_output_bytes"] + context["state_artifact_echo_bytes"]
+      unless context["active_context_bytes"] == expected_active
+        identity_errors << "active context categories overlap or omit bytes at event #{event['sequence']}"
+      end
     end
     peak_active_context_bytes = context_events.map { |event| event.dig("context", "active_context_bytes") }.max || 0
     orchestrator_peak_context_bytes = context_events.select { |event| event["role"] == "orchestrator" }
@@ -1147,7 +1165,9 @@ module HrmExperiment
       next false unless budget
 
       context = event["context"]
-      context["active_context_bytes"] > budget
+      context["active_context_bytes"] > budget ||
+        (context["loaded_artifact_budget_bytes"] &&
+         context["artifact_bytes"] > context["loaded_artifact_budget_bytes"])
     end
 
     completed_checks = Array(by_type["check_completed"])
@@ -1410,7 +1430,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.9 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.10 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 

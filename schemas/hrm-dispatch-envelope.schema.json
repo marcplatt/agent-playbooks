@@ -18,7 +18,7 @@
     "dispatch_hash"
   ],
   "properties": {
-    "schema_version": {"const": "agent_playbooks.hrm_dispatch_envelope.v0.2"},
+    "schema_version": {"const": "agent_playbooks.hrm_dispatch_envelope.v0.3"},
     "session_id": {"$ref": "#/$defs/nonempty"},
     "hrm_id": {"$ref": "#/$defs/nonempty"},
     "capsule_sha256": {"$ref": "#/$defs/sha256"},
@@ -37,7 +37,17 @@
     "assignment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["next_action", "action", "role", "required_dependency_ids"],
+      "required": [
+        "next_action",
+        "action",
+        "role",
+        "required_dependency_ids",
+        "dependencies",
+        "role_context_budget_bytes",
+        "loaded_artifact_budget_bytes",
+        "tool_output_reserve_bytes",
+        "load_policy"
+      ],
       "properties": {
         "next_action": {"$ref": "#/$defs/nonempty"},
         "action": {"type": ["string", "null"], "minLength": 1},
@@ -45,7 +55,15 @@
           "type": ["string", "null"],
           "enum": ["orchestrator", "builder", "checker", "provider_observer", "reviewer", null]
         },
-        "required_dependency_ids": {"$ref": "#/$defs/string_array"}
+        "required_dependency_ids": {"$ref": "#/$defs/string_array"},
+        "dependencies": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/assignment_dependency"}
+        },
+        "role_context_budget_bytes": {"type": "integer", "minimum": 0},
+        "loaded_artifact_budget_bytes": {"type": "integer", "minimum": 0},
+        "tool_output_reserve_bytes": {"type": "integer", "minimum": 0},
+        "load_policy": {"const": "bounded_queries_never_full_source"}
       }
     },
     "scope": {
@@ -90,8 +108,9 @@
     "protocol": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["context_command", "guard_command", "context_report", "result_contract"],
+      "required": ["handoff_command", "context_command", "guard_command", "context_report", "result_contract"],
       "properties": {
+        "handoff_command": {"$ref": "#/$defs/nullable_command"},
         "context_command": {"$ref": "#/$defs/nullable_command"},
         "guard_command": {"$ref": "#/$defs/nullable_command"},
         "context_report": {
@@ -102,6 +121,8 @@
             "required_fields",
             "optional_nonnegative_integer_fields",
             "measurement_scope",
+            "dependency_output_accounting",
+            "source_size_bounds_enforced",
             "platform_instructions",
             "machine_parsed_dispatch_echo_bytes"
           ],
@@ -109,7 +130,9 @@
             "stdin": {"const": "json"},
             "required_fields": {"$ref": "#/$defs/string_array"},
             "optional_nonnegative_integer_fields": {"$ref": "#/$defs/string_array"},
-            "measurement_scope": {"const": "declared_artifact_bytes_plus_worker_reported_tool_output"},
+            "measurement_scope": {"const": "nonoverlapping_loaded_artifact_and_nondependency_tool_output_bytes"},
+            "dependency_output_accounting": {"const": "exclude_from_tool_output_bytes"},
+            "source_size_bounds_enforced": {"const": true},
             "platform_instructions": {"const": "excluded"},
             "machine_parsed_dispatch_echo_bytes": {"const": 0}
           }
@@ -136,6 +159,18 @@
           "items": {"type": "string", "minLength": 1}
         }
       ]
+    },
+    "assignment_dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dependency_id", "kind", "source_path", "source_size_bytes", "access_policy"],
+      "properties": {
+        "dependency_id": {"$ref": "#/$defs/nonempty"},
+        "kind": {"$ref": "#/$defs/nonempty"},
+        "source_path": {"$ref": "#/$defs/nonempty"},
+        "source_size_bytes": {"type": "integer", "minimum": 0},
+        "access_policy": {"const": "targeted_queries_and_bounded_slices"}
+      }
     }
   }
 }

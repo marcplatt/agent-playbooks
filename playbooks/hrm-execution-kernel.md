@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.9"
+version: "0.1.0-rc.10"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -147,16 +147,22 @@ Use the event appender so a state update returns only event ID, sequence, and ty
 the growing JSONL ledger into active context. Keep raw CI output outside chat, PR prose, review
 packets, and events. Record only the check summary, raw-artifact path, byte count, and digest.
 Do not paste this kernel into the task prompt. The supervisor dispatch envelope carries a
-kernel cache key and target-contract cache key; reload full source only when the corresponding
-hash changes or the compact contract is internally ambiguous. Emit cumulative per-turn
+kernel cache key and target-contract cache key; reload changed source only within the compiled
+role's bounded access policy when a corresponding hash changes or compact state is ambiguous.
+Never turn a hash change into an unbounded implementation-source read. Emit cumulative per-turn
 `context_snapshot` events at startup, worker handoff, and before
 guarded actions. A root-orchestrator compaction before `first_executable_delta` or
 `first_operational_evidence`, raw-log replay, or state-artifact echo is measured against the
 capsule budget rather than treated as free. A governance record, state projection, capsule,
 or receipt never counts as executable or operational value.
 
-Every context snapshot names the stable IDs it loaded from the capsule's
-`context_dependencies`. Any loaded ID absent from that declaration must also appear in
+Every rc.10 context snapshot maps each loaded dependency ID to the exact source bytes actually
+materialized through bounded queries or slices. A declared dependency authorizes targeted access;
+it neither requires nor authorizes a full-source read. Dependency-derived query output is charged
+once in `loaded_artifact_bytes_by_id` and excluded from `tool_output_bytes`, which covers only
+non-dependency output. The supervisor rejects negative counts, counts above the bound source size,
+overlapping category totals, and IDs outside the compiled assignment. Any loaded ID absent from
+the capsule declaration must also appear in
 `outside_declared_dependency_ids`, and its count must match
 `files_outside_declared_dependencies`. The pinned kernel, capsule, dispatcher, accepted target
 contract, API-skill registry, run state, implementation sources, and declared checks are not
@@ -176,7 +182,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.9 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.10 experiment uses one state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -192,7 +198,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.9 append, context receipt, guarded action, and transition goes through
+the ledger before continuation. Every rc.10 append, handoff receipt, context receipt, guarded action, and transition goes through
 `scripts/hrm_supervisor.rb`; direct event appends are legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
 and only then binds the predecessor's terminal supersession event.
@@ -265,7 +271,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.9.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.10.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -289,7 +295,10 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    before the predecessor may become terminal. A manually copied capsule or free-text
    `superseded` event is invalid during routine mode transition.
 
-2. Validate a released worktree with the read-only `scripts/hrm_supervisor.rb release-check`
+2. Put the exact first `scripts/hrm_supervisor.rb resume` command in the compact repository
+   dispatcher that the cold HRM thread already loads. Its first action is that command: do not
+   search memory, README files, old worktrees, the full kernel, map, capsule, or supervisor source.
+   Validate a released worktree beforehand with the read-only `release-check`
    command. It must contain no artifacts for the new session. Start or resume only inside the
    actual HRM task through `scripts/hrm_supervisor.rb resume`. On an empty bound ledger, `resume`
    creates the ignored artifact directory if needed and atomically writes `session_started`
@@ -297,10 +306,12 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    cursor-bound compact projection
    and compiled dispatch envelope as active model state. Validate hashes mechanically; do not
    reread the complete kernel, project map, capsule, or ledger when their cache keys are unchanged.
-   The dispatch names only the dependencies required for its current assignment and carries exact
-   supervisor `context` and `guard` commands. Machine-parsed dispatch bytes are not conversation
-   echo. The supervisor measures declared artifact bytes; the worker reports only bounded tool-output
-   counters. A process-failing accepted event and its terminal stop are written under the same lock.
+   The dispatch names only the dependencies authorized for its current assignment and carries the
+   role context budget, a smaller loaded-artifact allowance, a tool-output reserve, source-size
+   bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, context, and guard
+   commands. Machine-parsed dispatch bytes are not conversation echo. The worker reports exact
+   materialized dependency bytes by ID and non-dependency tool-output bytes without double counting.
+   A process-failing accepted event and its terminal stop are written under the same lock.
    The stable capsule, append-only events, and validated grants remain durable authority. Conversation is not
    authoritative state. A generic reply can accept only the last prepared exact decision. Emit
    an event for every lifecycle transition, material decision, candidate freeze, conclusive
@@ -334,6 +345,10 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    `current_claim_blocker`, `defer`, `separate_proposal`, or `accepted_current_scope`.
    Only the orchestrator may accept current scope, and material semantic expansion retains
    its human or contract gate.
+
+   Provider observers inspect implementation dependencies with targeted `rg`, symbol or AST
+   queries, and bounded line slices. They must never dump a complete implementation source merely
+   because its dependency ID appears in the assignment.
 
 6. Permit one writer per overlapping change unit. Other agents are read-only. Parallel
    writers require evidenced non-overlap in paths, state, resources, authority, validation,
@@ -414,6 +429,9 @@ the disposition. Do not retain unrelated reference prose in subsequent role proj
 | Operator projection | 8,000 bytes |
 
 Projects may tighten or explicitly override these envelopes only under the `custom` profile.
+Each compiled worker assignment reserves half of its role envelope for non-dependency tool output
+and limits dependency-derived materialization to the other half unless a later kernel version
+defines a different preregistered split.
 
 ## Experiment profiles and evaluation
 
@@ -453,6 +471,12 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.10 — 2026-08-28:** Makes cold startup command-first from the compact repository
+  dispatcher and compiles per-role context, loaded-artifact, and tool-output budgets. Declared
+  dependency IDs authorize bounded queries rather than full reads. Context receipts count exact
+  materialized bytes by dependency ID, exclude those bytes from tool output, enforce source-size
+  bounds, and derive active context from nonoverlapping categories. Adds a no-replay fresh-worker
+  handoff receipt while preserving locked append, projection refresh, and terminalization.
 - **0.1.0-rc.9 — 2026-08-27:** Makes released sessions provably unstarted, terminalizes accepted
   process failures in the same locked append, and stops stale active sessions on resume. Replaces
   free-form context events with supervisor-measured declared dependencies, assignment-minimal

@@ -65,7 +65,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
 bounded-context replacement for the large Build, Execute, Integrate, and Rollout playbooks
-during the `0.1.0-rc.9` experiment. It derives the active HRM from the accepted project map
+during the `0.1.0-rc.10` experiment. It derives the active HRM from the accepted project map
 instead of requiring the operator to restate it. A validated capsule grants routine workflow
 through the next genuine human gate, including one bounded read-only provider diagnostic tree.
 Sign-in and MFA are operator actions rather than decisions. Exact merge and material external
@@ -102,6 +102,8 @@ ruby scripts/project_api_skill_registry.rb publish \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl < api-skill.json
 ruby scripts/hrm_supervisor.rb resume \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
+ruby scripts/hrm_supervisor.rb handoff \
+  path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl
 ruby scripts/hrm_supervisor.rb append \
   path/to/hrm-execution-capsule.yaml path/to/hrm-run-events.jsonl < event.json
 ruby scripts/hrm_supervisor.rb guard \
@@ -113,21 +115,22 @@ ruby scripts/hrm_supervisor.rb transition \
   path/to/successor-capsule.yaml SUCCESSOR_SESSION_ID EXECUTION_MODE
 ```
 
-During rc.9, use the non-LLM supervisor for release checks, run writes, context receipts, and continuation reads. It serializes
+During rc.10, use the non-LLM supervisor for release checks, run writes, handoff and context receipts, and continuation reads. It serializes
 event appends and commits cursor-bound state, scorecard, compiled worker dispatch, and a quiet
 operator projection. Unchanged kernel and HRM contract hashes are consumed from the dispatch
 envelope instead of rereading full startup sources. `resume` atomically writes `session_started`
 when the bound ledger is empty, then emits the first worker assignment. `transition`
 mechanically derives and binds runtime-build/production-observation successors. The legacy
 `hrm_experiment.rb` append, guard,
-and supersede commands fail closed for rc.6 through rc.9 so
+and supersede commands fail closed for rc.6 through rc.10 so
 they cannot advance the authoritative ledger without committing the matching projection.
 Every run artifact path is project-root-bound. A run-invalid ledger or failed process envelope
 projects an explicit stop and cannot accept more writes. A decision inherited from a predecessor
 must carry a request receipt verified against the exact immutable predecessor event log.
-Context snapshots use capsule-declared dependency IDs and matching loaded/outside ID sets; an
-opaque positive file count is invalid evidence, while the exact pinned external kernel is a
-declared dependency rather than a scope escape.
+Compiled assignments authorize bounded dependency queries, publish source-size bounds, split the
+role budget into a loaded-artifact allowance and tool-output reserve, and prohibit full-source
+dumps. Context snapshots map dependency IDs to exact materialized bytes and exclude those bytes
+from non-dependency tool output, preventing duplicate accounting.
 Runtime-build dispatch begins with a zero-effect binding inventory. A runtime delta is not
 executable until every frozen real seam is bound and construction is proven without effects.
 Routine technical choices remain silent; only unavoidable environment/private-value actions,

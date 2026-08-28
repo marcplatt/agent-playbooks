@@ -16,6 +16,8 @@ module HrmSupervisor
   MAX_DISPATCH_BYTES = 12_288
   MAX_ATTENTION_ITEMS = 12
   RC9_KERNEL_VERSION = "0.1.0-rc.9"
+  RC10_KERNEL_VERSION = "0.1.0-rc.10"
+  SUPERVISOR_MEASURED_CONTEXT_VERSIONS = [RC9_KERNEL_VERSION, RC10_KERNEL_VERSION].freeze
   CONTEXT_REPORT_INTEGER_FIELDS = %w[
     tool_output_bytes
     omitted_tool_output_bytes
@@ -48,6 +50,20 @@ module HrmSupervisor
     end
     if JSON.generate(dispatch).bytesize > MAX_DISPATCH_BYTES
       raise HrmExperiment::ValidationError, "dispatch envelope exceeds #{MAX_DISPATCH_BYTES} bytes"
+    end
+    assignment = dispatch.fetch("assignment")
+    dependency_ids = assignment.fetch("dependencies").map { |item| item.fetch("dependency_id") }
+    unless dependency_ids == assignment.fetch("required_dependency_ids") && dependency_ids.uniq == dependency_ids
+      raise HrmExperiment::ValidationError, "dispatch assignment dependencies must exactly match required dependency IDs"
+    end
+    role_budget = assignment.fetch("role_context_budget_bytes")
+    loaded_budget = assignment.fetch("loaded_artifact_budget_bytes")
+    reserve = assignment.fetch("tool_output_reserve_bytes")
+    unless loaded_budget + reserve == role_budget
+      raise HrmExperiment::ValidationError, "dispatch assignment context budget must equal artifact allowance plus reserve"
+    end
+    if assignment["role"] && (loaded_budget <= 0 || reserve <= 0)
+      raise HrmExperiment::ValidationError, "worker dispatch requires positive artifact allowance and tool-output reserve"
     end
     true
   end
@@ -105,9 +121,9 @@ module HrmSupervisor
       events = load_and_validate_run(capsule, events_path)
       ensure_run_writable!(capsule, events) unless events.empty?
       prepared = prepare_event(capsule, events, event)
-      if rc9?(capsule) && prepared["event_type"] == "context_snapshot"
+      if supervisor_measured_context?(capsule) && prepared["event_type"] == "context_snapshot"
         raise HrmExperiment::ValidationError,
-              "rc.9 context snapshots are supervisor-measured; use the context command"
+              "#{capsule.dig('playbook_pin', 'kernel_version')} context snapshots are supervisor-measured; use the context command"
       end
       if prepared["event_type"] == "stop_reason" && prepared.dig("details", "stop_reason") == "superseded"
         raise HrmExperiment::ValidationError,
@@ -119,8 +135,9 @@ module HrmSupervisor
 
   def record_context(capsule_path, events_path, role, report)
     capsule = HrmExperiment.load_yaml(capsule_path)
-    unless rc9?(capsule)
-      raise HrmExperiment::ValidationError, "the supervisor context command requires an rc.9 capsule"
+    unless supervisor_measured_context?(capsule)
+      raise HrmExperiment::ValidationError,
+            "the supervisor context command requires an rc.9 or rc.10 capsule"
     end
     with_run_lock(events_path, capsule) do
       events = load_and_validate_run(capsule, events_path)
@@ -136,21 +153,42 @@ module HrmSupervisor
               "context role #{role.inspect} does not match dispatched role #{dispatch.dig('assignment', 'role').inspect}"
       end
 
-      normalized = normalize_context_report!(report)
+      normalized = normalize_context_report!(report, capsule)
       required_ids = dispatch.dig("assignment", "required_dependency_ids")
-      loaded_ids = normalized.fetch("loaded_dependency_ids")
-      unless loaded_ids.sort == required_ids.sort
+      loaded_bytes_by_id = if rc10?(capsule)
+                             normalized.fetch("loaded_artifact_bytes_by_id")
+                           else
+                             measure_declared_dependencies(
+                               capsule,
+                               normalized.fetch("loaded_dependency_ids")
+                             ).fetch("by_id")
+                           end
+      loaded_ids = loaded_bytes_by_id.keys
+      unless (loaded_ids - required_ids).empty?
         raise HrmExperiment::ValidationError,
-              "loaded dependency IDs must exactly match the current assignment: #{required_ids.join(', ')}"
+              "loaded dependency IDs must be authorized by the current assignment: #{required_ids.join(', ')}"
       end
       measurements = measure_declared_dependencies(capsule, loaded_ids)
+      if rc10?(capsule)
+        loaded_bytes_by_id.each do |dependency_id, bytes|
+          source_size = measurements.fetch("by_id").fetch(dependency_id)
+          next if bytes <= source_size
+
+          raise HrmExperiment::ValidationError,
+                "loaded artifact bytes for #{dependency_id} exceed source size #{source_size}"
+        end
+      end
       prior_ids = events.select do |event|
         event["event_type"] == "context_snapshot" && event["role"] == role
       end.flat_map { |event| event.dig("context", "loaded_dependency_ids") || [] }.to_set
-      repeated_bytes = measurements.fetch("by_id").sum do |dependency_id, bytes|
+      repeated_bytes = loaded_bytes_by_id.sum do |dependency_id, bytes|
         prior_ids.include?(dependency_id) ? bytes : 0
       end
-      active_context_bytes = measurements.fetch("artifact_bytes") +
+      artifact_bytes = loaded_bytes_by_id.values.sum
+      instruction_bytes = loaded_bytes_by_id.sum do |dependency_id, bytes|
+        measurements.fetch("kinds_by_id").fetch(dependency_id) == "repository_dispatcher" ? bytes : 0
+      end
+      active_context_bytes = artifact_bytes +
                              normalized.fetch("tool_output_bytes") +
                              normalized.fetch("state_artifact_echo_bytes")
       event = {
@@ -161,21 +199,64 @@ module HrmSupervisor
           "turn_id" => normalized.fetch("turn_id"),
           "measurement_scope" => "turn_cumulative",
           "active_context_bytes" => active_context_bytes,
-          "instruction_bytes" => measurements.fetch("instruction_bytes"),
-          "artifact_bytes" => measurements.fetch("artifact_bytes"),
+          "instruction_bytes" => instruction_bytes,
+          "artifact_bytes" => artifact_bytes,
           "repeated_artifact_bytes" => repeated_bytes,
           "tool_output_bytes" => normalized.fetch("tool_output_bytes"),
           "omitted_tool_output_bytes" => normalized.fetch("omitted_tool_output_bytes"),
           "inline_raw_log_bytes" => normalized.fetch("inline_raw_log_bytes"),
           "state_artifact_echo_bytes" => normalized.fetch("state_artifact_echo_bytes"),
           "context_compactions" => normalized.fetch("context_compactions"),
-          "files_loaded" => measurements.fetch("files_loaded"),
+          "files_loaded" => loaded_ids.length,
           "files_outside_declared_dependencies" => 0,
           "loaded_dependency_ids" => loaded_ids,
           "outside_declared_dependency_ids" => []
         }
       }
+      if rc10?(capsule)
+        event["context"].merge!(
+          "loaded_artifact_bytes_by_id" => loaded_bytes_by_id,
+          "loaded_artifact_budget_bytes" => dispatch.dig("assignment", "loaded_artifact_budget_bytes"),
+          "tool_output_reserve_bytes" => dispatch.dig("assignment", "tool_output_reserve_bytes")
+        )
+      end
       append_prepared(capsule, events, events_path, event, "context", capsule_path)
+    end
+  end
+
+  def handoff(capsule_path, events_path, now = Time.now.utc)
+    capsule = HrmExperiment.load_yaml(capsule_path)
+    with_run_lock(events_path, capsule) do
+      events = load_and_validate_run(capsule, events_path)
+      ensure_run_writable!(capsule, events)
+      paths = artifact_paths(capsule, events_path)
+      dispatch = HrmExperiment.load_json(paths["dispatch"])
+      validate_dispatch!(dispatch)
+      unless dispatch["ledger_cursor"] == events.length
+        raise HrmExperiment::ValidationError, "handoff requires the current dispatch cursor"
+      end
+      role = dispatch.dig("assignment", "role")
+      action = dispatch.dig("assignment", "action")
+      unless role && action
+        raise HrmExperiment::ValidationError, "current dispatch has no worker assignment"
+      end
+      pending_handoff = events.reverse.find do |event|
+        %w[worker_handoff_started worker_result_received].include?(event["event_type"])
+      end
+      if pending_handoff && pending_handoff["event_type"] == "worker_handoff_started"
+        raise HrmExperiment::ValidationError, "a fresh worker handoff is already pending"
+      end
+
+      event = {
+        "event_type" => "worker_handoff_started",
+        "occurred_at" => now.utc.iso8601,
+        "role" => role,
+        "details" => {
+          "material_progress" => false,
+          "note" => "Fresh #{role} dispatched for #{action}."
+        }
+      }
+      append_prepared(capsule, events, events_path, event, "handoff", capsule_path)
     end
   end
 
@@ -458,8 +539,12 @@ module HrmSupervisor
     true
   end
 
-  def rc9?(capsule)
-    capsule.dig("playbook_pin", "kernel_version") == RC9_KERNEL_VERSION
+  def rc10?(capsule)
+    capsule.dig("playbook_pin", "kernel_version") == RC10_KERNEL_VERSION
+  end
+
+  def supervisor_measured_context?(capsule)
+    SUPERVISOR_MEASURED_CONTEXT_VERSIONS.include?(capsule.dig("playbook_pin", "kernel_version"))
   end
 
   def terminal_event?(event)
@@ -467,7 +552,7 @@ module HrmSupervisor
   end
 
   def resume_stop_event(capsule, events, now)
-    return nil unless rc9?(capsule)
+    return nil unless supervisor_measured_context?(capsule)
     return nil if terminal_event?(events.last)
 
     scorecard = HrmExperiment.evaluate(capsule, events)
@@ -522,11 +607,12 @@ module HrmSupervisor
     }
   end
 
-  def normalize_context_report!(report)
+  def normalize_context_report!(report, capsule)
     unless report.is_a?(Hash)
       raise HrmExperiment::ValidationError, "context report must be a JSON object"
     end
-    allowed = ["turn_id", "loaded_dependency_ids"] + CONTEXT_REPORT_INTEGER_FIELDS
+    dependency_field = rc10?(capsule) ? "loaded_artifact_bytes_by_id" : "loaded_dependency_ids"
+    allowed = ["turn_id", dependency_field] + CONTEXT_REPORT_INTEGER_FIELDS
     unknown = report.keys - allowed
     unless unknown.empty?
       raise HrmExperiment::ValidationError, "context report has unsupported fields: #{unknown.join(', ')}"
@@ -535,11 +621,24 @@ module HrmSupervisor
     unless turn_id.is_a?(String) && !turn_id.empty?
       raise HrmExperiment::ValidationError, "context report requires a non-empty turn_id"
     end
-    loaded = report["loaded_dependency_ids"]
-    unless loaded.is_a?(Array) && loaded.all? { |item| item.is_a?(String) && !item.empty? } && loaded.uniq == loaded
-      raise HrmExperiment::ValidationError, "context report requires unique loaded_dependency_ids"
+    normalized = {"turn_id" => turn_id}
+    if rc10?(capsule)
+      loaded = report["loaded_artifact_bytes_by_id"]
+      valid = loaded.is_a?(Hash) && loaded.all? do |dependency_id, bytes|
+        dependency_id.is_a?(String) && !dependency_id.empty? && bytes.is_a?(Integer) && bytes >= 0
+      end
+      unless valid
+        raise HrmExperiment::ValidationError,
+              "context report requires loaded_artifact_bytes_by_id with non-negative integer values"
+      end
+      normalized["loaded_artifact_bytes_by_id"] = loaded
+    else
+      loaded = report["loaded_dependency_ids"]
+      unless loaded.is_a?(Array) && loaded.all? { |item| item.is_a?(String) && !item.empty? } && loaded.uniq == loaded
+        raise HrmExperiment::ValidationError, "context report requires unique loaded_dependency_ids"
+      end
+      normalized["loaded_dependency_ids"] = loaded
     end
-    normalized = {"turn_id" => turn_id, "loaded_dependency_ids" => loaded}
     CONTEXT_REPORT_INTEGER_FIELDS.each do |field|
       value = report.fetch(field, 0)
       unless value.is_a?(Integer) && value >= 0
@@ -567,7 +666,10 @@ module HrmSupervisor
       "artifact_bytes" => by_id.values.sum,
       "instruction_bytes" => instruction_bytes,
       "files_loaded" => dependency_ids.length,
-      "by_id" => by_id
+      "by_id" => by_id,
+      "kinds_by_id" => dependency_ids.to_h do |dependency_id|
+        [dependency_id, dependencies.fetch(dependency_id).fetch("kind")]
+      end
     }
   end
 
@@ -654,7 +756,7 @@ module HrmSupervisor
     end
 
     appended = [prepared]
-    if rc9?(capsule) && prospective_verdict["process_envelope"] == "fail" && !terminal_event?(prepared)
+    if supervisor_measured_context?(capsule) && prospective_verdict["process_envelope"] == "fail" && !terminal_event?(prepared)
       terminal_time = [Time.now.utc, Time.iso8601(prepared.fetch("occurred_at"))].max
       terminal = process_failure_stop_event(capsule, updated_events, prospective_scorecard, terminal_time)
       updated_events << terminal
@@ -854,12 +956,23 @@ module HrmSupervisor
       "prepare_private_inputs" => %w[run_state],
       "inspect_provider_read_only" => %w[project_api_skill_registry run_state],
       "record_operational_evidence" => %w[project_api_skill_registry run_state],
-      "implement_frozen_slice" => %w[implementation_source run_state],
+      "implement_frozen_slice" => %w[implementation_source],
       "run_declared_checks" => %w[implementation_source declared_check]
     }
     assignment_dependency_kinds = dependency_kinds_by_action.fetch(action, [])
     assignment_dependency_ids = capsule.fetch("context_dependencies").each_with_object([]) do |dependency, ids|
       ids << dependency["dependency_id"] if assignment_dependency_kinds.include?(dependency["kind"])
+    end
+    assignment_dependencies = capsule.fetch("context_dependencies").each_with_object([]) do |dependency, items|
+      next unless assignment_dependency_ids.include?(dependency["dependency_id"])
+
+      items << {
+        "dependency_id" => dependency.fetch("dependency_id"),
+        "kind" => dependency.fetch("kind"),
+        "source_path" => dependency.fetch("source_path"),
+        "source_size_bytes" => dependency_bytes(capsule, dependency),
+        "access_policy" => "targeted_queries_and_bounded_slices"
+      }
     end
     declared_dependency_ids = capsule.fetch("context_dependencies").map { |item| item["dependency_id"] }
     latest_inventory = events.reverse.find { |event| event["event_type"] == "runtime_binding_inventory" }
@@ -875,8 +988,11 @@ module HrmSupervisor
       "target_contract_key" => target_key,
       "capsule_sha256" => HrmExperiment.object_sha256(capsule)
     )
+    role_context_budget = role ? capsule.dig("budgets", "context_bytes_by_role", role) : 0
+    loaded_artifact_budget = role_context_budget / 2
+    tool_output_reserve = role_context_budget - loaded_artifact_budget
     dispatch = {
-      "schema_version" => "agent_playbooks.hrm_dispatch_envelope.v0.2",
+      "schema_version" => "agent_playbooks.hrm_dispatch_envelope.v0.3",
       "session_id" => capsule["session_id"],
       "hrm_id" => capsule.dig("hrm", "id"),
       "capsule_sha256" => HrmExperiment.object_sha256(capsule),
@@ -891,7 +1007,12 @@ module HrmSupervisor
         "next_action" => next_action,
         "action" => action,
         "role" => role,
-        "required_dependency_ids" => assignment_dependency_ids
+        "required_dependency_ids" => assignment_dependency_ids,
+        "dependencies" => assignment_dependencies,
+        "role_context_budget_bytes" => role_context_budget,
+        "loaded_artifact_budget_bytes" => loaded_artifact_budget,
+        "tool_output_reserve_bytes" => tool_output_reserve,
+        "load_policy" => "bounded_queries_never_full_source"
       },
       "scope" => {
         "execution_mode" => capsule["execution_mode"],
@@ -911,6 +1032,13 @@ module HrmSupervisor
         "enabled_operational_effects" => enabled_effects
       },
       "protocol" => {
+        "handoff_command" => role ? [
+          "ruby",
+          File.expand_path(__FILE__),
+          "handoff",
+          File.expand_path(capsule_path),
+          paths.fetch("events")
+        ] : nil,
         "context_command" => role ? [
           "ruby",
           File.expand_path(__FILE__),
@@ -930,9 +1058,11 @@ module HrmSupervisor
         ] : nil,
         "context_report" => {
           "stdin" => "json",
-          "required_fields" => %w[turn_id loaded_dependency_ids],
+          "required_fields" => %w[turn_id loaded_artifact_bytes_by_id],
           "optional_nonnegative_integer_fields" => CONTEXT_REPORT_INTEGER_FIELDS,
-          "measurement_scope" => "declared_artifact_bytes_plus_worker_reported_tool_output",
+          "measurement_scope" => "nonoverlapping_loaded_artifact_and_nondependency_tool_output_bytes",
+          "dependency_output_accounting" => "exclude_from_tool_output_bytes",
+          "source_size_bounds_enforced" => true,
           "platform_instructions" => "excluded",
           "machine_parsed_dispatch_echo_bytes" => 0
         },
@@ -1119,6 +1249,7 @@ module HrmSupervisor
       Usage:
         ruby scripts/hrm_supervisor.rb release-check CAPSULE.yaml EVENTS.jsonl
         ruby scripts/hrm_supervisor.rb resume CAPSULE.yaml EVENTS.jsonl
+        ruby scripts/hrm_supervisor.rb handoff CAPSULE.yaml EVENTS.jsonl [ISO8601_NOW]
         ruby scripts/hrm_supervisor.rb context CAPSULE.yaml EVENTS.jsonl ROLE < CONTEXT-REPORT.json
         ruby scripts/hrm_supervisor.rb append CAPSULE.yaml EVENTS.jsonl < EVENT.json
         ruby scripts/hrm_supervisor.rb guard CAPSULE.yaml EVENTS.jsonl ACTION ROLE [ISO8601_NOW]
@@ -1140,6 +1271,15 @@ if $PROGRAM_NAME == __FILE__
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 HrmSupervisor.resume(capsule_path, events_path)
+              when "handoff"
+                capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
+                now_arg = ARGV.shift
+                HrmSupervisor.handoff(
+                  capsule_path,
+                  events_path,
+                  now_arg ? Time.iso8601(now_arg) : Time.now.utc
+                )
               when "context"
                 capsule_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
                 events_path = ARGV.shift or raise HrmExperiment::ValidationError, HrmSupervisor.usage
