@@ -9,6 +9,17 @@ class HrmSupervisorTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__)
   CAPSULE = File.join(ROOT, "examples/hrm-execution-capsule.example.yaml")
   EVENTS = File.join(ROOT, "examples/hrm-run-events.example.jsonl")
+  AE_SCALE_SESSION_ID = "AE-PRODUCTION-CANARY-APEXEC-RC13-20260828"
+  AE_SCALE_HRM_ID = "AE-HRM-PRODUCTION-CANARY"
+  AE_SCALE_REAL_SEAMS = %w[
+    distinct_Website_Thomas_AE_RFQ_identities
+    frozen_ADT_DT_roster_per_RFQ
+    real_APM_config_price_provenance
+    private_runtime_and_salesperson_manifest
+    member_QBO_create_send_delivery_reconciliation
+    RFQ_salesperson_SMS_after_all_deliveries
+    automatic_GHL_ack_after_SMS_with_CRM_recovery
+  ].freeze
 
   def test_resume_atomically_starts_an_empty_ledger_and_dispatches_first_worker
     capsule = HrmExperiment.load_yaml(CAPSULE)
@@ -169,6 +180,132 @@ class HrmSupervisorTest < Minitest::Test
     end
   end
 
+  def test_rc14_ae_scale_launch_compacts_the_exact_rc13_4155_byte_failure_and_executes
+    with_ae_scale_run("0.1.0-rc.13", project_root_bytes: 93) do |capsule_path, events_path, _paths|
+      resume = HrmSupervisor.resume(capsule_path, events_path, Time.now.utc - 5)
+      assert_operator JSON.generate(resume).bytesize, :<=, HrmSupervisor::MAX_RECEIPT_BYTES
+      before = File.binread(events_path)
+
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.handoff(capsule_path, events_path, Time.now.utc - 4)
+      end
+      assert_includes error.message, "worker launch receipt exceeds 4096 bytes (4155)"
+      assert_equal before, File.binread(events_path)
+      assert_equal 1, HrmExperiment.load_events(events_path).length
+    end
+
+    with_ae_scale_run("0.1.0-rc.14", project_root_bytes: 93) do |capsule_path, events_path, paths|
+      resume = HrmSupervisor.resume(capsule_path, events_path, Time.now.utc - 5)
+      resume_bytes = JSON.generate(resume).bytesize
+      assert_equal 2941, resume_bytes
+      assert_operator resume_bytes, :<=, 3800
+      assert_equal %w[action session_id ledger_cursor next_action worker_launch event_sequence event_type],
+                   resume.keys
+      assert_equal AE_SCALE_REAL_SEAMS,
+                   resume.dig("worker_launch", "result_input", "template", "runtime_readiness", "required_real_seams")
+      assert_equal "unpadded_base64url_canonical_json",
+                   resume.dig("worker_launch", "one_shot_input", "encoding")
+      assert_nil resume.dig("worker_launch", "activation_command")
+
+      handoff_stdout, handoff_stderr, handoff_status = Open3.capture3(
+        *resume.dig("worker_launch", "handoff_command"),
+        chdir: resume.dig("worker_launch", "working_directory")
+      )
+      assert handoff_status.success?, handoff_stderr
+      handoff = JSON.parse(handoff_stdout)
+      handoff_bytes = JSON.generate(handoff).bytesize
+      assert_equal 3660, handoff_bytes
+      assert_operator handoff_bytes, :<=, 3800
+      launch = handoff.fetch("worker_launch")
+      assert launch["activation_command"]
+      assert_equal %w[activate verify_dispatch_digest_without_dump bounded_source_materialization context guard result],
+                   launch.dig("launch_policy", "steps")
+      assert_equal Digest::SHA256.file(paths["dispatch"]).hexdigest, launch["dispatch_sha256"]
+
+      activation_stdout, activation_stderr, activation_status = Open3.capture3(
+        *launch.fetch("activation_command"),
+        chdir: launch.fetch("working_directory")
+      )
+      assert activation_status.success?, activation_stderr
+      assert_equal "activate", JSON.parse(activation_stdout)["action"]
+
+      context_command = launch.fetch("context_command").dup
+      context_command[-1] = HrmSupervisor.encode_one_shot_argument(
+        "turn_id" => "ae-scale-provider",
+        "loaded_artifact_bytes_by_id" => {"ae.runtime-source" => 9482},
+        "tool_output_bytes" => 1000
+      )
+      context_stdout, context_stderr, context_status = Open3.capture3(
+        *context_command,
+        chdir: launch.fetch("working_directory")
+      )
+      assert context_status.success?, context_stderr
+      assert_equal "context_snapshot", JSON.parse(context_stdout)["event_type"]
+
+      guard_stdout, guard_stderr, guard_status = Open3.capture3(
+        *launch.fetch("guard_command"),
+        chdir: launch.fetch("working_directory")
+      )
+      assert guard_status.success?, guard_stderr
+      assert_equal "action_guard_passed", JSON.parse(guard_stdout)["event_type"]
+
+      domain = Marshal.load(Marshal.dump(launch.dig("result_input", "template")))
+      domain.dig("runtime_readiness")["bound_real_seams"] = AE_SCALE_REAL_SEAMS
+      result_command = launch.fetch("result_command").dup
+      result_command[-1] = HrmSupervisor.encode_one_shot_argument(domain)
+      result_stdout, result_stderr, result_status = Open3.capture3(
+        *result_command,
+        chdir: launch.fetch("working_directory")
+      )
+      assert result_status.success?, result_stderr
+      result = JSON.parse(result_stdout)
+      assert_equal "implement_frozen_slice", result["next_action"]
+      assert_equal "builder", result.dig("worker_launch", "role")
+      assert_operator JSON.generate(result).bytesize, :<=, HrmSupervisor::MAX_RECEIPT_BYTES
+    end
+  end
+
+  def test_rc13_dispatch_receipt_and_pending_claim_shape_remain_exactly_legacy
+    capsule = capsule_for_kernel_version(HrmExperiment.load_yaml(CAPSULE), "0.1.0-rc.13")
+    assert_equal "cd34a909d18361bf827a5a0e864b12c550d68264cf2e71c8fd9142d879a1a82d",
+                 HrmExperiment.object_sha256(capsule)
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      resume = HrmSupervisor.resume(capsule_path, events_path, Time.now.utc - 5)
+      handoff = HrmSupervisor.handoff(capsule_path, events_path, Time.now.utc - 4)
+      launch = handoff.fetch("worker_launch")
+
+      assert resume.key?("projection_hash")
+      assert handoff.key?("projection_hash")
+      assert launch["launch_ready"]
+      assert_equal "none", launch["spawn_fork_turns"]
+      assert_equal "none_before_spawn_one_after", launch["root_wait_policy"]
+      assert_equal "unpadded_base64url_canonical_json", launch.dig("result_input", "encoding")
+      assert_nil launch["launch_policy"]
+      assert_nil launch["one_shot_input"]
+      assert_equal launch.dig("worker_claim", "worker_claim_id"), launch.dig("activation_command", -3)
+      assert_equal launch["dispatch_sha256"], launch.dig("activation_command", -1)
+    end
+  end
+
+  def test_rc14_adversarial_seam_expansion_fails_before_ledger_mutation
+    capsule = HrmExperiment.load_yaml(CAPSULE)
+    capsule.dig("function_slice")["required_real_seams"] = Array.new(18) do |index|
+      "oversized_rc14_seam_#{index}_#{'x' * 180}"
+    end
+
+    with_run(capsule, []) do |capsule_path, events_path, _paths|
+      before = File.binread(events_path)
+      error = assert_raises(HrmExperiment::ValidationError) do
+        HrmSupervisor.resume(capsule_path, events_path, Time.now.utc)
+      end
+
+      assert_includes error.message, "worker launch receipt exceeds"
+      assert_equal before, File.binread(events_path)
+      assert_empty HrmExperiment.load_events(events_path)
+    end
+  end
+
   def test_rc12_adversarial_launch_expansion_fails_before_ledger_mutation
     capsule = capsule_with_runtime_source
     14.times do |index|
@@ -202,8 +339,8 @@ class HrmSupervisorTest < Minitest::Test
     assert_includes error.message, "worker launch receipt exceeds"
   end
 
-  def test_rc12_overlong_receipt_fails_before_ledger_mutation
-    capsule = capsule_with_runtime_source
+  def test_rc13_overlong_receipt_fails_before_ledger_mutation
+    capsule = capsule_for_kernel_version(capsule_with_runtime_source, "0.1.0-rc.13")
     10.times do |index|
       capsule.fetch("context_dependencies") << {
         "dependency_id" => "deep-launch-#{index}-#{'x' * 72}",
@@ -729,9 +866,9 @@ class HrmSupervisorTest < Minitest::Test
                    receipt.dig("worker_launch", "activation_command", -3)
       assert_equal "inventory_runtime_bindings", receipt.dig("worker_launch", "action")
       assert_equal "provider_observer", receipt.dig("worker_launch", "role")
-      assert receipt.dig("worker_launch", "launch_ready")
-      assert_equal "none", receipt.dig("worker_launch", "spawn_fork_turns")
-      assert_equal "none_before_spawn_one_after", receipt.dig("worker_launch", "root_wait_policy")
+      assert_nil receipt.dig("worker_launch", "launch_ready")
+      assert_equal "none", receipt.dig("worker_launch", "launch_policy", "fork_turns")
+      assert_equal "none_before_one_after", receipt.dig("worker_launch", "launch_policy", "root_wait")
       assert_equal %w[
         activate
         verify_dispatch_digest_without_dump
@@ -739,14 +876,14 @@ class HrmSupervisorTest < Minitest::Test
         context
         guard
         result
-      ], receipt.dig("worker_launch", "execution_order")
+      ], receipt.dig("worker_launch", "launch_policy", "steps")
       assert_equal "runtime_binding_inventory", receipt.dig("worker_launch", "result_input", "domain_event")
       assert_equal ["runtime_readiness"], receipt.dig("worker_launch", "result_input", "required_keys")
       assert_equal "unpadded_base64url_canonical_json",
-                   receipt.dig("worker_launch", "result_input", "encoding")
-      assert_equal(-1, receipt.dig("worker_launch", "result_input", "argument_index"))
+                   receipt.dig("worker_launch", "one_shot_input", "encoding")
+      assert_equal(-1, receipt.dig("worker_launch", "one_shot_input", "argument_index"))
       assert_equal HrmSupervisor::MAX_ONE_SHOT_ARGUMENT_BYTES,
-                   receipt.dig("worker_launch", "result_input", "max_encoded_bytes")
+                   receipt.dig("worker_launch", "one_shot_input", "max_encoded_bytes")
       assert_equal event.dig("details", "worker_claim_id"),
                    receipt.dig("worker_launch", "activation_command", -3)
       assert_equal receipt.dig("worker_launch", "ledger_cursor").to_s,
@@ -1951,6 +2088,92 @@ class HrmSupervisorTest < Minitest::Test
   end
 
   private
+
+  def capsule_for_kernel_version(capsule, kernel_version)
+    capsule.dig("playbook_pin")["kernel_version"] = kernel_version
+    kernel_dependency = capsule.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "playbook_kernel"
+    end
+    if kernel_dependency
+      kernel_dependency["binding"] = kernel_dependency.fetch("binding").sub(
+        %r{AP-EXEC-001/0\.1\.0-rc\.\d+},
+        "AP-EXEC-001/#{kernel_version}"
+      )
+    end
+    implementation_source = capsule.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "implementation_source"
+    end
+    if implementation_source && kernel_version == "0.1.0-rc.13"
+      implementation_source["binding"] = "rc13-example-source"
+    end
+    capsule
+  end
+
+  def with_ae_scale_run(kernel_version, project_root_bytes:)
+    capsule = capsule_for_kernel_version(HrmExperiment.load_yaml(CAPSULE), kernel_version)
+    capsule["session_id"] = AE_SCALE_SESSION_ID
+    capsule.dig("target_resolution").merge!(
+      "current_target_hrm" => AE_SCALE_HRM_ID,
+      "resolved_hrm_id" => AE_SCALE_HRM_ID,
+      "explicit_hrm_id" => nil
+    )
+    capsule.dig("hrm")["id"] = AE_SCALE_HRM_ID
+    capsule.dig("function_slice")["required_real_seams"] = AE_SCALE_REAL_SEAMS
+    runtime_source = capsule.fetch("context_dependencies").find do |dependency|
+      dependency["kind"] == "implementation_source"
+    end
+    runtime_source.merge!(
+      "dependency_id" => "ae.runtime-source",
+      "source_path" => "src/estimating/operator_canary.py",
+      "binding" => "ae-scale-runtime-source"
+    )
+    capsule.dig("metrics").merge!(
+      "event_log_path" => ".codex/hrm-runs/#{AE_SCALE_SESSION_ID}.events.jsonl",
+      "session_state_path" => ".codex/hrm-runs/#{AE_SCALE_SESSION_ID}.state.yaml",
+      "scorecard_path" => ".codex/hrm-runs/#{AE_SCALE_SESSION_ID}.scorecard.yaml"
+    )
+
+    Dir.mktmpdir("aer", "/tmp") do |temporary_directory|
+      directory = exact_length_directory(temporary_directory, project_root_bytes)
+      FileUtils.mkdir_p(File.join(directory, ".git"))
+      capsule["project_root"] = directory
+      copy_relative_dependencies(capsule, directory)
+      runtime_copy = File.join(directory, runtime_source.fetch("source_path"))
+      FileUtils.mkdir_p(File.dirname(runtime_copy))
+      FileUtils.cp(File.join(ROOT, "scripts/hrm_supervisor.rb"), runtime_copy)
+
+      capsule_path = File.join(
+        directory,
+        "docs/experiments/ap-exec-001/AE-PRODUCTION-CANARY-capsule.yaml"
+      )
+      events_path = File.join(directory, capsule.dig("metrics", "event_log_path"))
+      FileUtils.mkdir_p(File.dirname(capsule_path))
+      FileUtils.mkdir_p(File.dirname(events_path))
+      File.write(capsule_path, YAML.dump(capsule), mode: "w", perm: 0o600)
+      File.write(events_path, "", mode: "w", perm: 0o600)
+      paths = HrmSupervisor.artifact_paths(capsule, events_path)
+      yield capsule_path, events_path, paths
+    end
+  end
+
+  def exact_length_directory(directory, target_bytes)
+    path = File.realpath(directory)
+    component_index = 0
+    while path.bytesize < target_bytes
+      available = target_bytes - path.bytesize - 1
+      raise "project root already exceeds #{target_bytes} bytes" unless available.positive?
+
+      component_bytes = [available, 120].min
+      prefix = "p#{component_index}"
+      component = (prefix + ("x" * component_bytes))[0, component_bytes]
+      path = File.join(path, component)
+      FileUtils.mkdir_p(path)
+      component_index += 1
+    end
+    raise "project root is #{path.bytesize} bytes, expected #{target_bytes}" unless path.bytesize == target_bytes
+
+    path
+  end
 
   def capsule_with_runtime_source
     capsule = HrmExperiment.load_yaml(CAPSULE)

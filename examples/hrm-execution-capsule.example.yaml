@@ -2,7 +2,7 @@ schema_version: agent_playbooks.hrm_execution_capsule.v0.7
 session_id: MS-EXAMPLE-2026-08-25-HRM-2
 playbook_pin:
   kernel_id: AP-EXEC-001
-  kernel_version: 0.1.0-rc.13
+  kernel_version: 0.1.0-rc.14
   source_sha: "1111111111111111111111111111111111111111"
 system_reference: SYS-EXAMPLE-001
 project_root: /example/project
@@ -71,11 +71,11 @@ context_dependencies:
   - dependency_id: ap.exec.kernel
     kind: playbook_kernel
     source_path: playbooks/hrm-execution-kernel.md
-    binding: AP-EXEC-001/0.1.0-rc.13@1111111111111111111111111111111111111111
+    binding: AP-EXEC-001/0.1.0-rc.14@1111111111111111111111111111111111111111
   - dependency_id: example.runtime-source
     kind: implementation_source
     source_path: scripts/hrm_supervisor.rb
-    binding: rc13-example-source
+    binding: rc14-example-source
 workflow_lease:
   objective: advance_to_next_human_gate
   permitted_routine_actions:

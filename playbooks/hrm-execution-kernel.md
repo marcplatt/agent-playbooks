@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-EXEC-001
 title: Compact HRM Execution Kernel
-version: "0.1.0-rc.13"
+version: "0.1.0-rc.14"
 status: experimental
 owner: Adopting organization
 mode: self-contained-bounded-hrm-execution
@@ -198,7 +198,7 @@ context-budget exception.
 
 ## Non-LLM supervisor and attention firewall
 
-The rc.13 experiment uses one state-owning process below the LLM orchestrator. The supervisor
+The rc.14 experiment preserves the rc.13 state-owning process below the LLM orchestrator. The supervisor
 does not interpret business meaning, derive scope, spawn workers, select checks, grant
 authority, or perform repository/provider effects. It owns only the mechanical run protocol:
 
@@ -214,7 +214,7 @@ authority, or perform repository/provider effects. It owns only the mechanical r
 The append-only ledger remains authoritative. The session state, scorecard, and supervisor
 projection are disposable derived artifacts and grant no new authority. If a process stops
 after the ledger append but before the projection commit, `resume` repairs the derived set from
-the ledger before continuation. Every rc.13 append, handoff receipt, activation, context receipt,
+the ledger before continuation. Every rc.13 or rc.14 append, handoff receipt, activation, context receipt,
 guarded action, and transition goes through `scripts/hrm_supervisor.rb`; direct event appends are
 legacy diagnostic behavior for older pins.
 `transition` derives the execution-mode successor mechanically, writes it once, validates it,
@@ -270,6 +270,19 @@ therefore fail without a ledger write, while a legitimate worker can change an i
 source or resolve an API-skill registry after its guard and still submit the bound result. Exact
 deterministic source dispatch recomputation remains mandatory through activation, context, and
 guard. A valid provider inventory result refresh exposes the next builder launch immediately.
+
+RC.14 changes only the launch-receipt representation. Start and handoff receipts retain the
+session, cursor, next action, append identity, and complete `worker_launch`, but omit projection
+diagnostics that the root does not consume before spawning. `worker_launch` keeps every exact
+command array, dispatch path and digest, dependency ID, role budget, worker claim, activation
+binding, and action-specific valid result template. Shared one-shot encoding, argument, and size
+metadata appears once; fresh-fork, root-wait, and execution-order policy uses one compact structured
+block. The receipt remains self-sufficient: neither root nor worker rereads a derived artifact
+before launch. The claim-bearing handoff receipt's `activation_command` is the compact launch-ready
+signal; the preceding resume receipt has no activation command. The 4,096-byte runtime preappend
+cap is unchanged. The AE-scale seven-seam fixture
+that produced a 4,155-byte rc.13 claim-bearing handoff is 2,941 bytes at rc.14 resume and 3,660
+bytes at rc.14 handoff, leaving 436 bytes below the hard cap.
 
 All event, state, scorecard, and projection paths resolve from the capsule `project_root`; a
 same-named path elsewhere is rejected. The projection carries the scorecard verdict and stops
@@ -339,7 +352,7 @@ already-required HRM closure record. Never open a branch or PR solely to receipt
 ## Prompt
 
 ```text
-Run the target HRM under AP-EXEC-001/0.1.0-rc.13.
+Run the target HRM under AP-EXEC-001/0.1.0-rc.14.
 
 Repository policy and accepted HRM map: load from the current repository.
 Capsule, event log, and session state: resume valid artifacts or derive them.
@@ -378,9 +391,10 @@ Capsule, event log, and session state: resume valid artifacts or derive them.
    assignment and carries the
    role context budget, a smaller loaded-artifact allowance, a tool-output reserve, source-size
    bounds, `bounded_queries_never_full_source`, and exact supervisor handoff, activation, context,
-   guard, and result commands. Execute the resume receipt's handoff command directly. On its
-   `launch_ready` receipt, spawn the assigned role immediately with `fork_turns: none`; do not open
-   state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
+   guard, and result commands. Execute the resume receipt's handoff command directly. For rc.14,
+   spawn the assigned role immediately with `fork_turns: none` when the handoff receipt contains
+   its claim-bound `activation_command`; for older receipt formats, use `launch_ready` when
+   present. Do not open state, scorecard, projection, or dispatch and do not wait before the spawn. The root waits
    exactly once after spawning. Machine-parsed dispatch bytes are not conversation echo. The
    worker reports exact
    materialized dependency bytes by ID and non-dependency tool-output bytes without double counting.
@@ -550,6 +564,14 @@ unbounded vocabulary.
 
 ## Change note
 
+- **0.1.0-rc.14 — 2026-08-28:** Compacts only start and claim-bearing handoff receipts while
+  preserving rc.13 activation, one-shot commands, result contracts, lifecycle integrity, and
+  20-second/10-second gates. Deduplicates one-shot metadata and launch policy, and removes
+  pre-spawn projection diagnostics without removing executable commands, exact claim/dispatch
+  bindings, dependency budgets, or action-specific templates. The permanent AE-scale regression
+  reproduces the rc.13 4,155-byte fail-closed receipt and measures rc.14 at 2,941-byte resume and
+  3,660-byte handoff under the unchanged 4,096-byte preappend cap. RC.11-RC.13 objects and pending
+  claims remain version-gated and unchanged.
 - **0.1.0-rc.13 — 2026-08-28:** Adds an atomic claim/cursor/current-dispatch-digest-bound
   worker activation as the child's required first tool and measures session-to-activation and
   handoff-to-activation against 20-second and 10-second runtime-build gates. Launch receipts carry

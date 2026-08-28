@@ -12,7 +12,7 @@ require "yaml"
 module HrmExperiment
   class ValidationError < StandardError; end
 
-  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.13"
+  SUPERVISOR_OWNED_KERNEL_VERSION = "0.1.0-rc.14"
   SUPERVISOR_OWNED_KERNEL_VERSIONS = %w[
     0.1.0-rc.6
     0.1.0-rc.7
@@ -22,7 +22,9 @@ module HrmExperiment
     0.1.0-rc.11
     0.1.0-rc.12
     0.1.0-rc.13
+    0.1.0-rc.14
   ].freeze
+  ACTIVATION_KERNEL_VERSIONS = %w[0.1.0-rc.13 0.1.0-rc.14].freeze
 
   PINNED_CONTEXT_BYTES_BY_ROLE = {
     "orchestrator" => 32_000,
@@ -487,15 +489,17 @@ module HrmExperiment
     end
 
     profile = capsule["experiment_profile"]
-    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13" &&
+    if ACTIVATION_KERNEL_VERSIONS.include?(capsule.dig("playbook_pin", "kernel_version")) &&
        capsule["execution_mode"] == "runtime_build"
       startup_activation = capsule.dig("budgets", "max_startup_to_worker_activation_seconds")
       handoff_activation = capsule.dig("budgets", "max_handoff_to_worker_activation_seconds")
       unless startup_activation.is_a?(Integer) && startup_activation.positive? && startup_activation <= 20
-        raise ValidationError, "rc.13 runtime build requires max_startup_to_worker_activation_seconds <= 20"
+        raise ValidationError,
+              "rc.13/rc.14 runtime build requires max_startup_to_worker_activation_seconds <= 20"
       end
       unless handoff_activation.is_a?(Integer) && handoff_activation.positive? && handoff_activation <= 10
-        raise ValidationError, "rc.13 runtime build requires max_handoff_to_worker_activation_seconds <= 10"
+        raise ValidationError,
+              "rc.13/rc.14 runtime build requires max_handoff_to_worker_activation_seconds <= 10"
       end
     end
     contract = PROFILE_CONTRACTS[profile]
@@ -907,7 +911,7 @@ module HrmExperiment
   end
 
   def event_schema_version(capsule)
-    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13].include?(capsule.dig("playbook_pin", "kernel_version")) ?
+    %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14].include?(capsule.dig("playbook_pin", "kernel_version")) ?
       "agent_playbooks.hrm_run_event.v0.5" : "agent_playbooks.hrm_run_event.v0.4"
   end
 
@@ -1003,7 +1007,7 @@ module HrmExperiment
       identity_errors << "hrm_id mismatch at event #{event['sequence']}" unless event["hrm_id"] == capsule.dig("hrm", "id")
     end
 
-    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13].include?(capsule.dig("playbook_pin", "kernel_version"))
+    if %w[0.1.0-rc.8 0.1.0-rc.9 0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14].include?(capsule.dig("playbook_pin", "kernel_version"))
       required_seams = capsule.dig("function_slice", "required_real_seams").sort
       inventories = events.select do |event|
         event["event_type"] == "runtime_binding_inventory" &&
@@ -1104,7 +1108,7 @@ module HrmExperiment
     structured_handoff = Array(by_type["worker_handoff_started"]).any? do |event|
       event.dig("details", "worker_claim_id")
     end
-    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13" &&
+    if ACTIVATION_KERNEL_VERSIONS.include?(capsule.dig("playbook_pin", "kernel_version")) &&
        structured_handoff && terminal_event
       required_event_types << "worker_started"
     end
@@ -1173,7 +1177,7 @@ module HrmExperiment
       unless context.fetch("files_outside_declared_dependencies") == outside_ids.length
         identity_errors << "context dependency count mismatch at event #{event['sequence']}"
       end
-      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13].include?(capsule.dig("playbook_pin", "kernel_version")) &&
+      next unless %w[0.1.0-rc.10 0.1.0-rc.11 0.1.0-rc.12 0.1.0-rc.13 0.1.0-rc.14].include?(capsule.dig("playbook_pin", "kernel_version")) &&
                   event["schema_version"] == "agent_playbooks.hrm_run_event.v0.5"
 
       loaded_bytes = context["loaded_artifact_bytes_by_id"]
@@ -1311,13 +1315,13 @@ module HrmExperiment
        startup_to_handoff_seconds > capsule.dig("budgets", "max_startup_to_worker_handoff_seconds")
       process_reasons << "worker-handoff startup budget exceeded"
     end
-    rc13_runtime_build = capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13" &&
-                         capsule["execution_mode"] == "runtime_build"
-    if rc13_runtime_build && startup_to_activation_seconds &&
+    activation_runtime_build = ACTIVATION_KERNEL_VERSIONS.include?(capsule.dig("playbook_pin", "kernel_version")) &&
+                               capsule["execution_mode"] == "runtime_build"
+    if activation_runtime_build && startup_to_activation_seconds &&
        startup_to_activation_seconds > capsule.dig("budgets", "max_startup_to_worker_activation_seconds")
       process_reasons << "worker-activation startup budget exceeded"
     end
-    if rc13_runtime_build && handoff_to_activation_seconds &&
+    if activation_runtime_build && handoff_to_activation_seconds &&
        handoff_to_activation_seconds > capsule.dig("budgets", "max_handoff_to_worker_activation_seconds")
       process_reasons << "worker activation after handoff budget exceeded"
     end
@@ -1478,7 +1482,7 @@ module HrmExperiment
         "reasons" => reasons.uniq
       }
     }
-    if capsule.dig("playbook_pin", "kernel_version") == "0.1.0-rc.13"
+    if ACTIVATION_KERNEL_VERSIONS.include?(capsule.dig("playbook_pin", "kernel_version"))
       scorecard.fetch("flow").merge!(
         "startup_to_first_worker_activation_seconds" => startup_to_activation_seconds,
         "handoff_to_first_worker_activation_seconds" => handoff_to_activation_seconds
@@ -1500,7 +1504,7 @@ module HrmExperiment
         ruby scripts/hrm_experiment.rb validate-grant GRANT.yaml CAPSULE.yaml
         ruby scripts/hrm_experiment.rb evaluate CAPSULE.yaml EVENTS.jsonl
 
-      rc.6-rc.13 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
+      rc.6-rc.14 mutations are supervisor-owned. Use scripts/hrm_supervisor.rb append, guard, supersede, or transition.
     TEXT
   end
 
