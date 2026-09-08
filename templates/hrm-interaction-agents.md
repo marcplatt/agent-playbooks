@@ -1,5 +1,9 @@
 # HRM interaction pilot dispatcher
 
+Historical profile for AP-INTERACT RC.33, the first Astra-driven experiment. Review
+the [experiment findings](../experiments/ap-interact-rc33/README.md) before any
+adoption; the recorded additive-intent and unchanged-review defects remain open.
+
 Use this profile only for a project explicitly adopting `ap-hrm-interaction/1`.
 Record the exact AP source revision and project-owned milestone when adopting it.
 This template does not activate itself or replace another repository's policy.

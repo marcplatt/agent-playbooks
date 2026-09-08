@@ -61,7 +61,13 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
-## Local interaction-kernel pilot
+## AP-INTERACT RC.33 — first Astra-driven development experiment
+
+[Experiment record](experiments/ap-interact-rc33/README.md) preserves PR #10 as an
+experiment outside AP `main`, with its audit findings and historical AE canary trial.
+This operator-designated RC.33 is distinct from the earlier AP-EXEC RC.33
+deployment-preflight compiler. Records under `experiments/` are historical evidence,
+not project adoption or operating policy.
 
 [HRM interaction kernel](playbooks/hrm-interaction-kernel.md) provides a separate
 `ap-hrm-interaction/1` command service for operator intent, general work orders,

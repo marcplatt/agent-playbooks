@@ -1,13 +1,27 @@
 ---
 playbook_id: AP-INTERACT-001
-title: HRM interaction kernel
+title: AP-INTERACT RC.33 - first Astra-driven interaction kernel experiment
 version: "0.2.0-pilot"
 status: experimental
 owner: Adopting organization
 mode: local-review-and-remediation
+experiment_id: AP-INTERACT-RC33
 ---
 
 # HRM interaction kernel
+
+Recorded as **AP-INTERACT RC.33**, the first Astra-driven development experiment in
+this project, at the operator's direction. The original software version remains
+`0.2.0-pilot` and the wire protocol remains `ap-hrm-interaction/1`. This is a separate
+line from AP-EXEC RC.32 and the earlier AP-EXEC RC.33 deployment-preflight compiler.
+See the [experiment record](../experiments/ap-interact-rc33/README.md) for exact
+lineage, the historical AE trial, and unresolved findings. It is not adopted policy.
+
+The later audit found that additive instructions can be treated as replacements
+and that revision-only changes can make unchanged deliverables eligible for another
+review. The lifecycle descriptions below express the intended contract; those two
+invariants are not reliably enforced by the frozen implementation. The experiment
+records these defects without changing the tested kernel.
 
 This pilot implements the local command and state layer for commissioning work,
 reviewing a milestone, and correcting it without losing the operator's decisions.
@@ -194,6 +208,10 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **AP-INTERACT RC.33 record — 2026-09-08:** Names PR #10 as the first Astra-driven
+  experiment, records its separate ancestry and known defects, and retains AE trial
+  findings outside AP `main`. Does not change the kernel or its protocol version.
 
 - **0.2.0-pilot — 2026-09-08:** Introduces a separate local interaction protocol with
   durable operator intent, exact decision binding, general work orders, writer claims,

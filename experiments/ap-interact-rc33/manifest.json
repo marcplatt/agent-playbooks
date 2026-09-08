@@ -1,0 +1,532 @@
+{
+  "schema_version": "agent_playbooks.ap_interact_experiment_record.v0.1",
+  "record_status": "completed_with_open_failures_archived",
+  "experiment": {
+    "id": "AP-INTERACT-RC33",
+    "display_name": "AP-INTERACT RC.33 - first Astra-driven development pilot",
+    "series": "AP-INTERACT",
+    "ordinal": "RC.33",
+    "purpose": "Evaluate durable operator intent, bounded work commissioning, and repeated review and remediation through the local HRM interaction kernel.",
+    "user_designation": "first Astra-driven development",
+    "started_on": "2026-09-08",
+    "completed_at": "2026-09-08T19:05:47.726662Z"
+  },
+  "protocol": {
+    "id": "ap-hrm-interaction/1",
+    "playbook_id": "AP-INTERACT-001",
+    "playbook_version": "0.2.0-pilot",
+    "changed_for_experiment_record": false
+  },
+  "agent_playbooks_repository": {
+    "url": "https://github.com/marcplatt/agent-playbooks",
+    "pull_request": {
+      "number": 10,
+      "url": "https://github.com/marcplatt/agent-playbooks/pull/10",
+      "title": "Archive AP-INTERACT RC.33: first Astra-driven development pilot",
+      "head_branch": "codex/hrm-interaction-kernel",
+      "base_branch": "codex/ap-interact-rc33-archive-base",
+      "intended_disposition": "close_unmerged_after_evidence"
+    },
+    "baseline_sha": "d0e2d72b8774184f30487f678f860c4e989f6f57",
+    "baseline_tree_sha": "b618f613c7a755dcaf73a63ecd9ce013e2239a3b",
+    "implementation_sha": "5db6ca44b48271680ef70bd27a8c5b7ae3473082",
+    "implementation_tree_sha": "8ac48dd2ceceb3f0eb11f5e9a2f81b90ed90b89f",
+    "documentation_commit": "Recorded in pull-request history; intentionally not self-referential."
+  },
+  "lineage": {
+    "parent_sha": "d0e2d72b8774184f30487f678f860c4e989f6f57",
+    "is_descendant_of_ap_exec_rc32": false,
+    "merge_base_with_ap_exec_rc33": "d0e2d72b8774184f30487f678f860c4e989f6f57",
+    "distinct_historical_identity": {
+      "id": "AP-EXEC-RC33",
+      "display_name": "AP-EXEC RC.33 - deployment-preflight compiler",
+      "head_sha": "0856fd2b9cfad74a8122c8ae8b5acc61cecabfef",
+      "tree_sha": "95451b69816b8243c469fd83d2c30d9e81c5e696",
+      "parent_id": "AP-EXEC-RC32",
+      "parent_sha": "de4a53c92c1c55ae3432703862e8de19a2e0a964",
+      "parent_tree_sha": "21d4ce22b6505b11e24e306f611b0f95285e3f0f"
+    }
+  },
+  "model_roles": [
+    {
+      "model": "gpt-6-astra",
+      "role": "orchestrator",
+      "phase": "development_and_canary_coordination",
+      "participation": "observed",
+      "evidence": "User designation and current Codex task orchestration record"
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "role": "bounded_implementation_worker",
+      "phase": "development",
+      "participation": "observed",
+      "evidence": "Private development task record; task transcript is not committed"
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "role": "independent_reviewer",
+      "phase": "development",
+      "participation": "observed",
+      "evidence": "Private review task record; task transcript is not committed"
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "role": "canary_runner",
+      "phase": "alpine_estimating_trial",
+      "participation": "observed",
+      "evidence": "Private runner result SHA-256 8c012bbd05a94b8f51b98fe3f331f7ac591199f4877321449d882f16ab77634d"
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "role": "independent_canary_checker",
+      "phase": "alpine_estimating_trial",
+      "participation": "observed",
+      "evidence": "Private checker result SHA-256 1ed7e3756bad06c34d068b2b9ca45429814968ec4fbf4e8256a457ca38bd3083"
+    }
+  ],
+  "audit": {
+    "status": "completed_with_open_defects",
+    "tested_sha": "5db6ca44b48271680ef70bd27a8c5b7ae3473082",
+    "tested_tree_sha": "8ac48dd2ceceb3f0eb11f5e9a2f81b90ed90b89f",
+    "method": "Reproduction through the actual HrmKernel::Store",
+    "run": {
+      "started_at": "2026-09-08T18:45:03.523673Z",
+      "completed_at": "2026-09-08T18:45:03.537893Z",
+      "duration_seconds": 0.014217,
+      "fixture_inputs": true,
+      "actual_human_feedback": false,
+      "ae_sha": "b24885f74d0eafc64de2adf40bcaa29f18e4425e",
+      "target_path": "src/estimating/dashboard/static/dashboard.css",
+      "target_sha256": "8cbb06e67ace9acabec85520a0eeb658193287454247629fd5a781ee4fe8cabf",
+      "application_source_changed": false,
+      "observations_completed": 2,
+      "invariants_failed": 2,
+      "ledger": {
+        "events": 13,
+        "event_hash": "807b89df27f1f5c65fdee9228cd3b8f223c64eaf102a3d1b1790435275250ba9",
+        "valid": true,
+        "private_artifact_sha256": "8bed1be1183f1dcf854141db191ee3b9b2193af961138b12ed2b1648ff66e9ab",
+        "private_artifact_bytes": 7029
+      },
+      "private_result": {
+        "sha256": "e10e02c463008da649a9269cabdee0e24b7431ada717bb1e04e9a64bb9dcad29",
+        "bytes": 1688
+      },
+      "private_probe_script": {
+        "sha256": "62b89900f74380f93ae49dd1134f2217297561f9908a6d2cdcf8396e27e87d6a",
+        "bytes": 5194
+      },
+      "private_check_artifacts": [
+        {
+          "sha256": "41a71f1fa36f9751c6f871c9f26e2c549020b5cbd5e7707f343bd989b2fd9c73",
+          "bytes": 432
+        },
+        {
+          "sha256": "a6bf18ac6c5abdabc84c8659569ef8eec81a33e57e9926f4394cf2c306c6ef9e",
+          "bytes": 432
+        }
+      ]
+    },
+    "findings": [
+      {
+        "id": "RC33-ASTRA-F01",
+        "classification": "defect",
+        "severity": "unassigned",
+        "summary": "Additive feedback is treated as replacement intent: after a blue instruction, a later 'Also bold' instruction supersedes blue.",
+        "affected_invariant": "A later additive correction must preserve earlier still-current operator intent.",
+        "expected": "Both blue and bold remain in the current intent projection.",
+        "observed": {
+          "blue_status": "superseded",
+          "visible_intent_ids": [
+            "bold"
+          ],
+          "invariant_passed": false
+        },
+        "status": "open",
+        "fix_sha": null,
+        "retest_run_ids": [],
+        "evidence": "Reproduced in the parent audit task; private transcript not committed."
+      },
+      {
+        "id": "RC33-ASTRA-F02",
+        "classification": "defect",
+        "severity": "unassigned",
+        "summary": "The same artifact bytes with revised submission metadata can enter a new review after changes_requested.",
+        "affected_invariant": "A requested artifact correction must be evidenced by changed current artifact content, explicit evidence-backed finding resolution, or operator clarification that makes a content change unnecessary before a replacement review is admitted.",
+        "expected": "Reject unchanged deliverables when the requested title change was not made and there is no finding resolution or operator clarification.",
+        "observed": {
+          "phase": "review_ready",
+          "deliverable_bytes_unchanged": true,
+          "requested_title_change_made": false,
+          "finding_resolution_present": false,
+          "new_operator_clarification": false,
+          "invariant_passed": false
+        },
+        "status": "open",
+        "fix_sha": null,
+        "retest_run_ids": [],
+        "evidence": "Reproduced in the parent audit task; private transcript not committed."
+      }
+    ]
+  },
+  "alpine_estimating_canary": {
+    "trial_id": "AE-AP-INTERACT-RC33-20260908",
+    "status": "completed_with_open_failures_archived",
+    "worktree_created_at": "2026-09-08T18:36:55Z",
+    "checkout_mode": "detached",
+    "repository": "https://github.com/Novarah/alpine-estimating",
+    "candidate_sha": "b24885f74d0eafc64de2adf40bcaa29f18e4425e",
+    "candidate_tree_sha": "5635761497aa14e2c2e8d16f893faf54917bafa0",
+    "fetched_origin_main_sha": "d3272967cc771cd609853053d3b4f223df7746f9",
+    "origin_main_minus_2_sha": "3ef690995b266a1e608428337d3200da0948b182",
+    "behind_origin_main": {
+      "first_parent_merges": 4,
+      "total_ancestor_commits": 78
+    },
+    "pin_reason": "Last first-parent main point whose AGENTS.md and current HRM map target the Canary; origin/main~2 already carries Production V1 work.",
+    "scope": {
+      "proof": "existing disposable local Canary proof",
+      "providers": "fake",
+      "transport": "manual CLI bridge by GPT-6 Astra",
+      "automatic_host_task_transport": false,
+      "live_provider_actions": false,
+      "deployment": false,
+      "activation": false,
+      "customer_communication": false,
+      "payment_effects": false,
+      "human_milestone_acceptance": false
+    },
+    "control_attribution": {
+      "astra_sol_experiment_harness": [
+        "candidate Git identity verification",
+        "sandbox network denial",
+        "candidate-local Python imports",
+        "non-overlapping test selection",
+        "separate real-model dispatch",
+        "worktree cleanup"
+      ],
+      "native_ap_hrm_interaction_1_evidence": [
+        "CLI state transitions",
+        "claim binding",
+        "revision binding",
+        "artifact hash binding",
+        "report hash binding"
+      ],
+      "not_demonstrated_by_report_assignments": [
+        "semantic interpretation",
+        "approval classification"
+      ]
+    },
+    "runs": [
+      {
+        "id": "canary-runner",
+        "work_order_revision": 1,
+        "claim_id": "rc33-canary-runner-claim-1",
+        "actor_id": "sol-canary-runner",
+        "model": "gpt-5.6-sol",
+        "role": "canary_runner",
+        "conclusion": "passed",
+        "started_at": "2026-09-08T18:44:09Z",
+        "ended_at": "2026-09-08T18:44:15Z",
+        "duration_seconds": 6,
+        "invocation_count": 1,
+        "exit_code": 0,
+        "sandbox_profile": "allow default; deny network-outbound",
+        "environment_controls": [
+          "isolated environment allowlist",
+          "candidate worktree PYTHONPATH",
+          "Python bytecode writes disabled",
+          "pytest plugin autoload disabled",
+          "pytest cache provider disabled",
+          "private basetemp and JUnit output"
+        ],
+        "test_files": [
+          "tests/test_ae19_3_5_disposable_pre_canary_proof.py",
+          "tests/test_ae18_17_provider_gate_isolation.py",
+          "tests/test_ae18_11_quote_set.py",
+          "tests/test_ae18_11_2_per_member_send.py",
+          "tests/test_ae19_1_production_province_evidence.py",
+          "tests/test_qbo_email_canary.py",
+          "tests/test_service_external_write_boundary.py",
+          "tests/test_dashboard_no_pii_in_sessions.py",
+          "tests/test_no_pii_in_fixtures.py",
+          "tests/test_ae19_3_4_operator_send_preflight.py"
+        ],
+        "tests": {
+          "collected": 134,
+          "passed": 134,
+          "failed": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "verified_behavior": {
+          "fixture_only": true,
+          "provider_mode": "fake",
+          "rfq_origins": [
+            "Website",
+            "Thomas"
+          ],
+          "origins_remain_separate": true,
+          "explicit_quote_email_actions": 4,
+          "fake_quote_email_receipts": 4,
+          "post_complete_rfq_fake_sms_receipts": 2,
+          "sms_only_recovery_without_qbo_replay": true,
+          "real_provider_mode_fails_closed": true,
+          "provider_or_network_calls": 0,
+          "provider_or_network_mutations": 0,
+          "tracked_application_edits": 0
+        },
+        "artifacts": [
+          {
+            "kind": "private_runner_result",
+            "sha256": "8c012bbd05a94b8f51b98fe3f331f7ac591199f4877321449d882f16ab77634d",
+            "bytes": 4332
+          },
+          {
+            "kind": "private_runner_kernel_check",
+            "sha256": "5d0b2c59d04615eae7a0c2c63ed9a257ca323a2050d874b09e30223dc894aee1",
+            "bytes": 286
+          },
+          {
+            "kind": "private_stdout",
+            "sha256": "265ac072a86a662b343cb346e7ab0790a78c5490fef723763bf65f99dcdde903",
+            "bytes": 1807
+          },
+          {
+            "kind": "private_stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          {
+            "kind": "private_junit",
+            "sha256": "610cf9632c73e247b43110c7e28de8aef833669392a09544d92530f3233ea82c",
+            "bytes": 22049
+          }
+        ],
+        "limitations": [
+          "Targeted fake-provider proof only.",
+          "No human function, UI, or UX acceptance.",
+          "No live canary, deployment, activation, received-message proof, production observation, or HRM closure.",
+          "The independent remaining-suite checker had not completed at this point."
+        ]
+      },
+      {
+        "id": "canary-checker",
+        "work_order_revision": 1,
+        "claim_id": "rc33-canary-checker-claim-1",
+        "actor_id": "sol-canary-checker",
+        "model": "gpt-5.6-sol",
+        "role": "independent_canary_checker",
+        "assessment_conclusion": "complete_with_open_failures",
+        "started_at": "2026-09-08T18:53:01Z",
+        "ended_at": "2026-09-08T18:54:05Z",
+        "duration_seconds": 64,
+        "pytest_duration_seconds": 63.07,
+        "invocation_count": 1,
+        "exit_code": 1,
+        "sandbox_profile": "allow default; deny network-outbound",
+        "source_import_verification": {
+          "uses_candidate_worktree_source": true,
+          "python_version": "3.9.6",
+          "historical_ci_python_version": "3.12"
+        },
+        "test_partition": {
+          "runner_files_excluded": 10,
+          "collected": 1634,
+          "passed": 1625,
+          "failed": 4,
+          "errors": 0,
+          "skipped": 5,
+          "warnings": 553
+        },
+        "failed_tests": [
+          "tests/test_dashboard_routes.py::test_dashboard_routes_render_the_shell",
+          "tests/test_dashboard_synthetic_banner.py::test_synthetic_banner_is_absent_from_non_settings_pages[/]",
+          "tests/test_dashboard_synthetic_banner.py::test_synthetic_status_is_present_once_in_settings",
+          "tests/test_dashboard_synthetic_banner.py::test_real_mode_omits_synthetic_banner"
+        ],
+        "failure_assessment": {
+          "shared_exception": "ValueError: fact provenance source is invalid",
+          "observed_source_class": "contact",
+          "accepted_source_classes": [
+            "form",
+            "chat"
+          ],
+          "classification": "environment_dependent_non_hermetic_historical_test_failure",
+          "network_sandbox_cause": false,
+          "clean_deterministic_baseline_defect_proven": false,
+          "harness_finding_id": "RC33-HARNESS-F03",
+          "summary": "The experiment harness failed to isolate the historical dashboard tests from the existing local intake database; historical fixture defaults left intake_db on its ambient path."
+        },
+        "ambient_local_state_exposure": {
+          "database_path_class": "default user Documents intake database",
+          "opened_read_write": true,
+          "write_capable_code_path_executed": true,
+          "actual_persistent_byte_change_proven": false,
+          "local_state_preservation_certified": false,
+          "pre_run_database_digest_available": false,
+          "pre_run_wal_digest_available": false,
+          "restoration_attempted": false
+        },
+        "artifacts": [
+          {
+            "kind": "private_checker_result",
+            "sha256": "1ed7e3756bad06c34d068b2b9ca45429814968ec4fbf4e8256a457ca38bd3083",
+            "bytes": 10079
+          },
+          {
+            "kind": "private_checker_evidence_check",
+            "sha256": "8073c56b3306fa8ed6ce431599740b82d29bd89578ab52f69da438664fa58f72",
+            "bytes": 473
+          },
+          {
+            "kind": "private_checker_command",
+            "sha256": "8087a105ffa37867f134b3dd0223845b6778ae7069259fea952a9c0b79448279",
+            "bytes": 2205
+          },
+          {
+            "kind": "private_stdout",
+            "sha256": "616cf57a7b6eb4c0141e0c3b10e3c71ca5aa7fa42a34e7c45dae2fb29acbc645",
+            "bytes": 43862
+          },
+          {
+            "kind": "private_stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          },
+          {
+            "kind": "private_junit",
+            "sha256": "dd644ed5a732af19318796bb9e190b5172da4aa2714c1ec68ca03d1ea19fdc29",
+            "bytes": 276116
+          }
+        ],
+        "evidence_check": {
+          "id": "independent-canary-evidence",
+          "conclusion": "passed",
+          "scope": "Evidence assessment is complete and candid; this does not make the complementary suite pass or resolve the kernel findings."
+        }
+      }
+    ],
+    "result": {
+      "assessment_state": "review_ready",
+      "assessment_report_only": true,
+      "application_suite_passed": false,
+      "combined_non_overlapping_tests": {
+        "collected": 1768,
+        "passed": 1759,
+        "failed": 4,
+        "errors": 0,
+        "skipped": 5
+      },
+      "kernel_findings_open": [
+        "RC33-ASTRA-F01",
+        "RC33-ASTRA-F02"
+      ],
+      "harness_findings_open": [
+        "RC33-HARNESS-F03"
+      ],
+      "interaction_ledger": {
+        "events": 8,
+        "event_hash": "cccf35ccd4ca87dda2368bcfca2d9c8b0fd42db10e919106daf56ddabf9e10cc",
+        "valid": true,
+        "work_orders_completed": 2,
+        "milestone_review_recorded": false,
+        "human_acceptance_recorded": false
+      },
+      "tracked_ae_source_changed": false,
+      "provider_or_network_actions": 0,
+      "ambient_local_database_preservation_proven": false,
+      "live_canary_proven": false,
+      "hrm_closed": false
+    },
+    "archive": {
+      "archived_at": "2026-09-08T19:05:47.626654Z",
+      "archive_manifest": {
+        "sha256": "49c9d8561d5d2a3ab0de4dad1dd2bd5b81d69abc71442459894d2b57e315a091",
+        "bytes": 3472
+      },
+      "archived_worktree_artifacts": 6,
+      "digests_verified": true,
+      "execution_metrics": {
+        "cli_commands": 8,
+        "all_cli_exit_codes_zero": true,
+        "measured_cli_total_seconds": 0.443056,
+        "projection_bytes_by_command": [1347, 2016, 2134, 2305, 3079, 3202, 3323, 3836],
+        "model_context_or_token_savings_measured": false,
+        "scope": "CLI elapsed time and JSON projection sizes only; excludes model context, tool reads, dispatch, and orchestration."
+      },
+      "cleanup": {
+        "completed_at": "2026-09-08T19:05:47.726662Z",
+        "ae_worktree_removed": true,
+        "git_registration_removed": true,
+        "temporary_parent_removed": true,
+        "other_registered_worktrees_preserved": true,
+        "operator_checkout_and_unrelated_dirty_work_preserved": true,
+        "archived_ledger_resumable": false,
+        "reason": "The original project root was intentionally deleted after evidence archival; historical ledger integrity does not establish current artifact availability."
+      },
+      "ambient_local_database_preservation_proven": false,
+      "restoration_attempted": false
+    }
+  },
+  "comparison_with_ap_exec_rc32": {
+    "ap_exec_rc32_strengths": [
+      "bounded context packs",
+      "exact Git workspace and candidate identity",
+      "compiled worker and checker execution",
+      "self-contained check acquisition",
+      "private postimage scorecard binding"
+    ],
+    "ap_interact_rc33_strengths": [
+      "durable operator intent",
+      "exact decision revision binding",
+      "general work orders",
+      "narrow role projections",
+      "repeated review and remediation within one milestone"
+    ],
+    "qualification": "The comparison is architectural and qualitative, not a head-to-head benchmark. AP-INTERACT RC.33 does not inherit AP-EXEC RC.32 controls, and its two open audit defects limit its review guarantees."
+  },
+  "known_integration_limits": [
+    "The local CLI trusts asserted actor IDs and source references.",
+    "Host task transport and authenticated model binding are not implemented.",
+    "Direct capture of operator messages in worker tasks is not implemented.",
+    "Structural evidence validation does not prove semantic correctness or full diff reach.",
+    "Structurally safe assignment and revision handling does not prove that the trusted caller supplied a semantically complete interpretation of operator intent.",
+    "Candidate pinning, sandboxing, Python import isolation, test partitioning, model dispatch, and cleanup were supplied by the experiment harness rather than the pilot kernel.",
+    "The pilot is not installed as policy in Alpine Estimating or another project repository."
+  ],
+  "claims": {
+    "astra_driven_development_observed": true,
+    "canary_runner_execution_observed": true,
+    "independent_canary_check_observed": true,
+    "human_acceptance_observed": false,
+    "project_adoption": false,
+    "deployment": false,
+    "activation": false,
+    "live_provider_effects": false,
+    "production_canary_success": false,
+    "context_or_token_savings_measured": false
+  },
+  "sources": [
+    {
+      "kind": "agent_playbooks_pull_request",
+      "ref": "https://github.com/marcplatt/agent-playbooks/pull/10"
+    },
+    {
+      "kind": "agent_playbooks_implementation",
+      "ref": "5db6ca44b48271680ef70bd27a8c5b7ae3473082"
+    },
+    {
+      "kind": "historical_ap_exec_rc32",
+      "ref": "de4a53c92c1c55ae3432703862e8de19a2e0a964"
+    },
+    {
+      "kind": "historical_ap_exec_rc33",
+      "ref": "0856fd2b9cfad74a8122c8ae8b5acc61cecabfef"
+    },
+    {
+      "kind": "alpine_estimating_candidate",
+      "ref": "b24885f74d0eafc64de2adf40bcaa29f18e4425e"
+    }
+  ]
+}
