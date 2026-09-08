@@ -61,6 +61,16 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
+## Local interaction-kernel pilot
+
+[HRM interaction kernel](playbooks/hrm-interaction-kernel.md) provides a separate
+`ap-hrm-interaction/1` command service for operator intent, general work orders,
+exact decision responses, and review/remediation cycles. Run
+`ruby scripts/hrm_kernel.rb --help` for its local interface. It preserves historical
+RC ledgers and does not automatically install policy, launch model tasks, or execute
+external effects. Its adopting-role profile assigns GPT-6 Astra to orchestration
+and GPT-5.6 Sol to workers and independent review.
+
 ## Experimental compact execution
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
