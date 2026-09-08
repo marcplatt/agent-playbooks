@@ -22,6 +22,7 @@ class HrmKernelExecutionTest < Minitest::Test
     File.write(@forbidden_read, "private-existing-data\n")
     File.write(@forbidden_write, "preserve\n")
     File.write(File.join(@project_root, ".gitignore"), "/.checks/\n")
+    File.write(File.join(@project_root, ".env.example"), "EXAMPLE_ONLY=not-secret\n")
     File.write(File.join(@project_root, "app.txt"), "before\n")
     File.write(File.join(@project_root, "other.txt"), "other-before\n")
     File.write(File.join(@project_root, "check.rb"), <<~RUBY)
@@ -162,6 +163,31 @@ class HrmKernelExecutionTest < Minitest::Test
     result = execution.run(spec: isolated_spec, binding: candidate.fetch("binding"), candidate: candidate)
     assert_equal "failed", result.fetch("conclusion")
     assert_equal "preserve\n", File.read(@forbidden_write)
+  end
+
+  def test_sensitive_file_metadata_is_visible_but_file_contents_are_blocked
+    File.write(File.join(@project_root, "check.rb"), <<~RUBY)
+      metadata = File.stat(".env.example")
+      abort("sensitive example metadata unavailable") unless metadata.file? && metadata.size.positive?
+      begin
+        File.binread(".env.example")
+        abort("sensitive example contents were readable")
+      rescue Errno::EACCES, Errno::EPERM
+        puts "metadata-visible-data-blocked"
+      end
+    RUBY
+    git("add", "check.rb")
+    execution = runner
+    candidate = capture(
+      execution,
+      paths: %w[app.txt check.rb],
+      authorized_paths: %w[app.txt other.txt check.rb]
+    )
+    result = execution.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+    descriptor = result.select { |key, _| %w[receipt_path receipt_sha256].include?(key) }
+    receipt = execution.verify_receipt!(descriptor, binding: candidate.fetch("binding"), candidate: candidate)
+    assert_equal "passed", result.fetch("conclusion"), private_log(receipt.dig("stderr", "path"))
+    assert_includes private_log(receipt.dig("stdout", "path")), "metadata-visible-data-blocked"
   end
 
   def test_candidate_capture_covers_add_delete_and_rejects_scope_or_symlink_escape

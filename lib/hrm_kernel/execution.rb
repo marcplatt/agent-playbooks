@@ -345,7 +345,7 @@ module HrmKernel
         "environment_allowlist" => @environment_allowlist.sort,
         "network" => "deny",
         "write" => "disposable_run_root_only",
-        "sensitive_existing_files" => "read_denied"
+        "sensitive_existing_files" => "data_read_denied"
       }
     end
 
@@ -437,7 +437,7 @@ module HrmKernel
       end
       read_roots.each { |path| rules << "(allow file-read* (subpath #{profile_string(path)}))" }
       @sensitive_existing_files.each do |path|
-        rules << "(deny file-read* (literal #{profile_string(path)}))"
+        rules << "(deny file-read-data (literal #{profile_string(path)}))"
       end
       rules << "(allow file-write* (subpath #{profile_string(run_root)}) (literal \"/dev/null\"))"
       rules.join(" ")
