@@ -23,11 +23,18 @@ module HrmKernel
 
     def check(input)
       exact_input!(input, %w[job_id check_id])
-      context = @host.check_context(job_id: input.fetch("job_id"), check_id: input.fetch("check_id"))
-      job = context.fetch("job")
-      collected = @host.collect(job_id: job.fetch("job_id"))
-      fail!("only an implemented worker may run its frozen checks") unless job["role"] == "worker" && collected.dig("result", "status") == "implemented"
       state = implementation_state!
+      existing_path = check_path(input.fetch("job_id"), input.fetch("check_id"))
+      existing = File.exist?(existing_path) && read_record(existing_path)
+      job = existing && refresh_job(existing["refresh_context"], state, input.fetch("check_id"))
+      unless job
+        context = @host.check_context(job_id: input.fetch("job_id"), check_id: input.fetch("check_id"))
+        job = context.fetch("job")
+        collected = @host.collect(job_id: job.fetch("job_id"))
+        fail!("only an implemented worker may run its frozen checks") unless job["role"] == "worker" && collected.dig("result", "status") == "implemented"
+      end
+      spec = Array(job.fetch("check_plan").fetch("checks")).find { |entry| entry["id"] == input.fetch("check_id") }
+      fail!("check_id is not uniquely declared in the frozen plan") unless spec && job.fetch("check_plan").fetch("checks").count { |entry| entry["id"] == input.fetch("check_id") } == 1
       order = state.fetch("work_orders").fetch(job.fetch("work_order_id"))
       runner = execution(job)
       candidate = runner.capture_candidate(
@@ -35,9 +42,10 @@ module HrmKernel
         revision: job.fetch("revision"), requirement_revisions: order.fetch("requirement_revisions"),
         check_plan: job.fetch("check_plan"), authorized_paths: authorized_paths(state)
       )
-      outcome = runner.run(spec: context.fetch("spec"), binding: candidate.fetch("binding"), candidate: candidate)
+      outcome = runner.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
       record = { "job_id" => job["job_id"], "check_id" => input["check_id"],
-                 "candidate" => candidate, "execution" => descriptor(outcome), "conclusion" => outcome["conclusion"] }
+                 "candidate" => candidate, "execution" => descriptor(outcome), "conclusion" => outcome["conclusion"],
+                 "refresh_context" => refresh_context(job) }
       Host.atomic_json(check_path(job["job_id"], input["check_id"]), record)
       record.slice("job_id", "check_id", "conclusion", "execution").merge("candidate_digest" => candidate["candidate_digest"], "reused" => outcome["reused"])
     end
@@ -46,12 +54,32 @@ module HrmKernel
       exact_input!(input, %w[job_id])
       id = identifier!(input.fetch("job_id"))
       persisted = File.join(@directory, "submit-#{id}.json")
-      return @store.transact(read_record(persisted)) if File.exist?(persisted)
-
-      job = @host.job_record(job_id: id)
-      collected = @host.collect(job_id: id)
-      fail!("only an implemented worker can submit") unless job["role"] == "worker" && collected.dig("result", "status") == "implemented"
       state = implementation_state!
+      if File.exist?(persisted)
+        prior = read_record(persisted)
+        begin
+          Evidence.verify_completed_work!(state, state_dir: @store.directory)
+          return @store.transact(prior)
+        rescue HrmKernel::Error
+          # A changed full candidate needs fresh checks and an evidence refresh.
+        end
+      end
+      job = nil
+      if File.exist?(persisted)
+        work_order_id = read_record(persisted).dig("data", "work_order_id")
+        order = state.fetch("work_orders").fetch(work_order_id)
+        if order["status"] == "completed"
+          first_check = order.fetch("check_ids").first
+          record = read_record(check_path(id, first_check))
+          job = refresh_job(record["refresh_context"], state, first_check)
+          fail!("completed work requires fresh native check records") unless job
+        end
+      end
+      unless job
+        job = @host.job_record(job_id: id)
+        collected = @host.collect(job_id: id)
+        fail!("only an implemented worker can submit") unless job["role"] == "worker" && collected.dig("result", "status") == "implemented"
+      end
       order = state.fetch("work_orders").fetch(job.fetch("work_order_id"))
       runner = execution(job)
       records = order.fetch("check_ids").map { |check_id| read_record(check_path(id, check_id)) }
@@ -67,10 +95,15 @@ module HrmKernel
         sha = entry["status"] == "D" ? Digest::SHA256.hexdigest("deleted\0#{entry.fetch('path')}") : entry.fetch("sha256")
         { "path" => entry.fetch("path"), "sha256" => sha }
       end
+      if order["status"] == "completed"
+        fail!("evidence refresh cannot change the completed order's artifacts") unless order.fetch("artifacts") == artifacts
+      else
+        fail!("work order is not running") unless order["status"] == "running"
+      end
       root = state.fetch("milestone").fetch("project_root")
       checks = records.map do |record|
         check_id = identifier!(record.fetch("check_id"))
-        relative = "#{REPORT_DIRECTORY}/#{id}-#{check_id}.json"
+        relative = "#{REPORT_DIRECTORY}/#{id}-#{check_id}-#{candidate.fetch('candidate_digest')}.json"
         ignored_report_path!(root, relative)
         report = { "check_id" => check_id, "conclusion" => "passed", "work_order_id" => order["id"],
                    "revision" => order["revision"], "artifacts" => artifacts, "execution" => record.fetch("execution") }
@@ -79,15 +112,36 @@ module HrmKernel
         Host.atomic_json(path, report)
         { "id" => check_id, "conclusion" => "passed", "artifact_path" => relative, "sha256" => Digest::SHA256.file(path).hexdigest }
       end
-      command = {
+      submit_command = {
         "command_id" => "native-submit-#{id}", "type" => "work_order.submit",
         "actor" => { "role" => "worker", "id" => job.fetch("actor_id") },
         "data" => { "work_order_id" => order["id"], "revision" => order["revision"],
                     "claim_id" => job.fetch("claim_id"), "artifacts" => artifacts, "checks" => checks }
       }
+      if order["status"] == "completed"
+        if File.exist?(persisted) && read_record(persisted) == submit_command
+          return @store.transact(submit_command)
+        end
+        refresh_command = submit_command.merge(
+          "command_id" => "native-refresh-#{id}-#{candidate.fetch('candidate_digest')}",
+          "type" => "work_order.refresh_evidence"
+        )
+        refresh_path = File.join(@directory, "refresh-#{id}-#{candidate.fetch('candidate_digest')}.json")
+        if File.exist?(refresh_path)
+          fail!("persisted evidence refresh does not match current evidence") unless read_record(refresh_path) == refresh_command
+        else
+          Host.atomic_json(refresh_path, refresh_command)
+        end
+        return @store.transact(read_record(refresh_path))
+      end
+
       # Persist before append, making a crash after the append safely replayable.
-      Host.atomic_json(persisted, command)
-      @store.transact(command)
+      if File.exist?(persisted)
+        fail!("persisted submission does not match current evidence") unless read_record(persisted) == submit_command
+      else
+        Host.atomic_json(persisted, submit_command)
+      end
+      @store.transact(read_record(persisted))
     end
 
     def assess(input)
@@ -149,6 +203,27 @@ module HrmKernel
       state = @store.read.fetch("state")
       fail!("native coordination requires implementation mode") unless state && state.dig("milestone", "mode") == "implementation"
       state
+    end
+
+    def refresh_context(job)
+      job.slice(
+        "job_id", "role", "actor_id", "work_order_id", "claim_id", "revision", "project_root",
+        "check_plan", "execution_read_roots", "execution_environment_allowlist"
+      )
+    end
+
+    def refresh_job(context, state, check_id)
+      return nil unless context.is_a?(Hash)
+      required = %w[job_id role actor_id work_order_id claim_id revision project_root check_plan execution_read_roots execution_environment_allowlist]
+      fail!("native check refresh context is malformed") unless context.keys.sort == required.sort
+      order = state.fetch("work_orders")[context["work_order_id"]]
+      return nil unless order && order["status"] == "completed"
+      valid = context["role"] == "worker" && context["actor_id"] == order["last_owner_id"] &&
+              context["revision"] == order["revision"] && context["claim_id"] == order.fetch("claim_history").last &&
+              context["project_root"] == state.dig("milestone", "project_root") &&
+              Array(context.dig("check_plan", "checks")).count { |entry| entry["id"] == check_id } == 1
+      fail!("native check refresh context is stale") unless valid
+      context
     end
 
     def execution(job)

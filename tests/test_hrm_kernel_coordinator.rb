@@ -19,9 +19,12 @@ class HrmKernelCoordinatorTest < Minitest::Test
     @state_dir = File.join(@temporary, "state")
     File.write(File.join(@project, ".gitignore"), "/.codex/hrm-runs/\n")
     File.write(File.join(@project, "app.txt"), "before\n")
+    File.write(File.join(@project, "sibling.txt"), "before\n")
     File.write(File.join(@project, "check.rb"), <<~'RUBY')
       require "json"
-      abort "worker did not implement the behavior" unless File.read("app.txt") == "implemented\n"
+      target = ENV.fetch("TARGET", "app.txt")
+      expected = ENV.fetch("EXPECTED", "implemented") + "\n"
+      abort "worker did not implement the behavior" unless File.read(target) == expected
       File.write(File.join(ENV.fetch("RUN_ROOT"), "test.sqlite3"), "temporary test data")
       puts JSON.generate("conclusion" => "passed")
       exit 7 if ENV["FAIL_CHECK"] == "yes"
@@ -37,7 +40,7 @@ class HrmKernelCoordinatorTest < Minitest::Test
       "milestone_id" => "native-trial", "outcome" => "Implement then independently review the application",
       "project_root" => @project, "mode" => "implementation",
       "requirements" => [{ "id" => "behavior", "text" => "Application contains implemented behavior" }],
-      "allowed_paths" => ["app.txt"],
+      "allowed_paths" => ["app.txt", "sibling.txt"],
       "acceptance_scenarios" => [{ "id" => "scenario", "text" => "Operator can use implemented behavior", "requirement_ids" => ["behavior"], "check_ids" => ["behavior-check"] }]
     })
     command("work_order.create", "orchestrator", "astra", {
@@ -53,11 +56,16 @@ class HrmKernelCoordinatorTest < Minitest::Test
       reviewer = packet["actor_id"].start_with?("reviewer-")
       thread = reviewer ? "11234567-89ab-cdef-0123-456789abcdef" : "01234567-89ab-cdef-0123-456789abcdef"
       puts JSON.generate("type" => "thread.started", "thread_id" => thread)
-      File.write("app.txt", "implemented\n") unless reviewer
+      order_id = packet.dig("role_projection", "work_orders").keys.first
+      target = order_id == "sibling" ? "sibling.txt" : "app.txt"
+      unless reviewer
+        value = packet.fetch("task").include?("correct") ? "corrected\n" : "implemented\n"
+        File.write(target, value)
+      end
       pending = packet.fetch("task") == "request-changes"
       result = {
         "status" => reviewer ? "reviewed" : "implemented", "summary" => "Process fixture completed",
-        "changed_paths" => reviewer ? [] : ["app.txt"],
+        "changed_paths" => reviewer ? [] : [target],
         "findings" => pending ? [{"severity" => "error", "message" => "Required behavior remains incomplete", "paths" => ["app.txt"], "scenario_ids" => ["scenario"]}] : [],
         "scenario_dispositions" => reviewer ? [{"scenario_id" => "scenario", "status" => pending ? "failed" : "passed", "evidence" => pending ? "A required part remains missing" : "Inspected implemented behavior and native check evidence"}] : [],
         "context_requests" => []
@@ -152,6 +160,55 @@ class HrmKernelCoordinatorTest < Minitest::Test
     assert_equal 2, @store.read.fetch("state").fetch("findings").length
   end
 
+  def test_sibling_correction_requires_unchanged_order_evidence_refresh_and_fresh_assessment
+    implement_and_submit
+    command("work_order.create", "orchestrator", "astra", {
+      "work_order_id" => "sibling", "intent_id" => "milestone_initial", "objective" => "Implement sibling behavior",
+      "requirement_ids" => ["behavior"], "paths" => ["sibling.txt"], "check_ids" => ["sibling-check"],
+      "effect_class" => "local_repository"
+    })
+    dispatch_worker("sibling-job", "sibling", "Implement sibling behavior", sibling_plan(expected: "implemented"))
+    @coordinator.check("job_id" => "sibling-job", "check_id" => "sibling-check")
+    @coordinator.submit("job_id" => "sibling-job")
+
+    # The sibling candidate invalidated the first order's full-candidate receipt.
+    assert_raises(HrmKernel::Error) { review(job_id: "reviewer-stale-before-refresh", context_paths: ["app.txt", "sibling.txt"]) }
+    @coordinator.check("job_id" => "worker-job", "check_id" => "behavior-check")
+    refreshed = @coordinator.submit("job_id" => "worker-job")
+    assert_equal 1, refreshed.dig("projection", "work_orders", "implement", "evidence_history").length
+    review(job_id: "reviewer-initial", context_paths: ["app.txt", "sibling.txt"])
+    @coordinator.assess("job_id" => "reviewer-initial")
+    original_assessment = @store.read.dig("state", "assessments", "reviewer-initial", "candidate_digest")
+
+    command("work_order.reopen", "worker", "worker-sibling", {
+      "work_order_id" => "sibling", "expected_revision" => 1, "claim_id" => "claim-sibling-correction",
+      "intent" => {
+        "intent_id" => "human-sibling-correction", "kind" => "presentation_adjustment",
+        "text" => "Correct the sibling behavior.", "source" => { "thread_id" => "operator-thread", "message_id" => "sibling-correction" },
+        "requirement_ids" => ["behavior"]
+      }
+    })
+    dispatch_worker(
+      "sibling-correction-job", "sibling", "Implement the correct sibling behavior",
+      sibling_plan(expected: "corrected"), resume_job_id: "sibling-job"
+    )
+    @coordinator.check("job_id" => "sibling-correction-job", "check_id" => "sibling-check")
+    @coordinator.submit("job_id" => "sibling-correction-job")
+
+    assert_raises(HrmKernel::Error) { ready_for_review(review_id: "stale-after-sibling-correction") }
+    @coordinator.check("job_id" => "worker-job", "check_id" => "behavior-check")
+    second_refresh = @coordinator.submit("job_id" => "worker-job")
+    assert_equal 2, second_refresh.dig("projection", "work_orders", "implement", "evidence_history").length
+    assert_raises(HrmKernel::Error) { ready_for_review(review_id: "missing-current-assessment") }
+
+    review(job_id: "reviewer-current", context_paths: ["app.txt", "sibling.txt"])
+    @coordinator.assess("job_id" => "reviewer-current")
+    current_assessment = @store.read.dig("state", "assessments", "reviewer-current", "candidate_digest")
+    refute_equal original_assessment, current_assessment
+    ready = ready_for_review(review_id: "current-human-review")
+    assert_equal "reviewer-current", ready.dig("projection", "reviews", "current-human-review", "assessment_id")
+  end
+
   private
 
   def command(type, role, actor, data)
@@ -173,16 +230,29 @@ class HrmKernelCoordinatorTest < Minitest::Test
     }
   end
 
+  def sibling_plan(expected:)
+    spec = plan
+    spec["checks"][0]["id"] = "sibling-check"
+    spec["checks"][0]["env"].merge!("TARGET" => "sibling.txt", "EXPECTED" => expected)
+    spec
+  end
+
   def implement(fail_check: false)
-    @jobs << "worker-job"
-    @host.dispatch(
-      "job_id" => "worker-job", "role" => "worker", "work_order_id" => "implement", "model" => "gpt-5.6-sol",
-      "prompt" => "Implement the behavior", "context_paths" => ["app.txt"], "check_plan" => plan(fail_check: fail_check),
-      "execution_environment_allowlist" => %w[RUN_ROOT FAIL_CHECK]
-    )
-    job = wait_job("worker-job")
+    job = dispatch_worker("worker-job", "implement", "Implement the behavior", plan(fail_check: fail_check))
     assert_equal "succeeded", job["status"], JSON.pretty_generate(job)
     job
+  end
+
+  def dispatch_worker(job_id, work_order_id, prompt, check_plan, resume_job_id: nil)
+    @jobs << job_id
+    spec = {
+      "job_id" => job_id, "role" => "worker", "work_order_id" => work_order_id, "model" => "gpt-5.6-sol",
+      "prompt" => prompt, "context_paths" => [work_order_id == "sibling" ? "sibling.txt" : "app.txt"],
+      "check_plan" => check_plan, "execution_environment_allowlist" => %w[RUN_ROOT FAIL_CHECK TARGET EXPECTED]
+    }
+    spec["resume_job_id"] = resume_job_id if resume_job_id
+    @host.dispatch(spec)
+    wait_job(job_id)
   end
 
   def implement_and_submit
@@ -192,20 +262,20 @@ class HrmKernelCoordinatorTest < Minitest::Test
     @coordinator.submit("job_id" => "worker-job")
   end
 
-  def review(prompt: "Review the exact candidate")
-    @jobs << "reviewer-job"
+  def review(prompt: "Review the exact candidate", job_id: "reviewer-job", context_paths: ["app.txt"])
+    @jobs << job_id
     @host.dispatch(
-      "job_id" => "reviewer-job", "role" => "reviewer", "model" => "gpt-5.6-sol", "prompt" => prompt,
-      "context_paths" => ["app.txt"], "check_plan" => plan,
-      "execution_environment_allowlist" => %w[RUN_ROOT FAIL_CHECK]
+      "job_id" => job_id, "role" => "reviewer", "model" => "gpt-5.6-sol", "prompt" => prompt,
+      "context_paths" => context_paths, "check_plan" => plan,
+      "execution_environment_allowlist" => %w[RUN_ROOT FAIL_CHECK TARGET EXPECTED]
     )
-    job = wait_job("reviewer-job")
+    job = wait_job(job_id)
     assert_equal "succeeded", job["status"], JSON.pretty_generate(job)
     job
   end
 
-  def ready_for_review
-    command("milestone.review_ready", "orchestrator", "astra", { "review_id" => "human-review" })
+  def ready_for_review(review_id: "human-review")
+    command("milestone.review_ready", "orchestrator", "astra", { "review_id" => review_id })
   end
 
   def wait_job(id)

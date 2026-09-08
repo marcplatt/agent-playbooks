@@ -145,6 +145,14 @@ configuration-presence checks, sandbox policy, and bounded output descriptors. T
 service rereads the current candidate and receipt before submission. A worker-authored
 report or `completed` status cannot substitute for native execution.
 
+When a sibling edit invalidates checks for an unchanged completed order, rerun its
+frozen checks and submit the same host job again. The coordinator uses
+`work_order.refresh_evidence` to retain its scope, owner, requirement revision, and
+artifact bytes while appending fresh evidence. Previous evidence remains in the
+ledger. The refreshed candidate requires a new independent assessment; no new
+operator instruction is invented merely to rerun a check. Changed artifact bytes
+must use the ordinary engineering correction workflow instead.
+
 Review findings are first-class state. `finding.raise` binds an independent reviewer's
 finding to the current candidate and requirement revisions. `finding.resolve` accepts
 only `fixed` or `no_change_needed`, current behavioral evidence, and a reviewer who did

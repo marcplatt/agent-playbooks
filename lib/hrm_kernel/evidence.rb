@@ -20,7 +20,7 @@ module HrmKernel
       case type
       when "milestone.create"
         verify_project_root!(command.dig("data", "project_root"))
-      when "work_order.submit"
+      when "work_order.submit", "work_order.refresh_evidence"
         verify_submission!(state, command.fetch("data"), state_dir: state_dir)
       when "milestone.review_ready"
         verify_completed_work!(state, state_dir: state_dir)

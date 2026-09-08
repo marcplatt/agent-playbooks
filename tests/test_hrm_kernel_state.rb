@@ -1126,6 +1126,38 @@ class HrmKernelStateTest < Minitest::Test
     assert_equal "closed", state.dig("milestone", "phase")
   end
 
+  def test_unchanged_completed_work_can_refresh_stale_evidence_but_requires_reassessment
+    state = implementation_milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-implementation")
+    state = submit(state, "claim-implementation", SHA_A)
+    original = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    state = assess_candidate(state, original)
+
+    changed_artifacts = submit_data("claim-implementation", SHA_B)
+    assert_kernel_error("invalid_command") do
+      apply_command(state, "work_order.refresh_evidence", worker("worker-1"), changed_artifacts)
+    end
+
+    refresh = submit_data("claim-implementation", SHA_A)
+    refresh["checks"] = check_results(SHA_B)
+    state = apply_command(state, "work_order.refresh_evidence", worker("worker-1"), refresh)
+    order = state.dig("work_orders", "work-1")
+    assert_equal 1, order.fetch("revision")
+    assert_equal [{ "path" => VIEW_PATH, "sha256" => SHA_A }, { "path" => API_PATH, "sha256" => SHA_A }], order.fetch("artifacts")
+    assert_equal 1, order.fetch("evidence_history").length
+    refute_equal order.dig("evidence_history", 0, "evidence_digest"), order.fetch("evidence_digest")
+
+    current = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    refute_equal original.fetch("candidate_digest"), current.fetch("candidate_digest")
+    assert_kernel_error("work_remaining") do
+      apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-stale-assessment")
+    end
+    state = assess_candidate(state, current, assessment_id: "assessment-refreshed")
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-refreshed")
+    assert_equal "assessment-refreshed", state.dig("reviews", "review-refreshed", "assessment_id")
+  end
+
   def test_reviewer_finding_blocks_implementation_until_behavior_changes_and_is_reassessed
     state = implementation_milestone_state
     state = create_order(state)

@@ -16,6 +16,7 @@ module HrmKernel
       "work_order.reopen" => "worker",
       "work_order.claim" => "worker",
       "work_order.submit" => "worker",
+      "work_order.refresh_evidence" => "worker",
       "work_order.release" => "orchestrator",
       "work_order.cancel" => "orchestrator",
       "milestone.review_ready" => "orchestrator",
@@ -180,6 +181,7 @@ module HrmKernel
       when "work_order.reopen" then work_order_reopen!(state, actor_id, data)
       when "work_order.claim" then work_order_claim!(state, actor_id, data)
       when "work_order.submit" then work_order_submit!(state, actor_id, data)
+      when "work_order.refresh_evidence" then work_order_refresh_evidence!(state, actor_id, data)
       when "work_order.release" then work_order_release!(state, data)
       when "work_order.cancel" then work_order_cancel!(state, data)
       when "milestone.review_ready" then milestone_review_ready!(state, data)
@@ -333,6 +335,7 @@ module HrmKernel
         "owner_id" => nil, "claim_id" => nil, "claim_history" => [],
         "last_owner_id" => nil,
         "artifacts" => [], "checks" => [], "evidence_digest" => nil,
+        "evidence_history" => [],
         "amendments" => []
       )
       refresh_intent_statuses!(state)
@@ -366,6 +369,7 @@ module HrmKernel
         "owner_id" => nil, "claim_id" => nil, "claim_history" => old_history,
         "last_owner_id" => order["last_owner_id"],
         "artifacts" => [], "checks" => [], "evidence_digest" => nil,
+        "evidence_history" => order.fetch("evidence_history", []),
         "amendments" => amendments
       )
       refresh_intent_statuses!(state)
@@ -504,6 +508,45 @@ module HrmKernel
       order["owner_id"] = nil
       order["claim_id"] = nil
       milestone["phase"] = "remediation" if milestone["last_changes_requested_digest"]
+    end
+
+    def work_order_refresh_evidence!(state, actor_id, data)
+      exact_keys!(data, %w[work_order_id revision claim_id artifacts checks])
+      milestone = mutable_milestone!(state)
+      order = fetch_order!(state, data)
+      error!("invalid_transition", "only a completed work order may refresh evidence") unless order["status"] == "completed"
+      error!("forbidden", "only the previous worker may refresh this work order's evidence") unless order["last_owner_id"] == actor_id
+      claim_id = identifier!(data["claim_id"], "claim_id")
+      error!("stale_revision", "evidence refresh claim is stale") unless order.fetch("claim_history").last == claim_id
+      current_order_authority!(state, order)
+
+      artifacts = artifact_entries!(data["artifacts"])
+      unless artifacts == order["artifacts"]
+        error!("invalid_command", "evidence refresh cannot change submitted artifacts")
+      end
+      checks = check_entries!(data["checks"])
+      check_ids = checks.map { |entry| entry["id"] }
+      unique!(check_ids, "check ids")
+      error!("invalid_command", "checks must exactly match required check_ids") unless same_set?(check_ids, order["check_ids"])
+      unique!(checks.map { |entry| entry["artifact_path"] }, "check artifact paths")
+      checks.each do |check|
+        error!("invalid_command", "all checks must pass") unless check["conclusion"] == "passed"
+        if artifacts.any? { |artifact| artifact["path"] == check["artifact_path"] }
+          error!("invalid_command", "check report must be separate from submitted artifacts")
+        end
+      end
+      evidence_digest = digest({ "revision" => order["revision"], "artifacts" => artifacts, "checks" => checks })
+      error!("conflict", "evidence refresh did not change the evidence binding") if evidence_digest == order["evidence_digest"]
+
+      order["evidence_history"] ||= []
+      order["evidence_history"] << {
+        "evidence_digest" => order["evidence_digest"],
+        "artifacts" => clone_value(order["artifacts"]),
+        "checks" => clone_value(order["checks"])
+      }
+      order["checks"] = checks
+      order["evidence_digest"] = evidence_digest
+      invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil)
     end
 
     def work_order_release!(state, data)
