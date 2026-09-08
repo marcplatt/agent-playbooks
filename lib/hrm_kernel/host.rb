@@ -501,9 +501,16 @@ module HrmKernel
       path == root || path.start_with?(root + File::SEPARATOR)
     end
 
-    def source_path(root, relative, forbidden, allow_missing: false)
+    def source_path(root, relative, forbidden, allow_missing: false, reject_symlinks: false)
       fail!("context/artifact path must be project-relative") unless relative.is_a?(String) && !Pathname.new(relative).absolute? && !relative.split("/").include?("..") && relative != "." && !relative.empty?
       path = File.expand_path(relative, root)
+      if reject_symlinks
+        component_path = root
+        path.delete_prefix(root + File::SEPARATOR).split(File::SEPARATOR).each do |component|
+          component_path = File.join(component_path, component)
+          fail!("work-order artifact path contains a symlink: #{relative}") if File.symlink?(component_path)
+        end
+      end
       if File.exist?(path)
         resolved = File.realpath(path)
       elsif allow_missing
@@ -535,7 +542,7 @@ module HrmKernel
 
     def artifact_snapshot(root, paths, forbidden)
       paths.to_h do |relative|
-        path = source_path(root, relative, forbidden, allow_missing: true)
+        path = source_path(root, relative, forbidden, allow_missing: true, reject_symlinks: true)
         fail!("work-order paths must name files") if File.exist?(path) && !File.file?(path)
         [relative, File.file?(path) ? Digest::SHA256.file(path).hexdigest : nil]
       end
@@ -587,7 +594,7 @@ module HrmKernel
         filesystem[resolved] = "read"
       end
       Array(order && order["paths"]).each do |relative|
-        path = source_path(root, relative, denied, allow_missing: true)
+        path = source_path(root, relative, denied, allow_missing: true, reject_symlinks: true)
         filesystem[path] = "write"
       end
       fail!("worker scratch space overlaps protected state") if denied.any? { |item| beneath?(tool_tmp, item) }

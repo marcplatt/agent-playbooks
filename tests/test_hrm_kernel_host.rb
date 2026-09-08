@@ -21,7 +21,7 @@ class HrmKernelHostTest < Minitest::Test
     transact("milestone.create", "operator", "human", {
       "milestone_id" => "trial", "outcome" => "Build a reviewable application",
       "project_root" => @project, "requirements" => [{ "id" => "R1", "text" => "Keep reviewed intent" }],
-      "allowed_paths" => ["app.txt", "other.txt"]
+      "allowed_paths" => ["app.txt", "other.txt", "owned/feature.txt"]
     })
     create_order("work", "app.txt")
     @fake = File.join(@temporary, "fake-codex")
@@ -296,6 +296,42 @@ class HrmKernelHostTest < Minitest::Test
     result = @host.collect(job_id: "bounded-write")
     assert_equal "cross-order write denied", result.dig("result", "summary")
     refute File.exist?(File.join(@project, "other.txt"))
+  end
+
+  def test_write_grants_reject_existing_and_dangling_artifact_symlinks_before_claim
+    File.unlink(File.join(@project, "app.txt"))
+    File.write(File.join(@project, "other.txt"), "another order's artifact")
+    ["other.txt", "missing.txt"].each_with_index do |target, index|
+      File.symlink(target, File.join(@project, "app.txt"))
+      error = assert_raises(HrmKernel::Error) { @host.dispatch(specification("linked-artifact-#{index}")) }
+      assert_match(/artifact path contains a symlink/, error.message)
+      assert_equal "queued", @store.read.dig("state", "work_orders", "work", "status")
+      refute File.exist?(File.join(@state_dir, "host-jobs", "linked-artifact-#{index}"))
+      File.unlink(File.join(@project, "app.txt"))
+    end
+    assert_equal "another order's artifact", File.read(File.join(@project, "other.txt"))
+  end
+
+  def test_write_grants_reject_symlinked_parent_of_a_missing_artifact
+    FileUtils.mkdir_p(File.join(@project, "another-order"))
+    File.symlink("another-order", File.join(@project, "owned"))
+    create_order("nested", "owned/feature.txt")
+    error = assert_raises(HrmKernel::Error) do
+      @host.dispatch(specification("linked-parent").merge("work_order_id" => "nested"))
+    end
+    assert_match(/artifact path contains a symlink/, error.message)
+    assert_equal "queued", @store.read.dig("state", "work_orders", "nested", "status")
+    refute File.exist?(File.join(@project, "another-order", "feature.txt"))
+    refute File.exist?(File.join(@state_dir, "host-jobs", "linked-parent"))
+  end
+
+  def test_collection_rejects_artifact_replaced_by_a_symlink_after_dispatch
+    dispatch("replaced-artifact")
+    await_job("replaced-artifact")
+    File.rename(File.join(@project, "app.txt"), File.join(@project, "other.txt"))
+    File.symlink("other.txt", File.join(@project, "app.txt"))
+    error = assert_raises(HrmKernel::Error) { @host.collect(job_id: "replaced-artifact") }
+    assert_match(/artifact path contains a symlink/, error.message)
   end
 
   def test_worker_cannot_read_its_control_ledger_but_cli_reads_schema_and_writes_result
