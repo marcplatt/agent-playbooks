@@ -29,6 +29,7 @@ policy.
 - Workers may not silently expand scope. The orchestrator can enlarge a work order's paths and checks within the milestone's already authorized path/effect policy without asking the operator to approve a file count. A new path boundary, business meaning, or external effect follows its owning authority gate.
 - In implementation mode, every acceptance scenario names required check IDs. Native checks execute from the frozen candidate and plan; a worker report cannot make them pass.
 - A fresh reviewer uses `finding.raise`, `finding.resolve`, and `milestone.assess`. A fixed finding requires changed behavioral artifact content plus current evidence. `no_change_needed` requires current behavioral evidence and independent reviewer provenance. Open findings, stale assessments, and missing scenario dispositions block `milestone.review_ready`.
+- A Canary uses easy, controlled inputs through the real production route to the declared destination. Mocked providers prove a rehearsal only. Preserve the operator's outcome; do not silently replace it with a simulation contract or exhaustive failure-testing project.
 - Work-order completion reports implementation evidence only. It never means that the product outcome was accepted. Only the operator can accept or defer the current review.
 
 ## Boundaries and reporting

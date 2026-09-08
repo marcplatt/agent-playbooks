@@ -27,6 +27,22 @@ operator review. These are local implementation controls. They do not deploy a
 candidate, apply a provider effect, merge a branch, or establish live canonical
 product acceptance.
 
+## Canary meaning and faithful acceptance
+
+A Canary proves that the real end-to-end production route works for a small set
+of easy cases. Synthetic input or an operator acting as the customer is valid;
+substituting recording or mocked providers is a rehearsal, not a Canary. Preserve
+the declared entry routes, real systems, destination and success observation.
+Provider API acceptance alone does not prove inbox receipt when receipt is the
+requested outcome. Keep broad regression and failure-mode coverage separate.
+
+The orchestrator must not replace an HRM outcome with an easier local contract,
+then count enforcement of that contract as success on the original HRM. Label
+partial simulation evidence and missing real-system proof explicitly. A pending
+review based on a misunderstood outcome must be invalidated when the operator
+corrects the meaning. Record the correction without rewriting historical evidence
+or treating clarification alone as an instruction to execute live effects.
+
 ## Responsibilities
 
 | Actor | Responsibility |

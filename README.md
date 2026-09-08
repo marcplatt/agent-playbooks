@@ -79,7 +79,9 @@ identity evidence without claiming stronger model authentication.
 
 The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
 records the actual native worker run, engineering failures, corrections, and
-remaining review boundaries.
+remaining review boundaries. The operator clarified that this was a simulation,
+not a successful Canary: real Website/Thomas entry, QBO API delivery, and inbox
+receipt remain unproved. The earlier pending review is invalidated.
 
 This is an experimental runtime recommendation for an explicitly selected Alpine
 Estimating pilot. It does not install a global profile, modify an existing project

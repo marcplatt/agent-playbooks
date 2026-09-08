@@ -178,7 +178,7 @@ impact, not rewritten history.
 | Read-only vertical slice | Real inputs, interpretation, provenance, safe failure, and missing functions are reviewable without external writes. |
 | Operator workflow | A human can perform realistic work, correct it, and understand controls, states, explanations, and failures. |
 | Activation readiness | Permissions, monitoring, privacy, recovery, runbook, support ownership, residual risk, and the separate activation decision are reviewable. |
-| Controlled canary | One explicitly authorized effect reaches the exact destination and has read-back, reconciliation, receipt, retry, and rollback evidence. |
+| Controlled canary | A small set of easy cases uses controlled test/customer inputs through the actual required production systems and reaches the declared destination, with observed receipt. Synthetic inputs are allowed; simulated providers are rehearsal only. Detailed failure coverage remains separate. |
 | Production observation | A separately activated, bounded production window has current health, reconciliation, operator-impact, and rollback evidence. |
 | Autonomy readiness | Lifecycle policy, eligibility, confidence, escalation, monitoring, audit, disablement, and human override are reviewable after sufficient production evidence exists. |
 

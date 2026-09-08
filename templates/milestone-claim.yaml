@@ -67,10 +67,13 @@ milestone_claim:
       starting_state: null
       operator_action: null
       ordered_effect_ids: []
+      # Canary: name actual systems used; synthetic inputs do not permit mocked providers.
       real_systems_required: []
       success_proof:
         machine_receipts: []
+        # Record actual destination receipt when the claim is delivery to a person.
         human_observations: []
+      # Supporting regression coverage; do not expand a simple Canary into every failure case.
       failure_modes: []
       recovery_proof: []
       execution_stage: "fixture|mutation_disabled|integrated|canary|production_observation"

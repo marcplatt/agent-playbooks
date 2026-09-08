@@ -6,6 +6,47 @@ It is a separate experiment, not an AP main adoption or a continuation of the
 historical AP-EXEC RC.33. The implementation uses `AP-INTERACT-001 0.3.0-rc34`
 and a fresh `ap-hrm-interaction/2` ledger. Historical ledgers remain unchanged.
 
+## Operator correction: this run was a simulation, not a Canary
+
+The operator clarified the acceptance criterion after this report: use simple
+controlled/customer test data through the real production workflow and observe
+the final result. For AE, the Website form and Thomas chat on the website must
+reach the real QuickBooks Online API and produce quote emails actually received
+in the operator's designated inbox. A Canary checks that the route exists; it is
+not an exhaustive catalogue of failure cases.
+
+This run did not do that. It seeded RFQs directly in AE and substituted recording
+providers. The earlier `review_ready` result applied to the orchestrator's narrowed
+simulation contract, not the intended Canary HRM. That interpretation was an
+orchestrator error. The pending review is now invalidated by an append-only
+operator requirement correction; historical receipts and assessments are retained.
+No actual inbox receipt was established, and this correction does not execute
+live services. The retained app is a rehearsal environment only.
+
+## How the AE result was produced
+
+This was a guided reconstruction, not an independent implementation derived from
+the HRM alone. The original UI work order explicitly allowed porting the four UI
+files from canonical commit `fda0bdb`. Later prompts referenced canonical tests and
+controls. The delivery work order explicitly pointed to the minimal `review.py`
+fix in `c360a8d`. The runtime order explicitly prohibited real providers and asked
+for seeded synthetic RFQs with recording adapters and frozen prepared commands.
+
+There were three retained AE implementation tasks: recovery (eight attempts),
+delivery (three), and runtime (nine), plus two fresh independent review tasks.
+Additional supporting delegates worked on kernel state, host/coordination,
+isolation, and comparison. They were not ten independent AE product builders.
+The UI worker ported and adapted known controls; the delivery worker reconstructed
+the known retry fix; the runtime worker built the isolated test composition and
+its tests. The orchestrator supplied detailed corrections across repeated attempts.
+
+No Gateway implementation, real Website/Thomas intake, production tax-code
+configuration, or production data update was commissioned in this trial. The
+operator reports that Gateway tax-code and data changes were needed in the
+canonical run. This experiment neither rediscovered nor proved those dependencies;
+it exercised AE's recording seams instead. Similar appearance and passing local
+tests therefore cannot establish equivalent end-to-end production capability.
+
 ## What changed
 
 The kernel preserves additive operator requirements, records explicit scoped
@@ -127,7 +168,7 @@ acceptance demonstration also passes its fictional change-request/review cycle;
 those actors are not a substitute for actual human feedback.
 
 The native AE candidate has **168 passing tests**: recovery 39, delivery 30,
-and isolated Canary 99. The selected interpreter is Python 3.9.6 with explicit
+and isolated rehearsal 99 (historical check ID `isolated-canary`). The selected interpreter is Python 3.9.6 with explicit
 candidate imports and read-only historical dependencies. This is not a Python
 3.12 CI result. Deprecation warnings remain in inherited framework paths.
 All three native receipts report exit status zero, denied forbidden reads and
@@ -161,8 +202,9 @@ frozen prices and availability. Native checks passed again; the two unchanged
 sibling orders each gained one evidence-history entry. The earlier assessment
 became obsolete. A fresh independent reviewer passed all four scenarios for the
 final candidate, and the kernel opened **AE-RC34-HRM-1** at ledger cursor 18.
-Its status is **pending**, with no human decision, no unresolved findings, and
-no pending business-authority decisions. There were no redundant approval
+At that earlier handoff its status was **pending**, with no human decision, no
+unresolved findings, and no pending business-authority decisions. The operator
+correction above subsequently invalidated that review. There were no redundant approval
 requests during these engineering corrections.
 
 The retained review URL is **http://127.0.0.1:63592/**. The final source digest is
@@ -194,6 +236,8 @@ is no automatic inbox bridge from arbitrary worker chat messages. Workspace edit
 also do not automatically regenerate the frozen prepared delivery set. Those
 limits matter before adopting this as an unattended multitasking workflow.
 
-Global and canonical repository dispatchers remain unchanged. Only the retained
+The implementation run left global and canonical repository dispatchers unchanged.
+The later operator correction adds the Canary definition to global guidance and
+the experimental dispatcher; it does not adopt the kernel globally. Only the retained
 AE experiment installs the pinned RC.34 dispatcher. AP main is untouched; the
 RC.34 branch is reviewed against the archived RC.33 experiment branch.
