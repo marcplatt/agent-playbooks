@@ -77,6 +77,10 @@ profile requests GPT-6 Astra for orchestration and GPT-5.6 Sol for workers and
 independent review; the host receipt records the requested model and available task
 identity evidence without claiming stronger model authentication.
 
+The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
+records the actual native worker run, engineering failures, corrections, and
+remaining review boundaries.
+
 This is an experimental runtime recommendation for an explicitly selected Alpine
 Estimating pilot. It does not install a global profile, modify an existing project
 policy, grant a deployment or provider effect, or establish live canonical product
