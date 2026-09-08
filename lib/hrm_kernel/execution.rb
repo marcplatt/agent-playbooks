@@ -70,10 +70,12 @@ module HrmKernel
       fail!("implementation candidate has no Git changes") if changes.empty?
       allowed_paths = authorized_paths.nil? ? Array(order["paths"]) : Array(authorized_paths)
       validate_change_scope!(changes, allowed_paths)
-      missing_deliverables = Array(order["paths"]).reject do |declared|
+      has_deliverable = Array(order["paths"]).any? do |declared|
         changes.any? { |entry| path_matches?(entry["path"], declared) }
       end
-      fail!("work order has no candidate change for #{missing_deliverables.join(', ')}") unless missing_deliverables.empty?
+      # Paths bound write authority; they are not a quota of files to modify.
+      # Unchanged dependencies may remain declared without manufacturing edits.
+      fail!("work order has no candidate changes in its declared paths") unless has_deliverable
       binding = {
         "work_order_id" => order.fetch("id"),
         "claim_id" => claim_id,

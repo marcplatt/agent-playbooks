@@ -91,6 +91,14 @@ class HrmKernelExecutionTest < Minitest::Test
     assert_equal first.fetch("receipt_sha256"), second.fetch("receipt_sha256")
   end
 
+  def test_declared_write_scope_does_not_force_changes_to_every_allowed_file
+    candidate = capture(runner, paths: %w[app.txt check.rb], authorized_paths: %w[app.txt other.txt check.rb])
+    assert_equal %w[app.txt other.txt], candidate.fetch("changes").map { |entry| entry["path"] }
+    assert_raises(HrmKernel::Error) do
+      capture(runner, paths: %w[check.rb], authorized_paths: %w[app.txt other.txt check.rb])
+    end
+  end
+
   def test_nonzero_process_cannot_claim_pass_by_printing_passing_json
     File.write(File.join(@project_root, "check.rb"), <<~RUBY)
       require "json"

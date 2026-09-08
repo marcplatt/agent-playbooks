@@ -31,7 +31,7 @@ module HrmKernel
     RESULT_SCHEMA = object_schema(
       "status" => { "type" => "string", "enum" => %w[implemented blocked reviewed] },
       "summary" => TEXT,
-      "changed_paths" => TEXTS,
+      "changed_paths" => TEXTS.merge("description" => "Only project-relative paths owned by this work order. Do not include unrelated Git changes or another order's AGENTS.md."),
       "findings" => { "type" => "array", "items" => object_schema(
         "severity" => { "type" => "string", "enum" => %w[info warning error] },
         "message" => TEXT, "paths" => TEXTS, "scenario_ids" => TEXTS
@@ -552,6 +552,7 @@ module HrmKernel
           "Start with the supplied packet. Inspect needed project sources and declared dependency roots in bounded excerpts; do not preload full history. Return context_requests when needed context is unavailable. Technical discovery does not require operator approval.",
           "Do not access operator Documents, ambient databases, credentials, private evidence, or other checkouts. No provider, customer, deployment, or runtime effects are authorized.",
           "Return the required structured JSON. Scenario statements are your assessment, not verified execution receipts or human acceptance. Preserve unmet requirements and findings.",
+          "changed_paths lists only files owned by this work order, including its earlier edits when resuming. Do not copy a global Git status list or report another worker's files as your outputs.",
           "This host measures supplied prompt bytes and actual reported token usage separately. Native Codex permission profiles restrict model commands to project/dependency reads, exact owned-file writes, and private scratch space. Operator Documents and kernel control state are denied; command networking is disabled. The Codex transport itself still authenticates and communicates with its model provider."
         ],
         "task" => spec["prompt"], "actor_id" => actor,
@@ -566,6 +567,8 @@ module HrmKernel
       profile_name = job.fetch("permission_profile_name")
       args = [job["codex_path"], "exec", "--ignore-user-config", "--strict-config", "-m", MODEL,
               "-c", 'approval_policy="never"', "-c", 'shell_environment_policy.inherit="none"',
+              "-c", 'shell_environment_policy.set.GIT_CONFIG_GLOBAL="/dev/null"',
+              "-c", 'shell_environment_policy.set.GIT_CONFIG_NOSYSTEM="1"',
               "-c", 'shell_environment_policy.set.PATH="/usr/bin:/bin:/usr/sbin:/sbin"',
               "-c", "shell_environment_policy.set.TMPDIR=#{self.class.toml_inline(job.fetch('tool_tmp'))}",
               "-c", "default_permissions=#{self.class.toml_inline(profile_name)}",
