@@ -37,6 +37,9 @@ class HrmKernelExecutionTest < Minitest::Test
       import os
       import socket
       import sqlite3
+      from zoneinfo import ZoneInfo
+
+      assert ZoneInfo("America/Vancouver").key == "America/Vancouver"
 
       root = os.environ["RUN_ROOT"]
       database = os.path.join(root, "python-check.sqlite3")

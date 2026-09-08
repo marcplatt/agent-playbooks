@@ -25,6 +25,8 @@ module HrmKernel
     SYSTEM_READ_ROOTS = [
       "/usr/bin",
       "/usr/lib",
+      "/usr/share/zoneinfo",
+      "/private/var/db/timezone",
       "/System/Library",
       "/Library/Apple",
       "/Library/Ruby",
