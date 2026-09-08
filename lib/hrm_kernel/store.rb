@@ -4,17 +4,18 @@ require "digest"
 require "fileutils"
 require "json"
 require "pathname"
+require "time"
 
 require_relative "state"
 require_relative "evidence"
 
 module HrmKernel
   class Store
-    SCHEMA_VERSION = "ap-hrm-interaction/1"
+    SCHEMA_VERSION = "ap-hrm-interaction/2"
     LEDGER_NAME = "events.jsonl"
     LOCK_NAME = ".lock"
     MAX_LEDGER_LINE_BYTES = 4 * 1024 * 1024
-    EVENT_KEYS = %w[schema_version sequence previous_hash command event_hash].freeze
+    EVENT_KEYS = %w[schema_version sequence previous_hash occurred_at command event_hash].freeze
 
     attr_reader :directory
 
@@ -53,12 +54,13 @@ module HrmKernel
         # materialized only when the first command is actually validated.
         base_state = replay.fetch(:state) || State.initial
         next_state = State.apply(base_state, command)
-        Evidence.verify!(replay.fetch(:state), command)
+        Evidence.verify!(replay.fetch(:state), command, state_dir: directory)
         sequence = replay.fetch(:cursor) + 1
         event = {
           "schema_version" => SCHEMA_VERSION,
           "sequence" => sequence,
           "previous_hash" => replay.fetch(:event_hash),
+          "occurred_at" => Time.now.utc.iso8601(6),
           "command" => command
         }
         event["event_hash"] = event_hash(event)
@@ -196,6 +198,14 @@ module HrmKernel
       unless event["previous_hash"] == expected_previous_hash
         raise HrmKernel::Error, "ledger event #{expected_sequence} previous_hash mismatch"
       end
+      unless event["occurred_at"].is_a?(String) && event["occurred_at"].match?(/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\z/)
+        raise HrmKernel::Error, "ledger event #{expected_sequence} has an invalid timestamp"
+      end
+      begin
+        Time.iso8601(event.fetch("occurred_at"))
+      rescue ArgumentError
+        raise HrmKernel::Error, "ledger event #{expected_sequence} has an invalid timestamp"
+      end
       unless event["event_hash"].is_a?(String) && event["event_hash"].match?(/\A[0-9a-f]{64}\z/)
         raise HrmKernel::Error, "ledger event #{expected_sequence} has an invalid event_hash"
       end
@@ -253,10 +263,21 @@ module HrmKernel
 
     def validate_existing_layout!
       children = Dir.children(@directory)
-      unknown = children - [LEDGER_NAME, LOCK_NAME]
+      runtime_directories = %w[host-jobs execution coordinator]
+      unknown = children - [LEDGER_NAME, LOCK_NAME, ".execution-receipt-key", *runtime_directories]
       unless unknown.empty?
         raise HrmKernel::Error, "state directory contains unrelated entries: #{unknown.sort.join(', ')}"
       end
+      (children & runtime_directories).each do |name|
+        path = File.join(@directory, name)
+        ensure_no_symlink_components!(path)
+        stat = File.lstat(path)
+        unless stat.directory? && (stat.mode & 0o777) == 0o700
+          raise HrmKernel::Error, "runtime state directory must be a private directory: #{name}"
+        end
+      end
+      key_path = File.join(@directory, ".execution-receipt-key")
+      ensure_safe_path!(key_path, regular: true) if children.include?(".execution-receipt-key")
       return if children.empty?
       unless children.include?(LOCK_NAME)
         raise HrmKernel::Error, "existing state directory is missing #{LOCK_NAME}"

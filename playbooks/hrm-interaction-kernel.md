@@ -1,38 +1,31 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.33 - first Astra-driven interaction kernel experiment
-version: "0.2.0-pilot"
+title: AP-INTERACT RC.34 - implementation and independent review runtime candidate
+version: "0.3.0-rc34"
 status: experimental
 owner: Adopting organization
-mode: local-review-and-remediation
-experiment_id: AP-INTERACT-RC33
+mode: local-implementation-review-and-remediation
+experiment_id: AP-INTERACT-RC34
 ---
 
 # HRM interaction kernel
 
-Recorded as **AP-INTERACT RC.33**, the first Astra-driven development experiment in
-this project, at the operator's direction. The original software version remains
-`0.2.0-pilot` and the wire protocol remains `ap-hrm-interaction/1`. This is a separate
-line from AP-EXEC RC.32 and the earlier AP-EXEC RC.33 deployment-preflight compiler.
-See the [experiment record](../experiments/ap-interact-rc33/README.md) for exact
-lineage, the historical AE trial, and unresolved findings. It is not adopted policy.
+**AP-INTERACT RC.34** is the successor runtime candidate to the archived
+[RC.33 experiment](../experiments/ap-interact-rc33/README.md). It uses software
+version `0.3.0-rc34` and protocol `ap-hrm-interaction/2`. RC.34 fixes the two recorded
+state defects: later additive feedback remains alongside earlier constraints, and
+an unresolved requested change cannot return to review through submission metadata
+alone.
 
-The later audit found that additive instructions can be treated as replacements
-and that revision-only changes can make unchanged deliverables eligible for another
-review. The lifecycle descriptions below express the intended contract; those two
-invariants are not reliably enforced by the frozen implementation. The experiment
-records these defects without changing the tested kernel.
+Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
+or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
+AP-EXEC RC.33 deployment-preflight compiler remain separate lines.
 
-This pilot implements the local command and state layer for commissioning work,
-reviewing a milestone, and correcting it without losing the operator's decisions.
-It is a separate protocol, `ap-hrm-interaction/1`, from the historical AP-EXEC RC
-experiments. It does not upgrade, resume, or rewrite their ledgers.
-
-The deliverable is a working Ruby command service. Automatic Codex task creation,
-direct capture of operator messages in worker tasks, model execution, deployment,
-and installation into Alpine repositories are subsequent integration work. Model
-assignments in state express the requested role configuration; they do not prove
-that a model ran.
+The Ruby service now covers state, local Codex host dispatch, frozen candidate and
+check plans, native check execution receipts, independent scenario assessment, and
+operator review. These are local implementation controls. They do not deploy a
+candidate, apply a provider effect, merge a branch, or establish live canonical
+product acceptance.
 
 ## Responsibilities
 
@@ -44,12 +37,21 @@ that a model ran.
 | Fresh GPT-5.6 Sol reviewer | Independently assess consequential work against its requirements and evidence. |
 | Kernel | Preserve the ledger, validate commands, serialize ownership, reject stale results, and derive role projections. |
 
-The local CLI is a trusted caller boundary. Actor IDs and operator message references
-are supplied by that caller. File permissions and validation do not authenticate a
-person, sandbox a worker, prove a source message came from Codex, or establish the
-truth of a passing check report. A future task adapter must bind these references
-to actual host events and model identities. Until then, a trusted operator or
-coordinator invokes commands and a trusted checker supplies reports.
+The local CLI remains a trusted caller boundary for actor IDs and operator message
+references. The host adapter records a requested model, Codex task/thread evidence,
+and a bound structured result. Requested-model metadata is not authenticated proof
+of the model that executed. A trusted adapter must verify that a source reference
+really came from the operator. Native receipts prove that the declared local process
+ran against the bound candidate under the recorded policy; they do not establish
+business truth or semantic correctness.
+
+The host's outer sandbox restricts candidate writes to the worker's exact declared
+files; independent reviewers cannot write candidate files. Parent directories must
+already exist before dispatch. Error findings in structured reviewer output must
+name their `scenario_ids`; every such finding is retained as an unresolved kernel
+finding. Native receipts bind executable bytes as well as source and check plans.
+Third-party dependency trees are not recursively content-addressed, so dependency
+changes require a new environment identity and fresh checks.
 
 ## Operator interaction
 
@@ -68,11 +70,20 @@ merely because an agent labelled it `business_meaning`.
 Original intent, question, answer, source, and revision remain in the private ledger.
 A new actionable instruction invalidates a pending review immediately. It remains
 pending until work orders account for all of its named requirements, so recording
-feedback alone cannot let an older result pass review. Replacing part of an
-assignment supersedes only the intent portions explicitly replaced. Unaffected
-portions remain active; removing an assignment does not silently consume its
-unreplaced instruction. Clarifications must name the requirements they affect.
-Ordinary conversation does not require a kernel event.
+feedback alone cannot let an older result pass review. New intent is additive by
+default. `supersedes` must identify the prior intent and exact requirement constraints
+for a replacement or removal. Every other active constraint remains attached to the
+amended order. Clarifications must name the requirements they affect. Ordinary
+conversation does not require a kernel event.
+
+A small correction delivered directly to the same worker may use
+`work_order.reopen`. It preserves the work order's paths, checks, and requirements,
+records the original operator source through the trusted caller, appends intent, and
+creates a new revision and claim. A larger technical gap returns to the Astra
+orchestrator, which may expand work-order paths and checks inside the milestone's
+already authorized path policy. File count is not a new business decision. A path
+outside that policy, a genuinely unresolved business meaning, or a new external
+effect follows its existing authority boundary.
 
 A revised question cannot be answered using a stale response. Ordinary and revised
 decisions bind the exact effect. Accepting an external-effect decision in this pilot
@@ -89,10 +100,17 @@ Exact duplicate questions are rejected even when an orchestrator invents a new I
 
 ## Milestones and work orders
 
-Milestones move from execution into prepared review, remediation, and later review.
-Only explicit operator acceptance of the current snapshot closes a milestone.
-Changes requested during review require changed work before that snapshot can be
-presented again. Deferral does not claim acceptance.
+Milestones move from execution into independent assessment, prepared review,
+remediation, and later review. An implementation milestone freezes its initial
+contract digest and declares acceptance scenarios with required check IDs. Later
+operator requirement amendments retain their before/after revisions and source;
+the original outcome and initial digest remain intact.
+
+`milestone.assess` records a fresh reviewer's disposition for every acceptance
+scenario, the current candidate digest, requirement revisions, evidence references,
+and assessor identity. The builder cannot assess its own candidate. An accepted
+assessment and closed work orders are evidence for review readiness; neither is
+product acceptance. Only the operator can accept or defer the current review.
 
 Work orders have their own revision, owner claim, paths, checks, and evidence. They
 are queued, claimed, completed, amended, released for another attempt, or cancelled.
@@ -111,14 +129,24 @@ A work order specifies desired behavior rather than predetermined output bytes.
 The worker chooses the implementation. Its submitted file hashes bind the result
 after implementation, and the service rereads them before review and acceptance.
 Hash checks cover declared artifacts, not all possible files in the workspace.
-An independent checker remains responsible for diff reach and behavioral correctness.
+Native candidate capture binds Git state, authorized paths, the requirement and
+work-order contract, and the frozen check plan before execution. A worker result is
+never treated as a check receipt or submission command.
 
-Check reports are separate JSON files under the project root. Each report binds
-`check_id`, `conclusion`, `work_order_id`, `revision`, and the exact deliverable
-`artifacts` array of path/SHA-256 pairs. The report is not itself a deliverable in
-that array, avoiding a self-hash. The submitted check descriptor also binds the
-report's path and digest. A passing report from an older revision or different
-artifact set cannot be reused as current evidence.
+In implementation mode, declared checks run as native child processes from the
+frozen execution plan. The private authenticated receipt binds the process result,
+candidate, claim, work-order and requirement revisions, environment ID, argv,
+configuration-presence checks, sandbox policy, and bounded output descriptors. The
+service rereads the current candidate and receipt before submission. A worker-authored
+report or `completed` status cannot substitute for native execution.
+
+Review findings are first-class state. `finding.raise` binds an independent reviewer's
+finding to the current candidate and requirement revisions. `finding.resolve` accepts
+only `fixed` or `no_change_needed`, current behavioral evidence, and a reviewer who did
+not build the candidate. `fixed` also requires changed artifact content. An operator's
+`changes_requested` review creates or binds unresolved findings. Open findings block
+another `review_ready`; changing only an order revision or report digest does not
+resolve them.
 
 The initial project path policy is fixed for this pilot. The orchestrator may
 amend assignments within it. A request outside it remains an explicit limitation;
@@ -133,6 +161,12 @@ ruby scripts/hrm_kernel.rb status --state-dir /private/run-directory --role orch
 ruby scripts/hrm_kernel.rb status --state-dir /private/run-directory --role worker --actor-id builder-1
 ruby scripts/hrm_kernel.rb status --state-dir /private/run-directory --role reviewer
 ruby scripts/hrm_kernel.rb verify --state-dir /private/run-directory
+ruby scripts/hrm_kernel.rb host-dispatch --state-dir /private/run-directory --input worker-job.json
+ruby scripts/hrm_kernel.rb host-status --state-dir /private/run-directory --input job-id.json
+ruby scripts/hrm_kernel.rb host-collect --state-dir /private/run-directory --input job-id.json
+ruby scripts/hrm_kernel.rb check --state-dir /private/run-directory --input check-id.json
+ruby scripts/hrm_kernel.rb submit --state-dir /private/run-directory --input job-id.json
+ruby scripts/hrm_kernel.rb assess --state-dir /private/run-directory --input review-job-id.json
 ```
 
 `apply` also accepts `--input -` for JSON on standard input. Each command has a
@@ -148,7 +182,8 @@ operator another question.
 `redundant_decision` means a current operator instruction already supplies the
 exact requested effect, including when the requested scope is a subset of it.
 
-For example, the initial operator command establishes the local milestone boundary:
+For example, the initial operator command establishes an implementation boundary and
+the behavior that independent review must exercise:
 
 ```json
 {
@@ -159,17 +194,25 @@ For example, the initial operator command establishes the local milestone bounda
     "milestone_id": "HRM-DEMO",
     "outcome": "Review and correct a local information panel",
     "project_root": "/absolute/canonical/path/to/project",
+    "mode": "implementation",
     "requirements": [{"id": "REQ-PANEL", "text": "The panel displays the intended information"}],
-    "allowed_paths": ["src/**", "tests/**"]
+    "allowed_paths": ["src/**", "tests/**"],
+    "acceptance_scenarios": [{
+      "id": "ACC-PANEL-01",
+      "text": "An operator opens the panel and sees the intended information",
+      "requirement_ids": ["REQ-PANEL"],
+      "check_ids": ["check-panel-behavior"]
+    }]
   }
 }
 ```
 
-The supported command families are `milestone.*`, `intent.record`, `work_order.*`,
-and `decision.*`. See the executable state acceptance tests for complete examples
-of a review/correction cycle, a multifile API-mirror commission, and decision revisions.
-The runnable example is fictional local work; it is not evidence of an Alpine
-integration or an automatic host task transport.
+The state command families are `milestone.*`, `intent.record`, `work_order.*`,
+`finding.*`, and `decision.*`. The host commands dispatch and collect bounded Codex
+jobs. `check`, `submit`, and `assess` coordinate native execution and state transitions
+from their frozen job records; they do not accept worker-authored substitute commands.
+See the state, store, execution, host, and coordinator acceptance tests for complete
+shapes.
 
 ```sh
 ruby examples/hrm_interaction_demo.rb
@@ -179,9 +222,10 @@ The example retains a fresh private temporary directory and prints the paths to
 its result, ledger, and local HTML artifact. Use `--output-dir /absolute/new/path`
 to choose the destination; an existing destination is refused. It applies real CLI
 commands and checks local fixture behavior through a visual correction and a
-multifile API-mirror correction, including rejected stale responses and results.
-Its operator and worker messages are fixtures, not actual model executions or
-acceptance of this kernel by a human.
+multifile API-mirror correction, including rejected stale responses, stale results,
+and explicit independent finding resolution. It is a compact coordination fixture;
+its operator, worker, and reviewer messages are fixtures rather than actual model
+executions, native implementation evidence, or acceptance by a human.
 
 The state directory contains a private hash-linked JSONL ledger. Commands are
 validated and appended under an exclusive lock and fsynced. Reads replay that
@@ -191,16 +235,19 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [pilot dispatcher](../templates/hrm-interaction-agents.md)
-in an isolated project pilot, pinned to one reviewed AP revision. Preserve the
-installed global and repository policies until their adoption change is reviewed.
-The AP development instructions do not automatically apply this runtime to projects.
+Adoption is explicit. Use the [RC.34 dispatcher](../templates/hrm-interaction-agents.md)
+in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
+Estimating, this is an experimental project-profile recommendation only. Preserve
+the installed global and repository policies unless their own adoption change is
+reviewed. Creating this runtime does not install it globally or activate it in AE.
 
 Run changed-reach checks, including:
 
 ```sh
 ruby tests/test_hrm_kernel_state.rb
 ruby tests/test_hrm_kernel_store.rb
+ruby tests/test_hrm_kernel_execution.rb
+ruby tests/test_hrm_kernel_host.rb
 ruby examples/hrm_interaction_demo.rb
 ```
 
@@ -208,6 +255,11 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.3.0-rc34 — 2026-09-08:** Starts protocol `ap-hrm-interaction/2` with additive
+  intent, explicit supersession, immutable initial contract identity, direct same-worker
+  intake, native candidate-bound checks, first-class findings, and independent scenario
+  assessment. Protocol 1 ledgers remain archival and are not migrated in place.
 
 - **AP-INTERACT RC.33 record — 2026-09-08:** Names PR #10 as the first Astra-driven
   experiment, records its separate ancestry and known defects, and retains AE trial

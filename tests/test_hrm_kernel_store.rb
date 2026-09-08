@@ -59,6 +59,24 @@ class HrmKernelStoreTest < Minitest::Test
     assert_equal 1, @store.read.fetch("cursor")
   end
 
+  def test_v1_ledgers_cannot_be_resumed_or_rewritten_by_rc34
+    @store.transact(command("milestone.create", operator, milestone_data))
+    path = File.join(@state_dir, "events.jsonl")
+    event = JSON.parse(File.read(path))
+    assert_equal "ap-hrm-interaction/2", event.fetch("schema_version")
+    assert_match(/Z\z/, event.fetch("occurred_at"))
+    event["schema_version"] = "ap-hrm-interaction/1"
+    event.delete("occurred_at")
+    event["event_hash"] = @store.send(:event_hash, event)
+    original = JSON.generate(event) + "\n"
+    File.write(path, original)
+    assert_raises(HrmKernel::Error) { @store.verify! }
+    assert_raises(HrmKernel::Error) do
+      @store.transact(command("intent.record", operator, intent_data("new")))
+    end
+    assert_equal original, File.read(path)
+  end
+
   def test_rejected_first_command_does_not_create_ledger_or_state
     invalid = command(
       "milestone.create",

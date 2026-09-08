@@ -1,0 +1,309 @@
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "minitest/autorun"
+require "rbconfig"
+require "tmpdir"
+require_relative "../lib/hrm_kernel/host"
+
+class HrmKernelHostTest < Minitest::Test
+  THREAD = "01234567-89ab-cdef-0123-456789abcdef"
+
+  def setup
+    @temporary = File.realpath(Dir.mktmpdir("hrm-host"))
+    @project = File.join(@temporary, "project")
+    FileUtils.mkdir_p(@project)
+    File.write(File.join(@project, "app.txt"), "original\n")
+    @state_dir = File.join(@temporary, "state")
+    @store = HrmKernel::Store.new(@state_dir)
+    @counter = 0
+    transact("milestone.create", "operator", "human", {
+      "milestone_id" => "trial", "outcome" => "Build a reviewable application",
+      "project_root" => @project, "requirements" => [{ "id" => "R1", "text" => "Keep reviewed intent" }],
+      "allowed_paths" => ["app.txt", "other.txt"]
+    })
+    create_order("work", "app.txt")
+    @fake = File.join(@temporary, "fake-codex")
+    File.write(@fake, <<~'RUBY'.sub("RUBY_EXECUTABLE", RbConfig.ruby))
+      #!RUBY_EXECUTABLE
+      require "json"
+      require "securerandom"
+      packet = JSON.parse(STDIN.read)
+      task = packet.fetch("task")
+      JSON.parse(File.read(ARGV[ARGV.index("--output-schema") + 1]))
+      puts JSON.generate("type" => "fixture.argv", "argv" => ARGV)
+      thread = if ARGV.include?("resume")
+                 ARGV[ARGV.index("resume") + 1]
+               elsif packet["actor_id"].start_with?("reviewer-")
+                 "11234567-89ab-cdef-0123-456789abcdef"
+               else
+                 "01234567-89ab-cdef-0123-456789abcdef"
+               end
+      puts JSON.generate("type" => "thread.started", "thread_id" => thread)
+      $stdout.flush
+      sleep 0.2 if task == "slow"
+      abort "fake host failure" if task == "fail"
+      status = packet["actor_id"].start_with?("reviewer-") ? "reviewed" : "implemented"
+      changed = []
+      summary = "Actual fake process completed"
+      if task == "edit" || task == "unreported-edit"
+        File.write("app.txt", "changed\n")
+        changed = ["app.txt"] if task == "edit"
+      elsif task.start_with?("read-forbidden:")
+        begin
+          File.read(task.delete_prefix("read-forbidden:"))
+          summary = "forbidden read unexpectedly succeeded"
+        rescue Errno::EPERM, Errno::EACCES
+          summary = "forbidden read denied"
+        end
+      elsif task == "write-other-order"
+        begin
+          File.write("other.txt", "unauthorized change")
+          summary = "cross-order write unexpectedly succeeded"
+        rescue Errno::EPERM, Errno::EACCES
+          summary = "cross-order write denied"
+        end
+      end
+      result = {
+        "status" => status, "summary" => summary, "changed_paths" => changed,
+        "findings" => [], "scenario_dispositions" => [], "context_requests" => []
+      }
+      result["status"] = "complete" if task == "invalid-result"
+      output = ARGV[ARGV.index("-o") + 1]
+      File.write(output, JSON.generate(result))
+      unless task == "no-completion-event"
+        puts JSON.generate("type" => "turn.completed", "usage" => {
+          "input_tokens" => 123, "cached_input_tokens" => 45, "output_tokens" => 67
+        })
+      end
+    RUBY
+    File.chmod(0o700, @fake)
+    @host = HrmKernel::Host.new(state_dir: @state_dir, codex_path: @fake)
+    @jobs = []
+  end
+
+  def teardown
+    @jobs.each { |id| await_job(id) rescue nil }
+    FileUtils.remove_entry(@temporary) if File.exist?(@temporary)
+  end
+
+  def test_real_child_dispatch_persists_thread_usage_claim_and_structured_artifacts
+    job = dispatch("one", prompt: "edit", context_paths: ["app.txt"])
+    assert_equal "worker-work", job["actor_id"]
+    assert_equal "claim-one", job["claim_id"]
+    done = await_job("one")
+    assert_equal "succeeded", done["status"]
+    assert_equal THREAD, done["thread_id"]
+    assert_equal [{ "input_tokens" => 123, "cached_input_tokens" => 45, "output_tokens" => 67 }], done["usage"]
+    collected = @host.collect(job_id: "one")
+    assert_equal ["app.txt"], collected["observed_changed_paths"]
+    assert_equal Digest::SHA256.hexdigest("changed\n"), collected["verified_artifacts"].first["sha256"]
+    refute collected["submitted"]
+    refute collected["tests_verified"]
+    assert_equal "running", @store.read.dig("state", "work_orders", "work", "status")
+    packet = JSON.parse(File.read(done["artifact_paths"]["prompt.json"]))
+    refute packet.key?("ledger")
+    assert_equal "original\n", packet.dig("declared_sources", 0, "text")
+    assert_equal "Build a reviewable application", packet.dig("initial_contract", "outcome")
+    assert_equal File.size(done["artifact_paths"]["prompt.json"]), done["prompt_bytes"]
+    assert_equal 0o600, File.stat(done["artifact_paths"]["events.jsonl"]).mode & 0o777
+    assert_equal 0o700, File.stat(File.dirname(done["artifact_paths"]["job.json"])).mode & 0o777
+    argv = JSON.parse(File.readlines(done["artifact_paths"]["events.jsonl"]).first)["argv"]
+    assert_includes argv, "--ignore-user-config"
+    assert_includes argv, "workspace-write"
+    assert_equal "gpt-5.6-sol", argv[argv.index("-m") + 1]
+    refute_includes argv, "--ignore-rules"
+    refute_includes argv, "--dangerously-bypass-approvals-and-sandbox"
+  end
+
+  def test_restart_and_duplicate_dispatch_do_not_launch_again
+    spec = specification("duplicate", prompt: "slow")
+    @jobs << "duplicate"
+    @host.dispatch(spec)
+    restarted = HrmKernel::Host.new(state_dir: @state_dir, codex_path: @fake)
+    assert_equal "duplicate", restarted.dispatch(spec)["job_id"]
+    await_job("duplicate")
+    assert_equal THREAD, restarted.dispatch(spec)["thread_id"]
+    events = File.readlines(@host.poll(job_id: "duplicate")["artifact_paths"]["events.jsonl"]).map { |line| JSON.parse(line) }
+    assert_equal 1, events.count { |event| event["type"] == "thread.started" }
+    assert_raises(HrmKernel::Error) { restarted.dispatch(spec.merge("prompt" => "different")) }
+  end
+
+  def test_stale_released_claim_rejects_collection
+    dispatch("stale")
+    await_job("stale")
+    transact("work_order.release", "orchestrator", "astra", {
+      "work_order_id" => "work", "revision" => 1, "claim_id" => "claim-stale", "reason" => "Changed assignment"
+    })
+    refute @host.poll(job_id: "stale")["claim_current"]
+    error = assert_raises(HrmKernel::Error) { @host.collect(job_id: "stale") }
+    assert_match(/stale host job/, error.message)
+  end
+
+  def test_exit_zero_without_completion_event_is_not_success
+    dispatch("unfinished", prompt: "no-completion-event")
+    assert_equal "failed", await_job("unfinished")["status"]
+    assert_raises(HrmKernel::Error) { @host.collect(job_id: "unfinished") }
+  end
+
+  def test_nonzero_child_exit_and_bad_schema_do_not_forge_completion
+    dispatch("failure", prompt: "fail")
+    failed = await_job("failure")
+    assert_equal "failed", failed["status"]
+    assert_equal 1, failed.dig("completion", "exit_code")
+    assert_raises(HrmKernel::Error) { @host.collect(job_id: "failure") }
+    release("failure")
+    dispatch("invalid", prompt: "invalid-result")
+    assert_equal "failed", await_job("invalid")["status"]
+    assert_raises(HrmKernel::Error) { @host.collect(job_id: "invalid") }
+  end
+
+  def test_result_tampering_and_unreported_artifact_changes_are_rejected
+    dispatch("tamper")
+    done = await_job("tamper")
+    result = JSON.parse(File.read(done["artifact_paths"]["result.json"]))
+    result["summary"] = "Forged after completion"
+    File.write(done["artifact_paths"]["result.json"], JSON.generate(result))
+    assert_raises(HrmKernel::Error) { @host.collect(job_id: "tamper") }
+    release("tamper")
+    dispatch("unreported", prompt: "unreported-edit")
+    await_job("unreported")
+    assert_raises(HrmKernel::Error) { @host.collect(job_id: "unreported") }
+  end
+
+  def test_resume_uses_exact_thread_and_same_actor_while_checker_is_fresh
+    dispatch("first")
+    await_job("first")
+    resumed = dispatch("second", resume_job_id: "first")
+    assert_equal "claim-first", resumed["claim_id"]
+    done = await_job("second")
+    assert_equal THREAD, done["thread_id"]
+    argv = JSON.parse(File.readlines(done["artifact_paths"]["events.jsonl"]).first)["argv"]
+    assert_equal THREAD, argv[argv.index("resume") + 1]
+    refute_includes argv, "--last"
+    complete_order
+    reviewer_spec = specification("checker").merge("role" => "reviewer")
+    reviewer_spec.delete("work_order_id")
+    @jobs << "checker"
+    reviewer = @host.dispatch(reviewer_spec)
+    assert_equal "reviewer-checker", reviewer["actor_id"]
+    checked = await_job("checker")
+    refute_equal THREAD, checked["thread_id"]
+    assert_equal "reviewed", @host.collect(job_id: "checker").dig("result", "status")
+    check_argv = JSON.parse(File.readlines(checked["artifact_paths"]["events.jsonl"]).first)["argv"]
+    assert_includes check_argv, "read-only"
+    assert_raises(HrmKernel::Error) { @host.dispatch(reviewer_spec.merge("job_id" => "bad-checker", "resume_job_id" => "first")) }
+    File.write(File.join(@project, "app.txt"), "changed after checker\n")
+    assert_raises(HrmKernel::Error) { @host.collect(job_id: "checker") }
+  end
+
+  def test_invalid_context_budget_model_or_cross_order_resume_does_not_reassign
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("wrong-model").merge("model" => "gpt-5.5")) }
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("escape", context_paths: ["../fake-codex"])) }
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("over-budget", max_context_bytes: 1024)) }
+    assert_equal "queued", @store.read.dig("state", "work_orders", "work", "status")
+    dispatch("original")
+    await_job("original")
+    create_order("other", "other.txt")
+    error = assert_raises(HrmKernel::Error) do
+      @host.dispatch(specification("cross-order", resume_job_id: "original").merge("work_order_id" => "other"))
+    end
+    assert_match(/preserve worker actor and order/, error.message)
+  end
+
+  def test_outer_filesystem_exclusion_is_effective_and_context_cannot_bypass_it
+    forbidden = File.join(@temporary, "operator-data")
+    FileUtils.mkdir_p(forbidden)
+    marker = File.join(forbidden, "private.txt")
+    File.write(marker, "private test fixture")
+    dispatch("isolated", prompt: "read-forbidden:#{marker}", forbidden_roots: [forbidden])
+    await_job("isolated")
+    assert_equal "forbidden read denied", @host.collect(job_id: "isolated").dig("result", "summary")
+    release("isolated")
+    File.symlink(marker, File.join(@project, "secret-link"))
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("link", context_paths: ["secret-link"], forbidden_roots: [forbidden])) }
+  end
+
+  def test_execution_uses_only_frozen_check_plan
+    dispatch("checks")
+    context = @host.check_context(job_id: "checks", check_id: "unit")
+    assert_equal ["ruby", "test.rb"], context.dig("spec", "argv")
+    assert_equal "fixture-env", context.dig("job", "check_plan", "environment_id")
+    assert_raises(HrmKernel::Error) { @host.check_context(job_id: "checks", check_id: "new-command") }
+    assert_equal [], context.dig("job", "execution_environment_allowlist")
+  end
+
+  def test_worker_cannot_write_another_orders_file_in_the_shared_candidate
+    create_order("other", "other.txt")
+    dispatch("bounded-write", prompt: "write-other-order")
+    assert_equal "succeeded", await_job("bounded-write")["status"]
+    result = @host.collect(job_id: "bounded-write")
+    assert_equal "cross-order write denied", result.dig("result", "summary")
+    refute File.exist?(File.join(@project, "other.txt"))
+  end
+
+  def test_worker_cannot_read_its_control_ledger_but_cli_reads_schema_and_writes_result
+    dispatch("control-denied", prompt: "read-forbidden:#{File.join(@state_dir, 'events.jsonl')}")
+    await_job("control-denied")
+    assert_equal "forbidden read denied", @host.collect(job_id: "control-denied").dig("result", "summary")
+  end
+
+  private
+
+  def transact(type, role, actor, data)
+    @counter += 1
+    @store.transact("command_id" => "command-#{@counter}", "type" => type,
+                    "actor" => { "role" => role, "id" => actor }, "data" => data)
+  end
+
+  def create_order(id, path)
+    transact("work_order.create", "orchestrator", "astra", {
+      "work_order_id" => id, "intent_id" => "milestone_initial", "objective" => "Implement exact app behavior",
+      "requirement_ids" => ["R1"], "paths" => [path], "check_ids" => ["unit"], "effect_class" => "local_repository"
+    })
+  end
+
+  def specification(id, **overrides)
+    {
+      "job_id" => id, "role" => "worker", "work_order_id" => "work", "model" => "gpt-5.6-sol",
+      "prompt" => "do work", "context_paths" => [], "max_context_bytes" => 64 * 1024,
+      "check_plan" => { "environment_id" => "fixture-env", "checks" => [{ "id" => "unit", "environment_id" => "fixture-env", "argv" => ["ruby", "test.rb"] }] }
+    }.merge(overrides.transform_keys(&:to_s))
+  end
+
+  def dispatch(id, **options)
+    @jobs << id
+    @host.dispatch(specification(id, **options))
+  end
+
+  def await_job(id)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+    loop do
+      job = @host.poll(job_id: id)
+      return job if %w[succeeded failed].include?(job["status"])
+      raise "host fixture timed out: #{job}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.025
+    end
+  end
+
+  def release(id)
+    order = @store.read.dig("state", "work_orders", "work")
+    transact("work_order.release", "orchestrator", "astra", {
+      "work_order_id" => "work", "revision" => order["revision"], "claim_id" => order["claim_id"], "reason" => "Fixture #{id} completed"
+    })
+  end
+
+  def complete_order
+    order = @store.read.dig("state", "work_orders", "work")
+    artifacts = [{ "path" => "app.txt", "sha256" => Digest::SHA256.file(File.join(@project, "app.txt")).hexdigest }]
+    report_path = File.join(@project, "unit-report.json")
+    File.write(report_path, JSON.generate(
+      "check_id" => "unit", "conclusion" => "passed", "work_order_id" => "work", "revision" => order["revision"], "artifacts" => artifacts
+    ))
+    transact("work_order.submit", "worker", "worker-work", {
+      "work_order_id" => "work", "revision" => order["revision"], "claim_id" => order["claim_id"], "artifacts" => artifacts,
+      "checks" => [{ "id" => "unit", "conclusion" => "passed", "artifact_path" => "unit-report.json", "sha256" => Digest::SHA256.file(report_path).hexdigest }]
+    })
+  end
+end
