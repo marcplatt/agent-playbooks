@@ -7,6 +7,7 @@ require "open3"
 require "pathname"
 require "rbconfig"
 require "time"
+require "tmpdir"
 require_relative "store"
 
 module HrmKernel
@@ -61,9 +62,6 @@ module HrmKernel
           return poll(job_id: spec.fetch("job_id"))
         end
         fail!("Codex executable is unavailable") unless File.file?(@codex_path) && File.executable?(@codex_path)
-        if !spec["forbidden_roots"].empty? && !File.executable?("/usr/bin/sandbox-exec")
-          fail!("required host filesystem exclusions need sandbox-exec on this host")
-        end
         state = @store.read.fetch("state")
         fail!("milestone is not initialized") unless state && state["milestone"]
         if spec["role"] == "reviewer"
@@ -81,6 +79,8 @@ module HrmKernel
           plan_ids = spec.fetch("check_plan").fetch("checks").map { |item| item["id"] }
           fail!("host check plan must match the work order's declared check IDs") unless plan_ids.sort == order.fetch("check_ids").sort
         end
+        tool_tmp = File.join(File.realpath(Dir.tmpdir), "ap-hrm-tools-#{Digest::SHA256.hexdigest(@state_dir)[0, 16]}", spec["job_id"])
+        permissions = permission_profile(spec, root, order, tool_tmp)
         # Read declared sources before claiming: bad context must not lease work.
         context = read_context(root, spec)
         preview_state = JSON.parse(JSON.generate(state))
@@ -121,13 +121,19 @@ module HrmKernel
           "execution_environment_allowlist" => spec["execution_environment_allowlist"],
           "resume_thread_id" => resumed && resumed["thread_id"],
           "codex_path" => @codex_path, "prompt_bytes" => prompt.bytesize,
+          "permission_profile" => permissions, "permission_profile_digest" => self.class.digest(permissions),
+          "permission_profile_name" => spec["role"] == "worker" ? "hrm-worker" : "hrm-reviewer",
+          "tool_tmp" => tool_tmp,
           "prompt_sha256" => Digest::SHA256.hexdigest(prompt),
           "created_at" => Time.now.utc.iso8601(6),
           "baseline_artifacts" => artifact_snapshot(root, order ? order["paths"] : [], forbidden)
         }
         self.class.private_directory!(path)
+        self.class.private_directory!(File.dirname(tool_tmp))
+        self.class.private_directory!(tool_tmp)
         self.class.atomic_write(File.join(path, "prompt.json"), prompt)
         self.class.atomic_json(File.join(path, "schema.json"), RESULT_SCHEMA)
+        self.class.atomic_json(File.join(path, "permissions.json"), permissions)
         self.class.atomic_json(File.join(path, "job.json"), job)
         # The durable job identity precedes launch. A restart never redispatches
         # an uncertain launch; the operator can inspect its persisted status.
@@ -157,10 +163,11 @@ module HrmKernel
       end
       completed_turns = events.select { |event| event["type"] == "turn.completed" }
       usage = completed_turns.map { |event| event["usage"] }.select { |item| item.is_a?(Hash) }
-      output = job.slice("job_id", "role", "actor_id", "work_order_id", "revision", "claim_id", "model_requested", "model_identity_evidence", "prompt_bytes", "created_at", "check_plan_digest", "binding_digest")
+      output = job.slice("job_id", "role", "actor_id", "work_order_id", "revision", "claim_id", "model_requested", "model_identity_evidence", "prompt_bytes", "created_at", "check_plan_digest", "binding_digest", "permission_profile_digest", "tool_tmp")
       output.merge!("status" => status, "thread_id" => thread_id, "usage" => usage,
                     "artifact_paths" => %w[job.json prompt.json events.jsonl stderr.log helper.stderr.log result.json completion.json].to_h { |name| [name, File.join(path, name)] })
       output["completion"] = completion if completion
+      output["result_status"] = completion && completion["result_status"]
       output["claim_current"] = binding_current?(job)
       output
     end
@@ -219,12 +226,8 @@ module HrmKernel
       self.class.atomic_json(File.join(path, "runtime.json"), { "helper_pid" => Process.pid, "started_at" => Time.now.utc.iso8601(6) })
       assert_current!(job)
       args = codex_arguments(job, path)
-      profile = sandbox_profile(job)
-      if profile
-        self.class.atomic_write(File.join(path, "sandbox.sb"), profile)
-        args = ["/usr/bin/sandbox-exec", "-f", File.join(path, "sandbox.sb")] + args
-      end
       env = ENV.to_h.select { |key, _value| %w[HOME USER LOGNAME PATH TMPDIR CODEX_HOME].include?(key) }
+      env["TMPDIR"] = job.fetch("tool_tmp")
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       status = nil
       File.open(File.join(path, "prompt.json"), "r") do |input|
@@ -242,17 +245,21 @@ module HrmKernel
       failed_event = events.any? { |event| %w[turn.failed error].include?(event["type"]) }
       result_file = File.join(path, "result.json")
       result_sha = nil
+      result_status = nil
       if File.file?(result_file)
         fail!("unsafe worker result symlink") if File.symlink?(result_file)
         File.chmod(0o600, result_file)
         result_bytes = self.class.read_private(result_file, max_bytes: MAX_RESULT_BYTES)
-        self.class.validate_result!(JSON.parse(result_bytes), role: job["role"])
+        parsed_result = JSON.parse(result_bytes)
+        self.class.validate_result!(parsed_result, role: job["role"])
+        result_status = parsed_result["status"]
         result_sha = Digest::SHA256.hexdigest(result_bytes)
       end
       succeeded = status.success? && valid_thread && completed && !failed_event && result_sha
       succeeded &&= !job["resume_thread_id"] || thread_ids.first == job["resume_thread_id"]
       self.class.atomic_json(File.join(path, "completion.json"), {
         "status" => succeeded ? "succeeded" : "failed", "exit_code" => status.exitstatus,
+        "result_status" => result_status,
         "term_signal" => status.termsig, "completed_at" => Time.now.utc.iso8601(6),
         "duration_seconds" => Process.clock_gettime(Process::CLOCK_MONOTONIC) - started,
         "result_sha256" => result_sha, "thread_id" => valid_thread ? thread_ids.first : nil,
@@ -304,6 +311,20 @@ module HrmKernel
 
     def self.digest(value)
       Digest::SHA256.hexdigest(JSON.generate(canonical(value)))
+    end
+
+    # All string keys are quoted, including absolute paths and names containing
+    # hyphens. This is TOML, not JSON passed as if it were a shell expression.
+    def self.toml_inline(value)
+      case value
+      when Hash then "{" + value.map { |key, item| "#{JSON.generate(key.to_s)}=#{toml_inline(item)}" }.join(",") + "}"
+      when Array then "[" + value.map { |item| toml_inline(item) }.join(",") + "]"
+      when String then JSON.generate(value)
+      when true then "true"
+      when false then "false"
+      when Numeric then value.to_s
+      else raise HrmKernel::Error, "unsupported inline TOML value"
+      end
     end
 
     def self.private_directory!(path)
@@ -406,6 +427,9 @@ module HrmKernel
               job["binding_digest"] == self.class.digest(job["binding"]) &&
               job["check_plan_digest"] == self.class.digest(job["check_plan"]) &&
               job["check_plan"] == job.dig("spec", "check_plan")
+      if job["permission_profile"]
+        valid &&= job["permission_profile_digest"] == self.class.digest(job["permission_profile"])
+      end
       fail!("host job manifest integrity mismatch") unless valid
       job
     end
@@ -525,10 +549,10 @@ module HrmKernel
         "host_contract" => "AP-INTERACT RC34 bounded Codex worker",
         "instructions" => [
           spec["role"] == "worker" ? "Implement only your declared work-order files. Do not commit, push, run tests, launch servers, or call providers. The kernel execution runner performs checks after you return." : "Independently review the exact candidate read-only. Do not edit files, run tests, launch servers, or call providers.",
-          "Read only the supplied packet and declared source paths. Ask for needed additional context through context_requests; technical discovery does not require operator approval.",
+          "Start with the supplied packet. Inspect needed project sources and declared dependency roots in bounded excerpts; do not preload full history. Return context_requests when needed context is unavailable. Technical discovery does not require operator approval.",
           "Do not access operator Documents, ambient databases, credentials, private evidence, or other checkouts. No provider, customer, deployment, or runtime effects are authorized.",
           "Return the required structured JSON. Scenario statements are your assessment, not verified execution receipts or human acceptance. Preserve unmet requirements and findings.",
-          "This host measures supplied prompt bytes and actual reported token usage separately. The worker sandbox is workspace-write (reviewer read-only), with the listed filesystem exclusions; this is not a complete read allowlist."
+          "This host measures supplied prompt bytes and actual reported token usage separately. Native Codex permission profiles restrict model commands to project/dependency reads, exact owned-file writes, and private scratch space. Operator Documents and kernel control state are denied; command networking is disabled. The Codex transport itself still authenticates and communicates with its model provider."
         ],
         "task" => spec["prompt"], "actor_id" => actor,
         "initial_contract" => initial,
@@ -539,29 +563,34 @@ module HrmKernel
     end
 
     def codex_arguments(job, path)
-      sandbox = job["role"] == "reviewer" ? "read-only" : "workspace-write"
-      args = [job["codex_path"], "exec", "--ignore-user-config", "-m", MODEL, "-s", sandbox,
+      profile_name = job.fetch("permission_profile_name")
+      args = [job["codex_path"], "exec", "--ignore-user-config", "--strict-config", "-m", MODEL,
               "-c", 'approval_policy="never"', "-c", 'shell_environment_policy.inherit="none"',
+              "-c", 'shell_environment_policy.set.PATH="/usr/bin:/bin:/usr/sbin:/sbin"',
+              "-c", "shell_environment_policy.set.TMPDIR=#{self.class.toml_inline(job.fetch('tool_tmp'))}",
+              "-c", "default_permissions=#{self.class.toml_inline(profile_name)}",
+              "-c", "permissions.#{profile_name}=#{self.class.toml_inline(job.fetch('permission_profile'))}",
               "-C", job["project_root"]]
       args += ["resume", job["resume_thread_id"]] if job["resume_thread_id"]
       args + ["--json", "--output-schema", File.join(path, "schema.json"), "-o", File.join(path, "result.json"), "-"]
     end
 
-    def sandbox_profile(job)
-      roots = job.dig("spec", "forbidden_roots")
-      profile = "(version 1)\n(allow default)\n" + roots.map { |root| "(deny file-read* file-write* (subpath #{JSON.generate(root)}))\n" }.join
-      path = job_path(job["job_id"])
-      # The CLI needs its schema and output file. It does not need the control
-      # ledger, receipt keys, execution records or other workers' private jobs.
-      # Keep directory metadata traversable but deny data reads/listing.
-      exceptions = %w[schema.json result.json].map { |name| "(require-not (literal #{JSON.generate(File.join(path, name))}))" }.join(" ")
-      profile += "(deny file-read-data file-write* (require-all (subpath #{JSON.generate(@state_dir)}) #{exceptions}))\n"
-      # Concurrent jobs share a candidate, but their write authority does not.
-      # Enforce declared file ownership in the outer process sandbox as well as
-      # in state. Reviewer sessions cannot mutate any candidate path.
-      paths = job.dig("binding", "order", "paths") || []
-      exclusions = paths.map { |relative| "(require-not (literal #{JSON.generate(File.join(job.fetch('project_root'), relative))}))" }.join(" ")
-      profile + "(deny file-write* (require-all (subpath #{JSON.generate(job.fetch('project_root'))}) #{exclusions}))\n"
+    def permission_profile(spec, root, order, tool_tmp)
+      denied = [@state_dir, *spec.fetch("forbidden_roots")].uniq
+      filesystem = { ":root" => "deny", ":minimal" => "read", root => "read" }
+      spec.fetch("execution_read_roots").each do |path|
+        resolved = File.exist?(path) ? File.realpath(path) : File.expand_path(path)
+        fail!("dependency read root would reopen protected state") if resolved == "/" || denied.any? { |item| beneath?(resolved, item) }
+        filesystem[resolved] = "read"
+      end
+      Array(order && order["paths"]).each do |relative|
+        path = source_path(root, relative, denied, allow_missing: true)
+        filesystem[path] = "write"
+      end
+      fail!("worker scratch space overlaps protected state") if denied.any? { |item| beneath?(tool_tmp, item) }
+      filesystem[tool_tmp] = "write"
+      denied.each { |path| filesystem[path] = "deny" }
+      { "filesystem" => filesystem, "network" => { "enabled" => false } }
     end
   end
 end

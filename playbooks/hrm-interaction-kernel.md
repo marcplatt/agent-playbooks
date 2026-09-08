@@ -45,9 +45,14 @@ really came from the operator. Native receipts prove that the declared local pro
 ran against the bound candidate under the recorded policy; they do not establish
 business truth or semantic correctness.
 
-The host's outer sandbox restricts candidate writes to the worker's exact declared
-files; independent reviewers cannot write candidate files. Parent directories must
-already exist before dispatch. Error findings in structured reviewer output must
+The host passes an explicit native Codex permission profile with strict config
+validation: project and declared dependency reads, exact owned-file writes, private
+scratch writes, denied operator Documents and kernel control state, and disabled
+command networking. Independent reviewers cannot write candidate files. The model
+transport keeps its existing authentication; it is not wrapped in another Seatbelt
+sandbox. Parent directories must already exist before dispatch. These profiles
+follow the [official permissions configuration](https://learn.chatgpt.com/docs/permissions).
+Error findings in structured reviewer output must
 name their `scenario_ids`; every such finding is retained as an unresolved kernel
 finding. Native receipts bind executable bytes as well as source and check plans.
 Third-party dependency trees are not recursively content-addressed, so dependency

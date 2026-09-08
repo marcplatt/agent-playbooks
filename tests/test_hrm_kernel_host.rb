@@ -29,9 +29,12 @@ class HrmKernelHostTest < Minitest::Test
       #!RUBY_EXECUTABLE
       require "json"
       require "securerandom"
+      require "open3"
+      require "rbconfig"
       packet = JSON.parse(STDIN.read)
       task = packet.fetch("task")
       JSON.parse(File.read(ARGV[ARGV.index("--output-schema") + 1]))
+      permissions = JSON.parse(File.read(File.join(File.dirname(ARGV[ARGV.index("-o") + 1]), "permissions.json")))
       puts JSON.generate("type" => "fixture.argv", "argv" => ARGV)
       thread = if ARGV.include?("resume")
                  ARGV[ARGV.index("resume") + 1]
@@ -45,28 +48,68 @@ class HrmKernelHostTest < Minitest::Test
       sleep 0.2 if task == "slow"
       abort "fake host failure" if task == "fail"
       status = packet["actor_id"].start_with?("reviewer-") ? "reviewed" : "implemented"
-      changed = []
-      summary = "Actual fake process completed"
-      if task == "edit" || task == "unreported-edit"
-        File.write("app.txt", "changed\n")
-        changed = ["app.txt"] if task == "edit"
-      elsif task.start_with?("read-forbidden:")
-        begin
-          File.read(task.delete_prefix("read-forbidden:"))
-          summary = "forbidden read unexpectedly succeeded"
-        rescue Errno::EPERM, Errno::EACCES
-          summary = "forbidden read denied"
-        end
-      elsif task == "write-other-order"
-        begin
-          File.write("other.txt", "unauthorized change")
-          summary = "cross-order write unexpectedly succeeded"
-        rescue Errno::EPERM, Errno::EACCES
-          summary = "cross-order write denied"
+      status = "blocked" if task == "blocked"
+      # Simulate one native tool sandbox inside the fake CLI. The CLI parent
+      # remains outside it, exactly as required for schema/result transport.
+      rules = ["(version 1)", "(deny default)", "(allow process*)", "(allow sysctl-read)", "(deny network*)"]
+      rules << '(allow file-read* (literal "/"))'
+      rules << '(allow file-write* (literal "/dev/null"))'
+      %w[/System/Library /usr /Library/Apple /Library/Ruby /private/var/db/dyld /private/var/select /dev/null /dev/urandom].each do |path|
+        rules << "(allow file-read* (subpath #{JSON.generate(path)}))"
+      end
+      filesystem = permissions.fetch("filesystem")
+      ["/System/Library", "/usr", "/Library/Apple", "/Library/Ruby", "/private/var/db/dyld", "/private/var/select", *filesystem.keys.reject { |path| path.start_with?(":") }].each do |path|
+        parent = File.dirname(path)
+        until parent == "/"
+          rules << "(allow file-read* (literal #{JSON.generate(parent)}))"
+          parent = File.dirname(parent)
         end
       end
+      filesystem.each do |path, access|
+        next if path.start_with?(":") || access == "deny"
+        rules << "(allow file-read* (subpath #{JSON.generate(path)}))"
+        if access == "write"
+          kind = File.directory?(path) ? "subpath" : "literal"
+          rules << "(allow file-write* (#{kind} #{JSON.generate(path)}))"
+        end
+      end
+      filesystem.each do |path, access|
+        next if path.start_with?(":") || access != "deny"
+        rules << "(deny file-read* file-write* (subpath #{JSON.generate(path)}))"
+      end
+      tool = <<~'TOOL'
+        require "json"
+        task = ARGV.fetch(0)
+        changed = []
+        summary = "Actual fake process completed"
+        if task == "edit" || task == "unreported-edit"
+          File.write("app.txt", "changed\n")
+          changed = ["app.txt"] if task == "edit"
+        elsif task.start_with?("read-forbidden:")
+          begin
+            File.read(task.delete_prefix("read-forbidden:"))
+            summary = "forbidden read unexpectedly succeeded"
+          rescue Errno::EPERM, Errno::EACCES
+            summary = "forbidden read denied"
+          end
+        elsif task == "write-other-order"
+          begin
+            File.write("other.txt", "unauthorized change")
+            summary = "cross-order write unexpectedly succeeded"
+          rescue Errno::EPERM, Errno::EACCES
+            summary = "cross-order write denied"
+          end
+        elsif task == "scratch"
+          File.write(File.join(ENV.fetch("TMPDIR"), "probe.txt"), "scratch")
+          summary = "scratch write succeeded"
+        end
+        puts JSON.generate("changed" => changed, "summary" => summary)
+      TOOL
+      output, errors, outcome = Open3.capture3("/usr/bin/sandbox-exec", "-p", rules.join("\n"), RbConfig.ruby, "-e", tool, task)
+      abort "fixture tool exit=#{outcome.exitstatus.inspect} signal=#{outcome.termsig.inspect}: #{errors} #{output}" unless outcome.success?
+      observed = JSON.parse(output)
       result = {
-        "status" => status, "summary" => summary, "changed_paths" => changed,
+        "status" => status, "summary" => observed.fetch("summary"), "changed_paths" => observed.fetch("changed"),
         "findings" => [], "scenario_dispositions" => [], "context_requests" => []
       }
       result["status"] = "complete" if task == "invalid-result"
@@ -85,6 +128,11 @@ class HrmKernelHostTest < Minitest::Test
 
   def teardown
     @jobs.each { |id| await_job(id) rescue nil }
+    @jobs.each do |id|
+      temporary = @host.poll(job_id: id)["tool_tmp"] rescue nil
+      FileUtils.remove_entry(temporary) if temporary && File.directory?(temporary)
+      Dir.rmdir(File.dirname(temporary)) if temporary && File.directory?(File.dirname(temporary)) && Dir.empty?(File.dirname(temporary))
+    end
     FileUtils.remove_entry(@temporary) if File.exist?(@temporary)
   end
 
@@ -111,7 +159,13 @@ class HrmKernelHostTest < Minitest::Test
     assert_equal 0o700, File.stat(File.dirname(done["artifact_paths"]["job.json"])).mode & 0o777
     argv = JSON.parse(File.readlines(done["artifact_paths"]["events.jsonl"]).first)["argv"]
     assert_includes argv, "--ignore-user-config"
-    assert_includes argv, "workspace-write"
+    assert_includes argv, "--strict-config"
+    assert_includes argv, 'default_permissions="hrm-worker"'
+    refute_includes argv, "-s"
+    refute_includes argv, "--sandbox"
+    frozen_permissions = @host.job_record(job_id: "one").fetch("permission_profile")
+    assert_includes argv, "permissions.hrm-worker=#{HrmKernel::Host.toml_inline(frozen_permissions)}"
+    assert_equal HrmKernel::Host.digest(frozen_permissions), done["permission_profile_digest"]
     assert_equal "gpt-5.6-sol", argv[argv.index("-m") + 1]
     refute_includes argv, "--ignore-rules"
     refute_includes argv, "--dangerously-bypass-approvals-and-sandbox"
@@ -192,7 +246,8 @@ class HrmKernelHostTest < Minitest::Test
     refute_equal THREAD, checked["thread_id"]
     assert_equal "reviewed", @host.collect(job_id: "checker").dig("result", "status")
     check_argv = JSON.parse(File.readlines(checked["artifact_paths"]["events.jsonl"]).first)["argv"]
-    assert_includes check_argv, "read-only"
+    assert_includes check_argv, 'default_permissions="hrm-reviewer"'
+    refute_includes check_argv, "--sandbox"
     assert_raises(HrmKernel::Error) { @host.dispatch(reviewer_spec.merge("job_id" => "bad-checker", "resume_job_id" => "first")) }
     File.write(File.join(@project, "app.txt"), "changed after checker\n")
     assert_raises(HrmKernel::Error) { @host.collect(job_id: "checker") }
@@ -212,7 +267,7 @@ class HrmKernelHostTest < Minitest::Test
     assert_match(/preserve worker actor and order/, error.message)
   end
 
-  def test_outer_filesystem_exclusion_is_effective_and_context_cannot_bypass_it
+  def test_native_profile_exclusion_is_effective_and_context_cannot_bypass_it
     forbidden = File.join(@temporary, "operator-data")
     FileUtils.mkdir_p(forbidden)
     marker = File.join(forbidden, "private.txt")
@@ -247,6 +302,25 @@ class HrmKernelHostTest < Minitest::Test
     dispatch("control-denied", prompt: "read-forbidden:#{File.join(@state_dir, 'events.jsonl')}")
     await_job("control-denied")
     assert_equal "forbidden read denied", @host.collect(job_id: "control-denied").dig("result", "summary")
+  end
+
+  def test_native_profile_keeps_transport_success_separate_from_blocked_work
+    dispatch("blocked", prompt: "blocked")
+    done = await_job("blocked")
+    assert_equal "succeeded", done["status"]
+    assert_equal "blocked", done["result_status"]
+    assert_equal "blocked", done.dig("completion", "result_status")
+    assert_equal "blocked", @host.collect(job_id: "blocked").dig("result", "status")
+  end
+
+  def test_native_profile_allows_private_scratch_without_reopening_protected_state
+    dispatch("scratch", prompt: "scratch")
+    await_job("scratch")
+    assert_equal "scratch write succeeded", @host.collect(job_id: "scratch").dig("result", "summary")
+    release("scratch")
+    assert_raises(HrmKernel::Error) do
+      @host.dispatch(specification("bad-read-root").merge("execution_read_roots" => [File.join(@state_dir, "host-jobs")]))
+    end
   end
 
   private

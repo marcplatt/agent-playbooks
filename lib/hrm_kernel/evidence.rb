@@ -24,6 +24,8 @@ module HrmKernel
         verify_submission!(state, command.fetch("data"), state_dir: state_dir)
       when "milestone.review_ready"
         verify_completed_work!(state, state_dir: state_dir)
+      when "milestone.assess", "finding.resolve"
+        verify_completed_work!(state, state_dir: state_dir)
       when "milestone.review"
         verify_completed_work!(state, state_dir: state_dir) if command.dig("data", "decision") == "accepted"
       end
@@ -264,10 +266,6 @@ module HrmKernel
       true
     rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP, Errno::ENOTDIR => e
       fail!("deleted artifact path #{relative_path.inspect} cannot be verified: #{e.message}")
-    end
-
-    def native_execution?(milestone)
-      milestone["mode"] == "implementation"
     end
 
     def native_execution?(milestone)

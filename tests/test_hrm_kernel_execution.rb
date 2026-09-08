@@ -237,6 +237,37 @@ class HrmKernelExecutionTest < Minitest::Test
     end
   end
 
+  def test_completed_work_transitions_reject_any_new_candidate_drift
+    execution = runner
+    candidate = capture(execution, authorized_paths: %w[app.txt other.txt])
+    result = execution.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+    descriptor = result.select { |key, _| %w[receipt_path receipt_sha256].include?(key) }
+    artifacts = [{"path" => "app.txt", "sha256" => Digest::SHA256.file(File.join(@project_root, "app.txt")).hexdigest}]
+    report_path = write_report(artifacts, descriptor)
+    submission = submit_command(artifacts, report_path)
+    completed = work_order.merge(
+      "status" => "completed",
+      "claim_id" => nil,
+      "artifacts" => artifacts,
+      "checks" => submission.dig("data", "checks")
+    )
+    state = {"milestone" => milestone, "work_orders" => {"work-1" => completed}}
+
+    File.write(File.join(@project_root, "rogue.txt"), "late drift\n")
+    commands = [
+      {"type" => "milestone.assess", "data" => {}},
+      {"type" => "finding.resolve", "data" => {}},
+      {"type" => "milestone.review_ready", "data" => {}},
+      {"type" => "milestone.review", "data" => {"decision" => "accepted"}}
+    ]
+    commands.each do |command|
+      error = assert_raises(HrmKernel::Error) do
+        HrmKernel::Evidence.verify!(state, command, state_dir: @state_dir)
+      end
+      assert_match(/candidate Git changes drifted/, error.message)
+    end
+  end
+
   private
 
   def runner(environment_allowlist: %w[RUN_ROOT], read_roots: [])
