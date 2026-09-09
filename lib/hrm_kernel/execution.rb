@@ -426,9 +426,9 @@ module HrmKernel
 
     def validate_configuration_paths!(spec, run_root)
       Array(spec["configuration_paths"]).each do |path|
-        fail!("configuration paths must be absolute") unless Pathname.new(path).absolute?
+        fail!("configuration paths must be absolute after {run_root} expansion; use configuration_paths: [] for project configuration and select it through argv") unless Pathname.new(path).absolute?
         expanded = File.expand_path(path)
-        fail!("configuration paths must remain in the disposable run root") unless within?(expanded, run_root)
+        fail!("configuration paths must remain in the disposable run root; project files such as pyproject.toml belong in argv with configuration_paths: [], not in this scratch-only field") unless within?(expanded, run_root)
         stat = File.lstat(expanded)
         fail!("configuration path must not be a symlink") if stat.symlink?
         fail!("configuration path must be a regular file or directory") unless stat.file? || stat.directory?
