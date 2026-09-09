@@ -28,6 +28,15 @@ class HrmKernelStoreTest < Minitest::Test
     refute File.exist?(File.join(@state_dir, "events.jsonl"))
   end
 
+  def test_driver_runtime_directory_requires_private_permissions
+    @store.read
+    path = File.join(@state_dir, "driver")
+    Dir.mkdir(path, 0o700)
+    assert_equal 0, HrmKernel::Store.new(@state_dir).read["cursor"]
+    File.chmod(0o755, path)
+    assert_raises(HrmKernel::Error) { HrmKernel::Store.new(@state_dir) }
+  end
+
   def test_hash_chain_permissions_and_exact_command_replay
     create = command("milestone.create", operator, milestone_data, id: "create-1")
     first = @store.transact(create)
@@ -57,6 +66,27 @@ class HrmKernelStoreTest < Minitest::Test
 
     assert_raises(HrmKernel::Error) { @store.transact(changed) }
     assert_equal 1, @store.read.fetch("cursor")
+  end
+
+  def test_cursor_guard_is_atomic_with_nested_transactions_and_operator_input
+    @store.transact(command("milestone.create", operator, milestone_data))
+    other = HrmKernel::Store.new(@state_dir)
+    ready = Queue.new
+    operator_command = command("intent.record", operator, intent_data("operator-next"))
+    guarded_command = command("intent.record", operator, intent_data("guarded"))
+    thread = nil
+    result = @store.at_cursor(1) do
+      thread = Thread.new { ready << true; other.transact(operator_command) }
+      ready.pop
+      other.transact(guarded_command)
+    end
+    assert_equal 2, result["cursor"]
+    assert_equal 3, thread.value["cursor"]
+    error = assert_raises(HrmKernel::Error) { @store.at_cursor(2) { flunk "stale guard ran" } }
+    assert_equal "stale_driver_response", error.code
+    assert_equal 3, @store.read["cursor"]
+  ensure
+    thread&.join
   end
 
   def test_v1_ledgers_cannot_be_resumed_or_rewritten_by_rc34

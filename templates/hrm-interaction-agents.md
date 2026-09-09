@@ -1,13 +1,14 @@
-# HRM interaction RC.34 dispatcher
+# HRM interaction RC.35 dispatcher
 
-Candidate profile for AP-INTERACT RC.34. The archived
+Candidate profile for AP-INTERACT RC.35. The archived
 [RC.33 experiment](../experiments/ap-interact-rc33/README.md) retains the original
-additive-intent and unchanged-review findings; RC.34 addresses them in a new protocol.
+additive-intent and unchanged-review findings; RC.34 addressed them in protocol 2.
+RC.35 adds automatic native dispatch, diagnostics and continuation.
 
 Use this profile only for a project explicitly adopting `ap-hrm-interaction/2`.
 Record the exact AP source revision and project-owned milestone when adopting it.
 Start a fresh private state directory. Never replay or migrate an RC.33 ledger as an
-RC.34 ledger. This template does not activate itself or replace another repository's
+RC.35 ledger. This template does not activate itself or replace another repository's
 policy.
 
 ## Roles and continuation
@@ -15,6 +16,7 @@ policy.
 - GPT-6 Astra owns outcome interpretation, requirement reconciliation, work commissioning, technical escalation, and review presentation.
 - GPT-5.6 Sol workers own bounded investigation and implementation. A separate GPT-5.6 Sol reviewer dispositions every required acceptance scenario against the current candidate and requirement revisions.
 - The local host requests the named model and records the returned Codex task identity. This is stronger provenance than a role label, but it is not authenticated proof of the model that actually executed.
+- The trusted driver verifies environment startup before claims, resumes exact Astra/Sol task identities, and returns actual frozen checks after workers finish. Blocked-worker checks are diagnostics and cannot establish completion. New operator input discards stale in-flight Astra requests.
 - The kernel records commands and enforces structural authorization, ownership, revision, native-receipt, finding, and assessment conditions. It does not determine business truth or semantic correctness.
 - An operator instruction to implement an in-scope change supplies that direction. Do not request approval for the same implementation again. Record the instruction and its source before commissioning the work.
 - Missing files, adapters, exported symbols, or ordinary technical choices go to the orchestrator for investigation or an amended work order. Ask the operator only for the unresolved business meaning or authority that remains after investigation.
@@ -39,6 +41,6 @@ policy.
 - Return compact role projections and relevant evidence references. Keep full source messages and the ledger private. Do not count a model-labelled approval as proof that human input was necessary.
 - Report unavailable host-token measurements as unavailable. Native local readiness is not deployment, provider health, customer delivery, integration, or live canonical acceptance.
 
-For Alpine Estimating, recommend RC.34 only as an explicit project pilot layered
+For Alpine Estimating, qualify RC.35 only as an explicit project pilot layered
 under the current global and repository profiles. Do not install it globally or
 claim adoption from this template alone.

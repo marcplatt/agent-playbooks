@@ -2,6 +2,7 @@
 
 require "digest"
 require "fileutils"
+require "find"
 require "json"
 require "open3"
 require "pathname"
@@ -16,7 +17,9 @@ module HrmKernel
   class Host
     DEFAULT_CODEX = "/Applications/ChatGPT.app/Contents/Resources/codex"
     MODEL = "gpt-5.6-sol"
+    ORCHESTRATOR_MODEL = "gpt-6-astra"
     MAX_RESULT_BYTES = 1024 * 1024
+    SENSITIVE_SOURCE = /\A(?:\.env(?:\..*)?|auth\.json|credentials[^\/]*\.json|[^\/]*\.(?:db|sqlite|sqlite3|pem|key))\z/i
     RESULT_KEYS = %w[status summary changed_paths findings scenario_dispositions context_requests].freeze
     IDENTIFIER = /\A[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}\z/.freeze
     UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i.freeze
@@ -43,6 +46,27 @@ module HrmKernel
       ) },
       "context_requests" => { "type" => "array", "items" => object_schema("path" => TEXT, "reason" => TEXT) }
     ).freeze
+
+    ORCHESTRATOR_RESULT_SCHEMA = object_schema(
+      "status" => { "type" => "string", "enum" => %w[continue waiting review_ready operator_input blocked] },
+      "summary" => TEXT,
+      "requests" => { "type" => "array", "maxItems" => 16, "items" => object_schema(
+        "request_id" => TEXT,
+        "operation" => { "type" => "string", "enum" => %w[apply host-dispatch host-status host-collect check submit assess status verify] },
+        "input_json" => TEXT
+      ) }
+    ).freeze
+
+    def self.result_schema(role)
+      return ORCHESTRATOR_RESULT_SCHEMA if role == "orchestrator"
+      schema = JSON.parse(JSON.generate(RESULT_SCHEMA))
+      schema["properties"]["status"]["enum"] = role == "reviewer" ? %w[reviewed blocked] : %w[implemented blocked]
+      if role == "reviewer"
+        schema["properties"]["changed_paths"].merge!("maxItems" => 0,
+          "description" => "Always empty: inspecting an existing diff is not changing files. Put reviewed paths in findings, never changed_paths.")
+      end
+      schema
+    end
 
     def initialize(state_dir:, codex_path: DEFAULT_CODEX)
       @store = Store.new(state_dir)
@@ -72,7 +96,11 @@ module HrmKernel
         root = File.realpath(state.fetch("milestone").fetch("project_root"))
         forbidden = spec["forbidden_roots"]
         fail!("project root overlaps a forbidden root") if forbidden.any? { |item| beneath?(root, item) }
-        actor = spec["role"] == "worker" ? "worker-#{spec.fetch('work_order_id')}" : "reviewer-#{spec.fetch('job_id')}"
+        actor = case spec["role"]
+                when "worker" then "worker-#{spec.fetch('work_order_id')}"
+                when "orchestrator" then "astra-orchestrator"
+                else "reviewer-#{spec.fetch('job_id')}"
+                end
         resumed = resume_parent(spec, actor)
         order = spec["role"] == "worker" ? state.fetch("work_orders").fetch(spec["work_order_id"]) { fail!("unknown work order") } : nil
         if order
@@ -94,6 +122,12 @@ module HrmKernel
           unless order["status"] == "queued" || (resumed && order["status"] == "running" && order["owner_id"] == actor)
             fail!("worker requires a queued order or its own resumed active claim")
           end
+          # Exact-file permissions cannot create a missing ancestor. Prepare only
+          # empty owned-path ancestors in the trusted host; keep worker grants exact.
+          order.fetch("paths").each do |relative|
+            owned = source_path(root, relative, forbidden, allow_missing: true, reject_symlinks: true)
+            FileUtils.mkdir_p(File.dirname(owned), mode: 0o700)
+          end
           if order["status"] == "queued"
             @store.transact(
               "command_id" => "host-claim-#{spec['job_id']}", "type" => "work_order.claim",
@@ -107,11 +141,11 @@ module HrmKernel
         packet = build_packet(spec, actor, state, context)
         prompt = JSON.pretty_generate(packet)
         fail!("bounded prompt exceeds max_context_bytes") if prompt.bytesize > spec["max_context_bytes"]
-        binding = binding_for(state, order)
+        binding = binding_for(state, order, role: spec["role"])
         job = {
           "schema_version" => "ap-hrm-host/1", "job_id" => spec["job_id"], "spec" => spec,
           "spec_digest" => self.class.digest(spec), "role" => spec["role"], "actor_id" => actor,
-          "model_requested" => MODEL, "model_identity_evidence" => "requested_cli_argument",
+          "model_requested" => spec["model"], "model_identity_evidence" => "requested_cli_argument",
           "work_order_id" => spec["work_order_id"], "revision" => order && order["revision"],
           "claim_id" => order && order["claim_id"], "binding" => binding,
           "binding_digest" => self.class.digest(binding), "project_root" => root,
@@ -122,7 +156,7 @@ module HrmKernel
           "resume_thread_id" => resumed && resumed["thread_id"],
           "codex_path" => @codex_path, "prompt_bytes" => prompt.bytesize,
           "permission_profile" => permissions, "permission_profile_digest" => self.class.digest(permissions),
-          "permission_profile_name" => spec["role"] == "worker" ? "hrm-worker" : "hrm-reviewer",
+          "permission_profile_name" => "hrm-#{spec['role']}",
           "tool_tmp" => tool_tmp,
           "prompt_sha256" => Digest::SHA256.hexdigest(prompt),
           "created_at" => Time.now.utc.iso8601(6),
@@ -132,7 +166,7 @@ module HrmKernel
         self.class.private_directory!(File.dirname(tool_tmp))
         self.class.private_directory!(tool_tmp)
         self.class.atomic_write(File.join(path, "prompt.json"), prompt)
-        self.class.atomic_json(File.join(path, "schema.json"), RESULT_SCHEMA)
+        self.class.atomic_json(File.join(path, "schema.json"), self.class.result_schema(spec["role"]))
         self.class.atomic_json(File.join(path, "permissions.json"), permissions)
         self.class.atomic_json(File.join(path, "job.json"), job)
         # The durable job identity precedes launch. A restart never redispatches
@@ -172,6 +206,16 @@ module HrmKernel
       output
     end
 
+    # Read-only recovery: validate the exact saved specification without launching
+    # anything when a controller lost its registration after dispatch.
+    def existing_dispatch(spec)
+      spec = normalize_spec(spec)
+      return nil unless File.exist?(job_path(spec.fetch("job_id")))
+      existing = read_job(spec.fetch("job_id"))
+      fail!("job_id already has a different dispatch specification") unless existing["spec_digest"] == self.class.digest(spec)
+      poll(job_id: spec.fetch("job_id"))
+    end
+
     def collect(job_id:)
       job = read_job(job_id)
       assert_current!(job)
@@ -188,12 +232,12 @@ module HrmKernel
         fail!("resumed host returned a different thread identity")
       end
       permitted = job.dig("binding", "order", "paths") || []
-      result.fetch("changed_paths").each do |relative|
+      Array(result["changed_paths"]).each do |relative|
         fail!("worker reported a path outside its work order") unless permitted.include?(relative)
       end
       actual = artifact_snapshot(job["project_root"], permitted, job.dig("spec", "forbidden_roots"))
       changed = actual.keys.select { |relative| actual[relative] != job["baseline_artifacts"][relative] }
-      fail!("worker changed declared files without reporting them") unless (changed - result["changed_paths"]).empty?
+      fail!("worker changed declared files without reporting them") unless (changed - Array(result["changed_paths"])).empty?
       { "job" => status, "result" => result, "verified_artifacts" => actual.map { |relative, sha| { "path" => relative, "sha256" => sha, "exists" => !sha.nil? } },
         "observed_changed_paths" => changed, "tests_verified" => false, "submitted" => false }
     rescue JSON::ParserError => error
@@ -276,6 +320,20 @@ module HrmKernel
 
     def self.validate_result!(result, role:)
       invalid = ->(message) { raise HrmKernel::Error, message }
+      if role == "orchestrator"
+        invalid.call("invalid orchestrator result") unless result.is_a?(Hash) && result.keys.sort == %w[requests status summary] &&
+          %w[continue waiting review_ready operator_input blocked].include?(result["status"]) && result["summary"].is_a?(String) &&
+          result["requests"].is_a?(Array) && result["requests"].length <= 16
+        ids = result["requests"].map do |request|
+          invalid.call("invalid orchestrator request") unless request.is_a?(Hash) && request.keys.sort == %w[input_json operation request_id] &&
+            request["request_id"].is_a?(String) && IDENTIFIER.match?(request["request_id"]) &&
+            %w[apply host-dispatch host-status host-collect check submit assess status verify].include?(request["operation"]) &&
+            request["input_json"].is_a?(String) && JSON.parse(request["input_json"]).is_a?(Hash)
+          request["request_id"]
+        end
+        invalid.call("duplicate orchestrator request id") unless ids.uniq == ids
+        return true
+      end
       invalid.call("structured result has invalid fields") unless result.is_a?(Hash) && result.keys.sort == RESULT_KEYS.sort
       statuses = role == "reviewer" ? %w[reviewed blocked] : %w[implemented blocked]
       invalid.call("structured result has invalid role/status") unless statuses.include?(result["status"])
@@ -367,15 +425,19 @@ module HrmKernel
     def normalize_spec(value)
       fail!("dispatch specification must be an object") unless value.is_a?(Hash)
       spec = JSON.parse(JSON.generate(value))
-      allowed = %w[job_id role work_order_id model prompt context_paths max_context_bytes check_plan resume_job_id forbidden_roots execution_read_roots execution_environment_allowlist]
+      allowed = %w[job_id role work_order_id model prompt context_paths max_context_bytes check_plan resume_job_id forbidden_roots execution_read_roots execution_environment_allowlist reasoning_effort]
       fail!("unknown dispatch fields") unless (spec.keys - allowed).empty?
       fail!("invalid job_id") unless spec["job_id"].is_a?(String) && IDENTIFIER.match?(spec["job_id"])
-      fail!("invalid role") unless %w[worker reviewer].include?(spec["role"])
-      fail!("only the requested Sol worker model is supported") unless spec["model"] == MODEL
+      fail!("invalid role") unless %w[worker reviewer orchestrator].include?(spec["role"])
+      expected_model = spec["role"] == "orchestrator" ? ORCHESTRATOR_MODEL : MODEL
+      fail!("role requires #{expected_model}") unless spec["model"] == expected_model
+      if spec["reasoning_effort"]
+        fail!("invalid reasoning effort") unless %w[low medium high xhigh max ultra].include?(spec["reasoning_effort"])
+      end
       fail!("prompt must be nonempty text") unless spec["prompt"].is_a?(String) && !spec["prompt"].empty?
       if spec["role"] == "worker"
         fail!("worker needs work_order_id") unless spec["work_order_id"].is_a?(String) && IDENTIFIER.match?(spec["work_order_id"])
-      elsif spec["work_order_id"] || spec["resume_job_id"]
+      elsif spec["work_order_id"] || (spec["role"] == "reviewer" && spec["resume_job_id"])
         fail!("reviewer must be a fresh independent host session")
       end
       spec["context_paths"] ||= []
@@ -466,19 +528,19 @@ module HrmKernel
     def resume_parent(spec, actor)
       return nil unless spec["resume_job_id"]
       prior = read_job(spec["resume_job_id"])
-      fail!("resume must preserve worker actor and order") unless prior["role"] == "worker" && prior["actor_id"] == actor && prior["work_order_id"] == spec["work_order_id"]
+      fail!("resume must preserve actor, role and order") unless %w[worker orchestrator].include?(spec["role"]) && prior["role"] == spec["role"] && prior["actor_id"] == actor && prior["work_order_id"] == spec["work_order_id"]
       status = poll(job_id: prior["job_id"])
       fail!("resume parent must have a completed verified thread") unless %w[succeeded failed].include?(status["status"]) && status["thread_id"]
       status
     end
 
-    def binding_for(state, order)
+    def binding_for(state, order, role: "worker")
       milestone = state.fetch("milestone")
       result = { "initial_contract_digest" => milestone.fetch("initial_contract_digest"), "milestone_id" => milestone["id"] }
       if order
         result["order"] = order.slice("id", "revision", "owner_id", "claim_id", "paths", "check_ids", "requirement_revisions", "intent_ids", "objective")
         result["current_requirements"] = order.fetch("requirement_ids").to_h { |id| [id, milestone.fetch("requirements").fetch(id)] }
-      else
+      elsif role != "orchestrator"
         result["candidate"] = State.project(state, role: "reviewer").dig("milestone", "current_candidate")
       end
       result
@@ -489,7 +551,7 @@ module HrmKernel
       return false unless state && state["milestone"]
       order = job["role"] == "worker" ? state.fetch("work_orders")[job["work_order_id"]] : nil
       return false if job["role"] == "worker" && (!order || order["status"] != "running")
-      self.class.digest(binding_for(state, order)) == job["binding_digest"]
+      self.class.digest(binding_for(state, order, role: job["role"])) == job["binding_digest"]
     end
 
     def assert_current!(job)
@@ -503,6 +565,7 @@ module HrmKernel
 
     def source_path(root, relative, forbidden, allow_missing: false, reject_symlinks: false)
       fail!("context/artifact path must be project-relative") unless relative.is_a?(String) && !Pathname.new(relative).absolute? && !relative.split("/").include?("..") && relative != "." && !relative.empty?
+      fail!("sensitive files cannot be host context or worker artifacts") if relative.split(File::SEPARATOR).any? { |part| SENSITIVE_SOURCE.match?(part) }
       path = File.expand_path(relative, root)
       if reject_symlinks
         component_path = root
@@ -521,6 +584,7 @@ module HrmKernel
       else
         fail!("declared context path is missing: #{relative}")
       end
+      fail!("sensitive context target") if SENSITIVE_SOURCE.match?(File.basename(resolved))
       fail!("source leaves project root") unless beneath?(resolved, root)
       fail!("source is inside a forbidden root") if forbidden.any? { |item| beneath?(resolved, item) }
       resolved
@@ -553,13 +617,13 @@ module HrmKernel
       line = File.open(File.join(@state_dir, Store::LEDGER_NAME), &:gets)
       initial = JSON.parse(line).dig("command", "data")
       {
-        "host_contract" => "AP-INTERACT RC34 bounded Codex worker",
+        "host_contract" => "AP-INTERACT RC35 bounded Codex #{spec['role']}",
         "instructions" => [
-          spec["role"] == "worker" ? "Implement only your declared work-order files. Do not commit, push, run tests, launch servers, or call providers. The kernel execution runner performs checks after you return." : "Independently review the exact candidate read-only. Do not edit files, run tests, launch servers, or call providers.",
+          spec["role"] == "orchestrator" ? "Coordinate the original milestone from this projection and actual job/check feedback. Project sources are read-only. Return structured requests to the trusted driver; never act as the operator, manufacture a review/receipt, or reduce the declared outcome. Technical gaps and partial returns stay engineering work. Use bounded continuations, then smaller assignments when progress stalls. A blocked disposition is not automatically an operator approval request." : spec["role"] == "worker" ? "Implement only your declared work-order files. Do not commit, push, run tests, launch servers, or call providers. The kernel execution runner performs checks after you return." : "Independently review the exact candidate read-only. Do not edit files, run tests, launch servers, or call providers.",
           "Start with the supplied packet. Inspect needed project sources and declared dependency roots in bounded excerpts; do not preload full history. Return context_requests when needed context is unavailable. Technical discovery does not require operator approval.",
           "Do not access operator Documents, ambient databases, credentials, private evidence, or other checkouts. No provider, customer, deployment, or runtime effects are authorized.",
           "Return the required structured JSON. Scenario statements are your assessment, not verified execution receipts or human acceptance. Preserve unmet requirements and findings.",
-          "changed_paths lists only files owned by this work order, including its earlier edits when resuming. Do not copy a global Git status list or report another worker's files as your outputs.",
+          spec["role"] == "reviewer" ? "changed_paths must be empty. You inspect the builder's changes; those are not your edits. Record any reviewed paths only in findings." : "changed_paths lists only files owned by this work order, including its earlier edits when resuming. Do not copy a global Git status list or report another worker's files as your outputs.",
           "This host measures supplied prompt bytes and actual reported token usage separately. Native Codex permission profiles restrict model commands to project/dependency reads, exact owned-file writes, and private scratch space. Operator Documents and kernel control state are denied; command networking is disabled. The Codex transport itself still authenticates and communicates with its model provider."
         ],
         "task" => spec["prompt"], "actor_id" => actor,
@@ -572,7 +636,8 @@ module HrmKernel
 
     def codex_arguments(job, path)
       profile_name = job.fetch("permission_profile_name")
-      args = [job["codex_path"], "exec", "--ignore-user-config", "--strict-config", "-m", MODEL,
+      args = [job["codex_path"], "exec", "--ignore-user-config", "--strict-config", "-m", job.fetch("model_requested"),
+              "--disable", "memories", "--disable", "apps", "--disable", "browser_use", "--disable", "computer_use", "--disable", "multi_agent",
               "-c", 'approval_policy="never"', "-c", 'shell_environment_policy.inherit="none"',
               "-c", 'shell_environment_policy.set.GIT_CONFIG_GLOBAL="/dev/null"',
               "-c", 'shell_environment_policy.set.GIT_CONFIG_NOSYSTEM="1"',
@@ -581,12 +646,20 @@ module HrmKernel
               "-c", "default_permissions=#{self.class.toml_inline(profile_name)}",
               "-c", "permissions.#{profile_name}=#{self.class.toml_inline(job.fetch('permission_profile'))}",
               "-C", job["project_root"]]
+      args += ["-c", "model_reasoning_effort=#{self.class.toml_inline(job.dig('spec', 'reasoning_effort'))}"] if job.dig("spec", "reasoning_effort")
       args += ["resume", job["resume_thread_id"]] if job["resume_thread_id"]
       args + ["--json", "--output-schema", File.join(path, "schema.json"), "-o", File.join(path, "result.json"), "-"]
     end
 
     def permission_profile(spec, root, order, tool_tmp)
       denied = [@state_dir, *spec.fetch("forbidden_roots")].uniq
+      Find.find(root) do |path|
+        if File.symlink?(path)
+          denied << path if SENSITIVE_SOURCE.match?(File.basename(path)) || (File.exist?(path) && SENSITIVE_SOURCE.match?(File.basename(File.realpath(path))))
+          Find.prune
+        end
+        denied << path if File.file?(path) && SENSITIVE_SOURCE.match?(File.basename(path))
+      end
       filesystem = { ":root" => "deny", ":minimal" => "read", root => "read" }
       spec.fetch("execution_read_roots").each do |path|
         resolved = File.exist?(path) ? File.realpath(path) : File.expand_path(path)
