@@ -15,6 +15,7 @@ require_relative "error"
 module HrmKernel
   class Execution
     RECEIPT_SCHEMA = "ap-hrm-native-check-receipt/1"
+    PREFLIGHT_RECEIPT_SCHEMA = "ap-hrm-execution-preflight-receipt/1"
     CANDIDATE_SCHEMA = "ap-hrm-git-candidate/1"
     KEY_NAME = ".execution-receipt-key"
     EXECUTION_DIRECTORY = "execution"
@@ -123,7 +124,7 @@ module HrmKernel
       materialized_spec = materialize_spec(spec, run_root)
       validate_configuration_paths!(materialized_spec, run_root)
       profile = sandbox_profile(run_root)
-      preflight_isolation!(profile, run_root)
+      isolation = preflight_isolation!(profile, run_root)
       result = execute_process(materialized_spec, profile, run_root)
       verify_candidate_manifest!(candidate, exact: true)
 
@@ -148,7 +149,7 @@ module HrmKernel
         "candidate" => candidate,
         "execution_spec_digest" => digest(spec),
         "sandbox_policy_digest" => digest(profile),
-        "preflight" => { "forbidden_read" => "blocked", "forbidden_write" => "blocked" },
+        "preflight" => isolation,
         "conclusion" => conclusion,
         "exit_status" => result.fetch("exit_status"),
         "timed_out" => result.fetch("timed_out"),
@@ -161,6 +162,100 @@ module HrmKernel
       write_private_exclusive!(run_root, "receipt.json", canonical_json(receipt) << "\n")
       descriptor = receipt_descriptor(receipt_path)
       descriptor.merge("conclusion" => conclusion, "reused" => false)
+    end
+
+    # Executes an explicitly declared environment smoke check without requiring
+    # a work order, Git changes, or a worker claim. Callers freeze this receipt
+    # before dispatching a native worker; it must never stand in for a product
+    # check or be inferred from one.
+    def preflight(spec:)
+      spec = stringify_hash!(spec, "preflight spec")
+      validate_execution_spec!(spec)
+      run_id = digest({
+        "kind" => "environment_preflight",
+        "declared_environment" => declared_environment(spec),
+        "execution_policy" => policy_manifest,
+        "executable_identity" => executable_identity(spec.fetch("argv").first)
+      })
+      run_root = prepare_run_root!("preflight-#{run_id}")
+      receipt_path = File.join(run_root, "preflight-receipt.json")
+      if File.exist?(receipt_path)
+        descriptor = receipt_descriptor(receipt_path)
+        receipt = verify_preflight!(descriptor, spec: spec)
+        return descriptor.merge("conclusion" => receipt["conclusion"], "reused" => true)
+      end
+
+      materialized_spec = materialize_spec(spec, run_root)
+      validate_configuration_paths!(materialized_spec, run_root)
+      profile = sandbox_profile(run_root)
+      isolation = preflight_isolation!(profile, run_root)
+      result = execute_process(materialized_spec, profile, run_root)
+      startup_marker = spec["startup_success_marker"]
+      startup_completed = startup_marker.nil? ? nil : result.fetch("stdout").include?(startup_marker)
+      stdout_path = write_private_exclusive!(run_root, "preflight-stdout.bin", result.delete("stdout"))
+      stderr_path = write_private_exclusive!(run_root, "preflight-stderr.bin", result.delete("stderr"))
+      conclusion = preflight_conclusion(result, startup_completed: startup_completed)
+      unsigned = {
+        "schema_version" => PREFLIGHT_RECEIPT_SCHEMA,
+        "receipt_id" => run_id,
+        "check_id" => spec.fetch("id"),
+        "environment_id" => spec.fetch("environment_id"),
+        "declared_environment" => declared_environment(spec),
+        "declared_environment_digest" => digest(declared_environment(spec)),
+        "execution_policy" => policy_manifest,
+        "execution_policy_digest" => digest(profile),
+        "executable_identity" => executable_identity(spec.fetch("argv").first),
+        "isolation" => isolation,
+        "startup_completed" => startup_completed,
+        "conclusion" => conclusion,
+        "exit_status" => result.fetch("exit_status"),
+        "term_signal" => result.fetch("term_signal"),
+        "timed_out" => result.fetch("timed_out"),
+        "output_limit_exceeded" => result.fetch("output_limit_exceeded"),
+        "duration_milliseconds" => result.fetch("duration_milliseconds"),
+        "stdout" => private_log_descriptor(stdout_path),
+        "stderr" => private_log_descriptor(stderr_path)
+      }
+      receipt = unsigned.merge("authentication" => receipt_authentication(unsigned))
+      write_private_exclusive!(run_root, "preflight-receipt.json", canonical_json(receipt) << "\n")
+      receipt_descriptor(receipt_path).merge("conclusion" => conclusion, "reused" => false)
+    rescue Errno::ENOENT, Errno::EACCES => e
+      fail!("environment preflight failed to start: #{e.message}")
+    end
+
+    def verify_preflight!(descriptor, spec: nil)
+      descriptor = stringify_hash!(descriptor, "preflight receipt descriptor")
+      expected_keys!(descriptor, %w[receipt_path receipt_sha256])
+      path = safe_state_file!(descriptor.fetch("receipt_path"))
+      receipt = JSON.parse(read_private_file!(path, descriptor.fetch("receipt_sha256")))
+      fail!("preflight receipt must be a JSON object") unless receipt.is_a?(Hash)
+      authentication = receipt["authentication"]
+      fail!("preflight receipt authentication is missing") unless authentication.is_a?(Hash)
+      unsigned = receipt.reject { |key, _| key == "authentication" }
+      expected_authentication = receipt_authentication(unsigned)
+      fail!("preflight receipt authentication failed") unless secure_equal?(authentication["hmac_sha256"], expected_authentication["hmac_sha256"])
+      fail!("preflight receipt schema is unsupported") unless receipt["schema_version"] == PREFLIGHT_RECEIPT_SCHEMA
+      fail!("preflight execution policy changed") unless receipt["execution_policy"] == policy_manifest
+      unless receipt["declared_environment_digest"] == digest(receipt.fetch("declared_environment"))
+        fail!("preflight declared environment digest mismatch")
+      end
+      fail!("preflight executable identity drifted") unless receipt["executable_identity"] == executable_identity(receipt.dig("declared_environment", "argv", 0))
+      if spec
+        spec = stringify_hash!(spec, "preflight spec")
+        validate_execution_spec!(spec)
+        fail!("preflight declared environment changed") unless receipt["declared_environment"] == declared_environment(spec)
+      end
+      stdout = verify_private_log!(receipt.fetch("stdout"))
+      verify_private_log!(receipt.fetch("stderr"))
+      marker = receipt.dig("declared_environment", "startup_success_marker")
+      expected_startup = marker.nil? ? nil : stdout.include?(marker)
+      fail!("preflight startup phase was not derived from output") unless receipt["startup_completed"] == expected_startup
+      unless receipt["conclusion"] == preflight_conclusion(receipt, startup_completed: expected_startup)
+        fail!("preflight conclusion was not derived from process exit")
+      end
+      receipt
+    rescue JSON::ParserError => e
+      fail!("preflight receipt contains invalid JSON: #{e.message}")
     end
 
     def prepare_run_root(spec:, binding:, candidate:)
@@ -303,7 +398,7 @@ module HrmKernel
     end
 
     def validate_execution_spec!(spec)
-      expected_keys!(spec, %w[id environment_id argv env cwd timeout_seconds configuration_paths], %w[max_output_bytes])
+      expected_keys!(spec, %w[id environment_id argv env cwd timeout_seconds configuration_paths], %w[max_output_bytes startup_success_marker])
       fail!("check id is invalid") unless spec["id"].is_a?(String) && !spec["id"].empty?
       fail!("environment_id is invalid") unless spec["environment_id"].is_a?(String) && !spec["environment_id"].empty?
       argv = spec["argv"]
@@ -322,6 +417,10 @@ module HrmKernel
       fail!("max_output_bytes is invalid") unless maximum.is_a?(Integer) && maximum.positive? && maximum <= MAX_OUTPUT_BYTES
       paths = spec["configuration_paths"]
       fail!("configuration_paths must be an array") unless paths.is_a?(Array) && paths.all? { |path| path.is_a?(String) }
+      marker = spec["startup_success_marker"]
+      if marker && (!marker.is_a?(String) || marker.empty? || marker.bytesize > 256)
+        fail!("startup_success_marker must be a short non-empty string")
+      end
       true
     end
 
@@ -340,12 +439,15 @@ module HrmKernel
 
     def policy_manifest
       {
-        "runner" => "sandbox-exec-default-deny-v1",
+        "runner" => "sandbox-exec-default-deny-v2",
         "sandbox_executable" => @sandbox_executable,
         "sandbox_executable_sha256" => Digest::SHA256.file(@sandbox_executable).hexdigest,
         "read_roots" => (@read_roots + SYSTEM_READ_ROOTS.select { |path| File.exist?(path) }).uniq.sort,
         "environment_allowlist" => @environment_allowlist.sort,
         "network" => "deny",
+        "iokit" => { "open_user_client_classes" => ["RootDomainUserClient"] },
+        "mach_lookup" => { "global_name_prefixes" => ["org.chromium.Chromium.MachPortRendezvousServer."] },
+        "mach_register" => { "global_name_prefixes" => ["org.chromium.Chromium.MachPortRendezvousServer."] },
         "write" => "disposable_run_root_only",
         "sensitive_existing_files" => "data_read_denied"
       }
@@ -430,6 +532,9 @@ module HrmKernel
     def sandbox_profile(run_root)
       read_roots = [@project_root, run_root, *@read_roots, *SYSTEM_READ_ROOTS.select { |path| File.exist?(path) }].uniq
       rules = ["(version 1)", "(deny default)", "(allow process*)", "(deny network*)", "(allow sysctl-read)"]
+      rules << '(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))'
+      rules << '(allow mach-register (global-name-prefix "org.chromium.Chromium.MachPortRendezvousServer."))'
+      rules << '(allow mach-lookup (global-name-prefix "org.chromium.Chromium.MachPortRendezvousServer."))'
       # Current macOS launchers inspect the root directory before resolving an
       # absolute executable. This literal grants only that directory entry; it
       # does not grant descendant reads as `(subpath \"/\")` would.
@@ -473,6 +578,42 @@ module HrmKernel
       if write_result["exit_status"].zero? || before != after || write_result["timed_out"]
         fail!("sandbox preflight did not block forbidden write")
       end
+      network_probe = <<~'RUBY'
+        require "socket"
+        begin
+          socket = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM, 0)
+          socket.connect(Socket.sockaddr_in(9, "127.0.0.1"))
+          socket.close
+          exit 9
+        rescue Errno::EPERM, Errno::EACCES
+          exit 0
+        rescue SystemCallError
+          exit 8
+        end
+      RUBY
+      network_result = execute_raw([File.realpath(RbConfig.ruby), "-e", network_probe], {}, @project_root, 10, 4096, profile)
+      if !network_result["exit_status"].zero? || network_result["timed_out"]
+        fail!("sandbox preflight did not block network")
+      end
+      { "forbidden_read" => "blocked", "forbidden_write" => "blocked", "network" => "blocked" }
+    end
+
+    def declared_environment(spec)
+      canonical_value(spec)
+    end
+
+    def executable_identity(path)
+      path = canonical_executable!(path, "argv executable")
+      stat = File.stat(path)
+      { "path" => path, "sha256" => Digest::SHA256.file(path).hexdigest, "bytes" => stat.size, "mode" => stat.mode & 0o777 }
+    end
+
+    def preflight_conclusion(result, startup_completed: nil)
+      return "output_limit_exceeded" if result["output_limit_exceeded"]
+      return "timed_out" if result["timed_out"]
+      return "startup_failed" if result["term_signal"]
+      return "startup_failed" if startup_completed == false
+      result["exit_status"].zero? ? "passed" : "failed"
     end
 
     def execute_process(spec, profile, run_root)
@@ -588,6 +729,7 @@ module HrmKernel
         "stdout" => stdout_text,
         "stderr" => stderr_text,
         "exit_status" => status.exitstatus || 128 + status.termsig.to_i,
+        "term_signal" => status.signaled? ? status.termsig : nil,
         "timed_out" => timed_out,
         "output_limit_exceeded" => output_limit_exceeded,
         "duration_milliseconds" => ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).ceil
@@ -626,7 +768,6 @@ module HrmKernel
       path = safe_state_file!(descriptor.fetch("path"))
       fail!("private log byte count changed") unless File.size(path) == descriptor.fetch("bytes")
       read_private_file!(path, descriptor.fetch("sha256"))
-      true
     end
 
     def write_private_exclusive!(directory, basename, contents)

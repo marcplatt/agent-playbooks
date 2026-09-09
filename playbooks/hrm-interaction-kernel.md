@@ -1,21 +1,21 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.34 - implementation and independent review runtime candidate
-version: "0.3.0-rc34"
+title: AP-INTERACT RC.35 - automatic orchestration and diagnostic continuation
+version: "0.4.0-rc35"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC34
+experiment_id: AP-INTERACT-RC35
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.34** is the successor runtime candidate to the archived
-[RC.33 experiment](../experiments/ap-interact-rc33/README.md). It uses software
-version `0.3.0-rc34` and protocol `ap-hrm-interaction/2`. RC.34 fixes the two recorded
-state defects: later additive feedback remains alongside earlier constraints, and
-an unresolved requested change cannot return to review through submission metadata
-alone.
+**AP-INTERACT RC.35** develops the [RC.34 experiment](../experiments/ap-interact-rc34/README.md).
+It uses software version `0.4.0-rc35` and protocol `ap-hrm-interaction/2`. It adds a
+trusted automatic driver for native Astra orchestration, Sol workers and fresh
+reviewers, environment preflight, and candidate-bound diagnostics for partial work.
+The [RC.35 experiment record](../experiments/ap-interact-rc35/README.md) distinguishes
+these execution improvements from the still-unproved production Canary outcome.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
 or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
@@ -66,7 +66,9 @@ validation: project and declared dependency reads, exact owned-file writes, priv
 scratch writes, denied operator Documents and kernel control state, and disabled
 command networking. Independent reviewers cannot write candidate files. The model
 transport keeps its existing authentication; it is not wrapped in another Seatbelt
-sandbox. Parent directories must already exist before dispatch. These profiles
+sandbox. The trusted host prepares missing owned-file parent directories without
+granting workers write access to those directories. Sensitive source paths are
+excluded from context packets and denied in native command profiles. These profiles
 follow the [official permissions configuration](https://learn.chatgpt.com/docs/permissions).
 Error findings in structured reviewer output must
 name their `scenario_ids`; every such finding is retained as an unresolved kernel
@@ -75,6 +77,41 @@ Third-party dependency trees are not recursively content-addressed, so dependenc
 changes require a new environment identity and fresh checks.
 
 ## Operator interaction
+
+### Automatic driver
+
+Initialize the project-owned implementation milestone through the trusted operator
+CLI, then call `driver-start` with a private configuration and `driver-run` (or
+poll `driver-step`). The configuration freezes environment ID, dependency reads,
+environment variable names, startup checks, model reasoning settings, parallelism
+and a maximum turn count. Preflight must pass before any claim or model launch;
+restart re-verifies its signed receipts, executable and policy bindings.
+
+The driver resumes the exact Astra task UUID and transports its structured
+requests. It does not plan work or supply a known implementation. It records request
+envelopes and receipts, collects completed workers after writers stop, executes
+their frozen checks and returns bounded diagnostics to Astra. A worker's `blocked`
+result may produce diagnostic evidence; only an `implemented` result with successful
+current completion evidence may be submitted. Repeated incomplete work produces
+advice to narrow or decompose the assignment, not an inferred operator question.
+
+Only orchestrator commands can enter through Astra's request transport. Human
+messages, decisions and review dispositions still enter through the trusted operator
+CLI; the driver does not authenticate chat messages. New ledger input during an
+Astra turn discards its unapplied requests and supplies the current projection on
+resumption. A restart after a partially applied response may conservatively replan;
+already committed commands and receipts remain intact.
+
+The driver yields at a current human review or unresolved decision, service failure,
+repeated idle response or turn limit. These stops are distinct outcomes. A turn limit
+does not reset merely because the ledger changed. Keep the driver running again
+after actual operator input to resume a review/remediation cycle. This transport
+does not provide a production-effect adapter or an operator review UI.
+
+Preflight is a startup check for the declared environment. It does not recursively
+hash dependency trees or replace product tests. The native browser runner permits
+only the macOS Chromium rendezvous and RootDomain user-client access required by
+the original launch settings; its outer read, write and network restrictions remain.
 
 An explicit instruction supplies the meaning it states. The orchestrator records it
 and commissions implementation without requesting the same permission again.
@@ -284,6 +321,11 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.4.0-rc35 — 2026-09-09:** Adds native Astra driver transport, exact-task
+  continuation, authenticated preflight, diagnostic-only blocked-worker checks,
+  bounded continuation advice, and browser startup repairs. Retains protocol 2 and
+  historical RC.34 evidence. Develops on the RC.34 experiment branch, not AP main.
 
 - **0.3.0-rc34 — 2026-09-08:** Starts protocol `ap-hrm-interaction/2` with additive
   intent, explicit supersession, immutable initial contract identity, direct same-worker

@@ -87,6 +87,7 @@ class HrmKernelExecutionTest < Minitest::Test
     assert_equal 0, receipt.fetch("exit_status")
     assert_equal "passed", receipt.fetch("conclusion")
     assert_equal "blocked", receipt.dig("preflight", "forbidden_read")
+    assert_equal "blocked", receipt.dig("preflight", "network")
     stdout = private_log(receipt.dig("stdout", "path"))
     assert_includes stdout, '"worker_claim":"passed"'
 

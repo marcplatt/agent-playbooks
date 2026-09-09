@@ -108,10 +108,17 @@ class HrmKernelHostTest < Minitest::Test
       output, errors, outcome = Open3.capture3("/usr/bin/sandbox-exec", "-p", rules.join("\n"), RbConfig.ruby, "-e", tool, task)
       abort "fixture tool exit=#{outcome.exitstatus.inspect} signal=#{outcome.termsig.inspect}: #{errors} #{output}" unless outcome.success?
       observed = JSON.parse(output)
-      result = {
-        "status" => status, "summary" => observed.fetch("summary"), "changed_paths" => observed.fetch("changed"),
-        "findings" => [], "scenario_dispositions" => [], "context_requests" => []
-      }
+      result = if packet["actor_id"] == "astra-orchestrator"
+                 {
+                   "status" => "continue", "summary" => observed.fetch("summary"),
+                   "requests" => [{"request_id" => "next-step", "operation" => "status", "input_json" => "{}"}]
+                 }
+               else
+                 {
+                   "status" => status, "summary" => observed.fetch("summary"), "changed_paths" => observed.fetch("changed"),
+                   "findings" => [], "scenario_dispositions" => [], "context_requests" => []
+                 }
+               end
       result["status"] = "complete" if task == "invalid-result"
       output = ARGV[ARGV.index("-o") + 1]
       File.write(output, JSON.generate(result))
@@ -243,6 +250,9 @@ class HrmKernelHostTest < Minitest::Test
     reviewer = @host.dispatch(reviewer_spec)
     assert_equal "reviewer-checker", reviewer["actor_id"]
     checked = await_job("checker")
+    schema = JSON.parse(File.read(File.join(@state_dir, "host-jobs", "checker", "schema.json")))
+    assert_equal %w[reviewed blocked], schema.dig("properties", "status", "enum")
+    assert_equal 0, schema.dig("properties", "changed_paths", "maxItems")
     refute_equal THREAD, checked["thread_id"]
     assert_equal "reviewed", @host.collect(job_id: "checker").dig("result", "status")
     check_argv = JSON.parse(File.readlines(checked["artifact_paths"]["events.jsonl"]).first)["argv"]
@@ -251,6 +261,56 @@ class HrmKernelHostTest < Minitest::Test
     assert_raises(HrmKernel::Error) { @host.dispatch(reviewer_spec.merge("job_id" => "bad-checker", "resume_job_id" => "first")) }
     File.write(File.join(@project, "app.txt"), "changed after checker\n")
     assert_raises(HrmKernel::Error) { @host.collect(job_id: "checker") }
+  end
+
+  def test_orchestrator_uses_astra_read_only_profile_and_structured_result
+    error = assert_raises(HrmKernel::Error) do
+      @host.dispatch(orchestrator_specification("astra-wrong-model", model: "gpt-5.6-sol"))
+    end
+    assert_match(/role requires gpt-6-astra/, error.message)
+
+    spec = orchestrator_specification("astra-one", context_paths: ["app.txt"])
+    @jobs << "astra-one"
+    job = @host.dispatch(spec)
+    assert_equal "orchestrator", job["role"]
+    assert_equal "astra-orchestrator", job["actor_id"]
+    assert_nil job["work_order_id"]
+    done = await_job("astra-one")
+    assert_equal "succeeded", done["status"]
+    assert_equal "continue", done["result_status"]
+    result = @host.collect(job_id: "astra-one").fetch("result")
+    assert_equal "continue", result["status"]
+    assert_equal "status", result.fetch("requests").first["operation"]
+
+    argv = JSON.parse(File.readlines(done["artifact_paths"]["events.jsonl"]).first).fetch("argv")
+    assert_equal "gpt-6-astra", argv[argv.index("-m") + 1]
+    assert_includes argv, 'default_permissions="hrm-orchestrator"'
+    permissions = @host.job_record(job_id: "astra-one").fetch("permission_profile").fetch("filesystem")
+    assert_equal "read", permissions.fetch(@project)
+    refute_equal "write", permissions[File.join(@project, "app.txt")]
+  end
+
+  def test_orchestrator_resume_uses_exact_prior_session
+    @jobs << "astra-first"
+    @host.dispatch(orchestrator_specification("astra-first"))
+    first = await_job("astra-first")
+    @jobs << "astra-second"
+    resumed = @host.dispatch(orchestrator_specification("astra-second", resume_job_id: "astra-first"))
+    assert_equal "astra-orchestrator", resumed["actor_id"]
+    second = await_job("astra-second")
+    assert_equal first["thread_id"], second["thread_id"]
+    argv = JSON.parse(File.readlines(second["artifact_paths"]["events.jsonl"]).first).fetch("argv")
+    assert_equal ["resume", first["thread_id"]], argv.values_at(argv.index("resume"), argv.index("resume") + 1)
+    refute_includes argv, "--last"
+  end
+
+  def test_orchestrator_rejects_sensitive_context_before_persisting_job
+    File.write(File.join(@project, ".env"), "SECRET=fixture\n")
+    error = assert_raises(HrmKernel::Error) do
+      @host.dispatch(orchestrator_specification("astra-sensitive", context_paths: [".env"]))
+    end
+    assert_match(/sensitive files cannot be host context/, error.message)
+    refute File.exist?(File.join(@state_dir, "host-jobs", "astra-sensitive"))
   end
 
   def test_invalid_context_budget_model_or_cross_order_resume_does_not_reassign
@@ -264,7 +324,7 @@ class HrmKernelHostTest < Minitest::Test
     error = assert_raises(HrmKernel::Error) do
       @host.dispatch(specification("cross-order", resume_job_id: "original").merge("work_order_id" => "other"))
     end
-    assert_match(/preserve worker actor and order/, error.message)
+    assert_match(/preserve .*actor.*order/, error.message)
   end
 
   def test_native_profile_exclusion_is_effective_and_context_cannot_bypass_it
@@ -325,6 +385,22 @@ class HrmKernelHostTest < Minitest::Test
     refute File.exist?(File.join(@state_dir, "host-jobs", "linked-parent"))
   end
 
+  def test_missing_owned_file_parent_is_created_privately_without_parent_write_grant
+    create_order("nested", "owned/feature.txt")
+    @jobs << "nested-parent"
+    @host.dispatch(specification("nested-parent").merge("work_order_id" => "nested"))
+    done = await_job("nested-parent")
+    assert_equal "succeeded", done["status"]
+
+    parent = File.join(@project, "owned")
+    target = File.join(parent, "feature.txt")
+    assert File.directory?(parent)
+    assert_equal 0o700, File.stat(parent).mode & 0o777
+    filesystem = @host.job_record(job_id: "nested-parent").fetch("permission_profile").fetch("filesystem")
+    assert_equal "write", filesystem[target]
+    refute_equal "write", filesystem[parent]
+  end
+
   def test_collection_rejects_artifact_replaced_by_a_symlink_after_dispatch
     dispatch("replaced-artifact")
     await_job("replaced-artifact")
@@ -380,6 +456,13 @@ class HrmKernelHostTest < Minitest::Test
       "prompt" => "do work", "context_paths" => [], "max_context_bytes" => 64 * 1024,
       "check_plan" => { "environment_id" => "fixture-env", "checks" => [{ "id" => "unit", "environment_id" => "fixture-env", "argv" => ["ruby", "test.rb"] }] }
     }.merge(overrides.transform_keys(&:to_s))
+  end
+
+  def orchestrator_specification(id, **overrides)
+    specification(id).merge(
+      "role" => "orchestrator", "work_order_id" => nil, "model" => "gpt-6-astra",
+      "check_plan" => {"environment_id" => "fixture-env", "checks" => []}
+    ).merge(overrides.transform_keys(&:to_s))
   end
 
   def dispatch(id, **options)

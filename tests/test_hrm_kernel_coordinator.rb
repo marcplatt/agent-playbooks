@@ -58,13 +58,14 @@ class HrmKernelCoordinatorTest < Minitest::Test
       puts JSON.generate("type" => "thread.started", "thread_id" => thread)
       order_id = packet.dig("role_projection", "work_orders").keys.first
       target = order_id == "sibling" ? "sibling.txt" : "app.txt"
+      blocked = packet.fetch("task").start_with?("blocked")
       unless reviewer
-        value = packet.fetch("task").include?("correct") ? "corrected\n" : "implemented\n"
+        value = blocked ? "partial\n" : packet.fetch("task").include?("correct") ? "corrected\n" : "implemented\n"
         File.write(target, value)
       end
       pending = packet.fetch("task") == "request-changes"
       result = {
-        "status" => reviewer ? "reviewed" : "implemented", "summary" => "Process fixture completed",
+        "status" => reviewer ? "reviewed" : blocked ? "blocked" : "implemented", "summary" => "Process fixture completed",
         "changed_paths" => reviewer ? [] : [target],
         "findings" => pending ? [{"severity" => "error", "message" => "Required behavior remains incomplete", "paths" => ["app.txt"], "scenario_ids" => ["scenario"]}] : [],
         "scenario_dispositions" => reviewer ? [{"scenario_id" => "scenario", "status" => pending ? "failed" : "passed", "evidence" => pending ? "A required part remains missing" : "Inspected implemented behavior and native check evidence"}] : [],
@@ -136,6 +137,52 @@ class HrmKernelCoordinatorTest < Minitest::Test
     HrmKernel::Host.atomic_json(record_path, record)
     assert_raises(HrmKernel::Error) { @coordinator.submit("job_id" => "worker-job") }
     assert_equal "running", @store.read.dig("state", "work_orders", "implement", "status")
+  end
+
+  def test_blocked_worker_can_run_candidate_bound_diagnostic_but_cannot_submit
+    blocked = dispatch_worker("blocked-job", "implement", "blocked after partial work", plan(expected: "partial"))
+    assert_equal "blocked", blocked["result_status"]
+
+    checked = @coordinator.check("job_id" => "blocked-job", "check_id" => "behavior-check")
+    assert_equal "passed", checked["conclusion"]
+    assert_equal "blocked", checked["worker_disposition"]
+    assert_equal "diagnostic_evidence", checked["classification"]
+    assert_raises(HrmKernel::Error) { @coordinator.submit("job_id" => "blocked-job") }
+    assert_equal "running", @store.read.dig("state", "work_orders", "implement", "status")
+  end
+
+  def test_failed_blocked_worker_diagnostic_reports_failure_without_losing_disposition
+    blocked = dispatch_worker("blocked-job", "implement", "blocked after partial work", plan(expected: "implemented"))
+    assert_equal "blocked", blocked["result_status"]
+
+    checked = @coordinator.check("job_id" => "blocked-job", "check_id" => "behavior-check")
+    assert_equal "failed", checked["conclusion"]
+    assert_equal "blocked", checked["worker_disposition"]
+    assert_equal "diagnostic_evidence", checked["classification"]
+    record = JSON.parse(File.read(File.join(@state_dir, "coordinator", "check-blocked-job-behavior-check.json")))
+    assert_equal checked["worker_disposition"], record["worker_disposition"]
+    assert_equal checked["classification"], record["classification"]
+  end
+
+  def test_completed_order_cannot_upgrade_an_earlier_blocked_diagnostic
+    dispatch_worker("blocked-job", "implement", "blocked after partial work", plan(expected: "partial"))
+    diagnostic = @coordinator.check("job_id" => "blocked-job", "check_id" => "behavior-check")
+    assert_equal "diagnostic_evidence", diagnostic["classification"]
+
+    resumed = dispatch_worker(
+      "resumed-job", "implement", "Implement the behavior", plan,
+      resume_job_id: "blocked-job"
+    )
+    assert_equal "implemented", resumed["result_status"]
+    @coordinator.check("job_id" => "resumed-job", "check_id" => "behavior-check")
+    @coordinator.submit("job_id" => "resumed-job")
+
+    assert_raises(HrmKernel::Error) do
+      @coordinator.check("job_id" => "blocked-job", "check_id" => "behavior-check")
+    end
+    persisted = JSON.parse(File.read(File.join(@state_dir, "coordinator", "check-blocked-job-behavior-check.json")))
+    assert_equal "blocked", persisted["worker_disposition"]
+    assert_equal "diagnostic_evidence", persisted["classification"]
   end
 
   def test_stale_claim_cannot_submit_previously_passing_execution
@@ -217,13 +264,15 @@ class HrmKernelCoordinatorTest < Minitest::Test
                     "actor" => { "role" => role, "id" => actor }, "data" => data)
   end
 
-  def plan(fail_check: false)
+  def plan(fail_check: false, expected: nil)
+    env = { "RUN_ROOT" => "{run_root}", "FAIL_CHECK" => fail_check ? "yes" : "no" }
+    env["EXPECTED"] = expected if expected
     {
       "environment_id" => "isolated-ruby",
       "checks" => [{
         "id" => "behavior-check", "environment_id" => "isolated-ruby",
         "argv" => [File.realpath(RbConfig.ruby), "check.rb"],
-        "env" => { "RUN_ROOT" => "{run_root}", "FAIL_CHECK" => fail_check ? "yes" : "no" },
+        "env" => env,
         "cwd" => @project, "timeout_seconds" => 10, "max_output_bytes" => 1024 * 1024,
         "configuration_paths" => ["{run_root}"]
       }]

@@ -109,6 +109,19 @@ module HrmKernel
       end
     end
 
+    # Serialize a short trusted driver mutation with operator input. Native checks
+    # stay outside this guard. Nested Store instances on this thread reuse the
+    # same lock, so Host/Coordinator transactions remain atomic with the check.
+    def at_cursor(expected)
+      with_exclusive_lock do
+        unless replay_ledger.fetch(:cursor) == expected
+          raise HrmKernel::Error.new("stale_driver_response", "Ledger changed before driver mutation")
+        end
+        value = yield
+        { "value" => value, "cursor" => replay_ledger.fetch(:cursor) }
+      end
+    end
+
     private
 
     def receipt(replay, state, replayed, command_event_hash, command_cursor)
@@ -234,13 +247,21 @@ module HrmKernel
     end
 
     def with_exclusive_lock
+      held = Thread.current[:hrm_store_locks] ||= {}
+      key = [Process.pid, @directory]
+      return yield if held[key]
       ensure_safe_directory!
       open_private_file(@lock_path, File::RDWR) do |lock, _created|
         raise HrmKernel::Error, "state lock is not a regular file" unless lock.stat.file?
         validate_private_file_mode!(lock.stat, @lock_path)
         raise HrmKernel::Error, "cannot lock state directory" unless lock.flock(File::LOCK_EX)
         ensure_safe_directory!
-        yield
+        held[key] = true
+        begin
+          yield
+        ensure
+          held.delete(key)
+        end
       end
     rescue Errno::ELOOP => e
       raise HrmKernel::Error, "unsafe symlink in state directory: #{e.message}"
@@ -263,7 +284,7 @@ module HrmKernel
 
     def validate_existing_layout!
       children = Dir.children(@directory)
-      runtime_directories = %w[host-jobs execution coordinator]
+      runtime_directories = %w[host-jobs execution coordinator driver]
       unknown = children - [LEDGER_NAME, LOCK_NAME, ".execution-receipt-key", *runtime_directories]
       unless unknown.empty?
         raise HrmKernel::Error, "state directory contains unrelated entries: #{unknown.sort.join(', ')}"

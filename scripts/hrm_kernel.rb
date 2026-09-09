@@ -23,6 +23,7 @@ module HrmKernel
                when "verify" then verify(argv)
                when "host-dispatch", "host-status", "host-collect" then host(command, argv, stdin)
                when "check", "submit", "assess" then coordinate(command, argv, stdin)
+               when "driver-start", "driver-step", "driver-status", "driver-run" then drive(command, argv, stdin)
                else
                  raise HrmKernel::Error, "unknown command #{command.inspect}"
                end
@@ -70,6 +71,23 @@ module HrmKernel
       when "host-dispatch" then adapter.dispatch(input)
       when "host-status" then adapter.poll(job_id: input.fetch("job_id"))
       when "host-collect" then adapter.collect(job_id: input.fetch("job_id"))
+      end
+    end
+
+    def drive(command, argv, stdin)
+      require_relative "../lib/hrm_kernel/driver"
+      options = parse_options(argv, input: command == "driver-start")
+      driver = Driver.new(state_dir: options.fetch(:state_dir))
+      case command
+      when "driver-start" then driver.start(input_object(options, stdin))
+      when "driver-status" then driver.status
+      when "driver-step" then driver.step
+      when "driver-run"
+        loop do
+          result = driver.step
+          return result if Driver::TERMINAL.include?(result["outcome"])
+          sleep 2
+        end
       end
     end
 
@@ -146,7 +164,12 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb submit --state-dir DIR --input JOB_ID.json
           ruby scripts/hrm_kernel.rb assess --state-dir DIR --input REVIEW_JOB_ID.json
 
-        RC34 uses fresh ap-hrm-interaction/2 ledgers. Earlier ledgers are never upgraded in place.
+          ruby scripts/hrm_kernel.rb driver-start --state-dir DIR --input DRIVER.json
+          ruby scripts/hrm_kernel.rb driver-step --state-dir DIR
+          ruby scripts/hrm_kernel.rb driver-status --state-dir DIR
+          ruby scripts/hrm_kernel.rb driver-run --state-dir DIR
+
+        RC35 uses fresh ap-hrm-interaction/2 ledgers. Earlier ledgers are never upgraded in place.
         Native checks and Codex task identities are recorded by the local host adapter.
         Operator input remains a trusted local caller boundary; human acceptance is never inferred.
       HELP

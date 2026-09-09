@@ -26,13 +26,18 @@ module HrmKernel
       state = implementation_state!
       existing_path = check_path(input.fetch("job_id"), input.fetch("check_id"))
       existing = File.exist?(existing_path) && read_record(existing_path)
-      job = existing && refresh_job(existing["refresh_context"], state, input.fetch("check_id"))
+      refreshable = existing && existing["worker_disposition"] == "implemented" &&
+                    existing["classification"] == "completion_evidence"
+      job = refreshable && refresh_job(existing["refresh_context"], state, input.fetch("check_id"))
       unless job
         context = @host.check_context(job_id: input.fetch("job_id"), check_id: input.fetch("check_id"))
         job = context.fetch("job")
         collected = @host.collect(job_id: job.fetch("job_id"))
-        fail!("only an implemented worker may run its frozen checks") unless job["role"] == "worker" && collected.dig("result", "status") == "implemented"
+        disposition = collected.dig("result", "status")
+        fail!("only a completed worker may run its frozen checks") unless job["role"] == "worker" && %w[implemented blocked].include?(disposition)
       end
+      disposition ||= "implemented"
+      classification = disposition == "implemented" ? "completion_evidence" : "diagnostic_evidence"
       spec = Array(job.fetch("check_plan").fetch("checks")).find { |entry| entry["id"] == input.fetch("check_id") }
       fail!("check_id is not uniquely declared in the frozen plan") unless spec && job.fetch("check_plan").fetch("checks").count { |entry| entry["id"] == input.fetch("check_id") } == 1
       order = state.fetch("work_orders").fetch(job.fetch("work_order_id"))
@@ -45,9 +50,11 @@ module HrmKernel
       outcome = runner.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
       record = { "job_id" => job["job_id"], "check_id" => input["check_id"],
                  "candidate" => candidate, "execution" => descriptor(outcome), "conclusion" => outcome["conclusion"],
+                 "worker_disposition" => disposition, "classification" => classification,
                  "refresh_context" => refresh_context(job) }
       Host.atomic_json(check_path(job["job_id"], input["check_id"]), record)
-      record.slice("job_id", "check_id", "conclusion", "execution").merge("candidate_digest" => candidate["candidate_digest"], "reused" => outcome["reused"])
+      record.slice("job_id", "check_id", "conclusion", "execution", "worker_disposition", "classification")
+            .merge("candidate_digest" => candidate["candidate_digest"], "reused" => outcome["reused"])
     end
 
     def submit(input)
@@ -86,6 +93,7 @@ module HrmKernel
       fail!("checks were not run against the same candidate") unless records.map { |record| record.dig("candidate", "candidate_digest") }.uniq.length == 1
       records.each do |record|
         fail!("check record belongs to another job") unless record["job_id"] == id
+        fail!("diagnostic check cannot support submission") unless record["worker_disposition"] == "implemented" && record["classification"] == "completion_evidence"
         receipt = runner.verify_receipt!(record.fetch("execution"), candidate: record.fetch("candidate"), current_exact: true)
         fail!("native check has not passed") unless receipt["conclusion"] == "passed"
       end

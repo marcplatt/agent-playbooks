@@ -1,0 +1,24 @@
+{
+  "run_id": "project-hrm-rc35",
+  "prompt": "Commission and verify the initialized milestone from its original requirements. Return a current review package for the real operator; preserve any unmet production acceptance requirements.",
+  "environment_id": "project-runtime-v1",
+  "read_roots": [],
+  "environment_allowlist": [],
+  "forbidden_roots": [],
+  "max_turns": 24,
+  "max_parallel_workers": 3,
+  "orchestrator_reasoning_effort": "high",
+  "worker_reasoning_effort": "high",
+  "preflight_checks": [
+    {
+      "id": "runtime-startup",
+      "environment_id": "project-runtime-v1",
+      "argv": ["/replace/with/canonical/runtime/executable", "--version"],
+      "env": {},
+      "cwd": "/replace/with/canonical/project/root",
+      "timeout_seconds": 30,
+      "max_output_bytes": 16384,
+      "configuration_paths": []
+    }
+  ]
+}
