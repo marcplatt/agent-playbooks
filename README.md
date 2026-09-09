@@ -72,7 +72,7 @@ runtime policy or proof of project adoption.
 `ap-hrm-interaction/2` local service for additive operator intent, bounded host work,
 native check receipts, independent scenario assessment, first-class findings, and
 review/remediation cycles. Run `ruby scripts/hrm_kernel.rb --help` for its interface.
-RC.35 retains protocol 2 and uses a fresh experimental ledger. It never migrates an RC.33 ledger in place. Its role
+RC.36 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
 profile requests GPT-6 Astra for orchestration and GPT-5.6 Sol for workers and
 independent review; the host receipt records the requested model and available task
 identity evidence without claiming stronger model authentication.
@@ -81,6 +81,11 @@ The [RC.35 automatic driver](experiments/ap-interact-rc35/README.md) adds native
 dispatch and resumption, environment preflight, and automatic diagnostic feedback
 to Sol workers. It preserves real human review and does not infer acceptance from
 successful tests or model output.
+
+The [RC.36 successor](experiments/ap-interact-rc36/README.md) adds private technical
+supervisor evidence and explicit continuation of a stopped RC.35 run into a new
+state directory. It preserves operator decisions and historical evidence. The AE
+trial is paused with real production acceptance still pending.
 
 The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
 records the actual native worker run, engineering failures, corrections, and

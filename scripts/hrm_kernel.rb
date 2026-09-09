@@ -23,7 +23,8 @@ module HrmKernel
                when "verify" then verify(argv)
                when "host-dispatch", "host-status", "host-collect" then host(command, argv, stdin)
                when "check", "submit", "assess" then coordinate(command, argv, stdin)
-               when "driver-start", "driver-step", "driver-status", "driver-run" then drive(command, argv, stdin)
+               when "driver-start", "driver-step", "driver-status", "driver-run", "driver-input" then drive(command, argv, stdin)
+               when "driver-continue" then continue_run(argv, stdin)
                else
                  raise HrmKernel::Error, "unknown command #{command.inspect}"
                end
@@ -76,10 +77,11 @@ module HrmKernel
 
     def drive(command, argv, stdin)
       require_relative "../lib/hrm_kernel/driver"
-      options = parse_options(argv, input: command == "driver-start")
+      options = parse_options(argv, input: %w[driver-start driver-input].include?(command))
       driver = Driver.new(state_dir: options.fetch(:state_dir))
       case command
       when "driver-start" then driver.start(input_object(options, stdin))
+      when "driver-input" then driver.technical_input(input_object(options, stdin))
       when "driver-status" then driver.status
       when "driver-step" then driver.step
       when "driver-run"
@@ -101,6 +103,24 @@ module HrmKernel
       when "submit" then coordinator.submit(input)
       when "assess" then coordinator.assess(input)
       end
+    end
+
+    def continue_run(argv, stdin)
+      require_relative "../lib/hrm_kernel/run_continuation"
+      options = parse_continuation_options(argv)
+      input = input_object(options, stdin)
+      allowed = %w[new_run_id source_kernel_root source_kernel_revision controller_stopped supervisor_provenance production]
+      raise HrmKernel::Error, "unknown driver continuation fields" unless (input.keys - allowed).empty?
+      HrmKernel::RunContinuation.clone(
+        source_state_dir: options.fetch(:state_dir),
+        destination_state_dir: options.fetch(:destination_state_dir),
+        new_run_id: input.fetch("new_run_id"),
+        source_kernel_root: input.fetch("source_kernel_root"),
+        source_kernel_revision: input.fetch("source_kernel_revision"),
+        controller_stopped: input.fetch("controller_stopped"),
+        supervisor_provenance: input.fetch("supervisor_provenance"),
+        production: input.fetch("production", true)
+      )
     end
 
     def status(argv)
@@ -142,6 +162,21 @@ module HrmKernel
       options
     end
 
+    def parse_continuation_options(argv)
+      options = {}
+      parser = OptionParser.new do |opts|
+        opts.on("--state-dir DIR") { |value| options[:state_dir] = value }
+        opts.on("--destination-state-dir DIR") { |value| options[:destination_state_dir] = value }
+        opts.on("--input FILE") { |value| options[:input] = value }
+      end
+      parser.parse!(argv)
+      raise OptionParser::ParseError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
+      raise OptionParser::MissingArgument, "--state-dir" unless options[:state_dir]
+      raise OptionParser::MissingArgument, "--destination-state-dir" unless options[:destination_state_dir]
+      raise OptionParser::MissingArgument, "--input" unless options[:input]
+      options
+    end
+
     def read_bounded(input, label)
       contents = input.read(MAX_INPUT_BYTES + 1)
       raise HrmKernel::Error, "#{label} exceeds #{MAX_INPUT_BYTES} bytes" if contents.bytesize > MAX_INPUT_BYTES
@@ -165,11 +200,14 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb assess --state-dir DIR --input REVIEW_JOB_ID.json
 
           ruby scripts/hrm_kernel.rb driver-start --state-dir DIR --input DRIVER.json
+          ruby scripts/hrm_kernel.rb driver-input --state-dir DIR --input TECHNICAL_INPUT.json
+          ruby scripts/hrm_kernel.rb driver-continue --state-dir SOURCE_DIR --destination-state-dir DESTINATION_DIR --input CONTINUATION.json
           ruby scripts/hrm_kernel.rb driver-step --state-dir DIR
           ruby scripts/hrm_kernel.rb driver-status --state-dir DIR
           ruby scripts/hrm_kernel.rb driver-run --state-dir DIR
 
-        RC35 uses fresh ap-hrm-interaction/2 ledgers. Earlier ledgers are never upgraded in place.
+        RC36 adopts technical supervisor input explicitly through driver-input; existing RC35 state is not rewritten by inspection.
+        Protocol ap-hrm-interaction/2 operator ledgers remain separate and are never upgraded in place.
         Native checks and Codex task identities are recorded by the local host adapter.
         Operator input remains a trusted local caller boundary; human acceptance is never inferred.
       HELP

@@ -1,21 +1,21 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.35 - automatic orchestration and diagnostic continuation
-version: "0.4.0-rc35"
+title: AP-INTERACT RC.36 - supervisor evidence and versioned continuation
+version: "0.5.0-rc36"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC35
+experiment_id: AP-INTERACT-RC36
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.35** develops the [RC.34 experiment](../experiments/ap-interact-rc34/README.md).
-It uses software version `0.4.0-rc35` and protocol `ap-hrm-interaction/2`. It adds a
-trusted automatic driver for native Astra orchestration, Sol workers and fresh
-reviewers, environment preflight, and candidate-bound diagnostics for partial work.
-The [RC.35 experiment record](../experiments/ap-interact-rc35/README.md) distinguishes
-these execution improvements from the still-unproved production Canary outcome.
+**AP-INTERACT RC.36** develops the [RC.35 experiment](../experiments/ap-interact-rc35/README.md).
+It uses software version `0.5.0-rc36` and protocol `ap-hrm-interaction/2`. It adds
+trusted technical supervisor observations and an explicit continuation into a new
+private state root. The [RC.36 experiment record](../experiments/ap-interact-rc36/README.md)
+describes the paused AE trial that motivated these repairs. Production Canary
+acceptance remains unproved.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
 or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
@@ -77,6 +77,32 @@ Third-party dependency trees are not recursively content-addressed, so dependenc
 changes require a new environment identity and fresh checks.
 
 ## Operator interaction
+
+### Technical supervision and versioned continuation
+
+`driver-input --state-dir DIR --input TECHNICAL_INPUT.json` accepts bounded
+technical observations from a trusted local supervisor adapter. Each record has
+an immutable input ID and source reference. Repeating identical input is safe;
+conflicting reuse fails. Records live in a separate private hash-linked journal,
+never in the operator intent ledger. They cannot approve work, revise business
+requirements, expand execution permissions or satisfy a human decision.
+
+The driver delivers unread observations to Astra and rejects an in-flight response
+if trusted input changed after dispatch. Technical evidence can unblock an
+engineering or host failure, but cannot override review, decision, preflight or
+turn-budget gates. Publication during a synchronized driver step returns an
+explicit retry error; the caller must retry the same input ID.
+
+For the supported RC.35 to RC.36 transition, stop the old controller between steps,
+allow its native jobs to finish and preserve the original state. Invoke
+`driver-continue --state-dir SOURCE --destination-state-dir DESTINATION --input CONTINUATION.json`
+from a clean committed RC.36 checkout. The source kernel must match its declared
+clean RC.35 pin. The continuation preserves historical ledger and receipts, records
+both kernel identities and the supervisor's stop assertion, and retains consumed
+turns and human gates. It requires a fresh Astra projection rather than replaying
+copied requests. The source lock establishes an observed safe boundary; it cannot
+prove an old external controller will never restart. Keep that controller stopped.
+See the experiment record for input examples and limitations.
 
 ### Automatic driver
 
@@ -301,7 +327,7 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [RC.34 dispatcher](../templates/hrm-interaction-agents.md)
+Adoption is explicit. Use the [RC.36 dispatcher](../templates/hrm-interaction-agents.md)
 in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
 Estimating, this is an experimental project-profile recommendation only. Preserve
 the installed global and repository policies unless their own adoption change is
@@ -321,6 +347,11 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.5.0-rc36 — 2026-09-09:** Adds separate technical supervisor input,
+  stale-response rejection on technical changes, explicit stopped-run continuation,
+  and actionable scratch-configuration diagnostics. Keeps the original RC.35
+  experiment and AE evidence unchanged; no Canary acceptance is implied.
 
 - **0.4.0-rc35 — 2026-09-09:** Adds native Astra driver transport, exact-task
   continuation, authenticated preflight, diagnostic-only blocked-worker checks,

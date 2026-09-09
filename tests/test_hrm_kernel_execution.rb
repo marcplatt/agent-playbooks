@@ -68,6 +68,20 @@ class HrmKernelExecutionTest < Minitest::Test
     FileUtils.remove_entry(@temporary) if @temporary && File.exist?(@temporary)
   end
 
+  def test_project_configuration_rejection_explains_the_existing_readable_route
+    execution = runner
+    ["pyproject.toml", File.join(@project_root, "pyproject.toml")].each do |path|
+      selected_spec = spec.merge("configuration_paths" => [path])
+      candidate = capture(execution, authorized_paths: %w[app.txt other.txt], selected_spec: selected_spec)
+      error = assert_raises(HrmKernel::Error) do
+        execution.run(spec: selected_spec,
+                      binding: candidate.fetch("binding"), candidate: candidate)
+      end
+      assert_includes error.message, "configuration_paths: []"
+      assert_includes error.message, "argv"
+    end
+  end
+
   def test_runner_executes_frozen_plan_in_sandbox_and_reuses_conclusive_receipt
     execution = runner
     candidate = capture(execution, authorized_paths: %w[app.txt other.txt])
