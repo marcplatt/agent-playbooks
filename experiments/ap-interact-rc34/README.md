@@ -23,6 +23,10 @@ operator requirement correction; historical receipts and assessments are retaine
 No actual inbox receipt was established, and this correction does not execute
 live services. The retained app is a rehearsal environment only.
 
+A separate [qualification repeat](qualification-repeat.md) removes the canonical
+implementation hints and retains the real end-to-end outcome. Its evidence and
+limitations are recorded separately from this earlier rehearsal.
+
 ## How the AE result was produced
 
 This was a guided reconstruction, not an independent implementation derived from
