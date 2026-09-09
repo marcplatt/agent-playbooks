@@ -61,21 +61,33 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
-## AP-INTERACT RC.33 — first Astra-driven development experiment
+## AP-INTERACT RC.34 — implementation and review runtime candidate
 
 [Experiment record](experiments/ap-interact-rc33/README.md) preserves PR #10 as an
-experiment outside AP `main`, with its audit findings and historical AE canary trial.
-This operator-designated RC.33 is distinct from the earlier AP-EXEC RC.33
-deployment-preflight compiler. Records under `experiments/` are historical evidence,
-not project adoption or operating policy.
+archived RC.33 experiment, including its audit findings and historical AE canary
+trial. Records under `experiments/` remain historical evidence rather than current
+runtime policy or proof of project adoption.
 
 [HRM interaction kernel](playbooks/hrm-interaction-kernel.md) provides a separate
-`ap-hrm-interaction/1` command service for operator intent, general work orders,
-exact decision responses, and review/remediation cycles. Run
-`ruby scripts/hrm_kernel.rb --help` for its local interface. It preserves historical
-RC ledgers and does not automatically install policy, launch model tasks, or execute
-external effects. Its adopting-role profile assigns GPT-6 Astra to orchestration
-and GPT-5.6 Sol to workers and independent review.
+`ap-hrm-interaction/2` local service for additive operator intent, bounded host work,
+native check receipts, independent scenario assessment, first-class findings, and
+review/remediation cycles. Run `ruby scripts/hrm_kernel.rb --help` for its interface.
+RC.34 starts a fresh ledger and never migrates an RC.33 ledger in place. Its role
+profile requests GPT-6 Astra for orchestration and GPT-5.6 Sol for workers and
+independent review; the host receipt records the requested model and available task
+identity evidence without claiming stronger model authentication.
+
+The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
+records the actual native worker run, engineering failures, corrections, and
+remaining review boundaries. The operator clarified that this was a simulation,
+not a successful Canary: real Website/Thomas entry, QBO API delivery, and inbox
+receipt remain unproved. The earlier pending review is invalidated.
+
+This is an experimental runtime recommendation for an explicitly selected Alpine
+Estimating pilot. It does not install a global profile, modify an existing project
+policy, grant a deployment or provider effect, or establish live canonical product
+acceptance. Those actions remain under the adopting repository's existing authority
+and release controls.
 
 ## Experimental compact execution
 
@@ -198,8 +210,9 @@ unit. Each project designates one stable operator checkout and one stable curren
 worker agents never implement in that checkout. Reconcile and remove eligible worktrees after
 verified integration rather than waiting for HRM closure.
 
-The HRM orchestrator owns meaning, scope, finding disposition, operator interaction, and
-closure. A dedicated checker/merge-controller subagent owns the deterministic check and Git
+The HRM orchestrator owns meaning reconciliation, scope routing, operator interaction, and
+review presentation. Independent review dispositions implementation findings; the operator
+owns milestone closure. A dedicated checker/merge-controller subagent owns the deterministic check and Git
 integration segment for one repository queue. It remains source-read-only, never waives a
 gate or edits a failing candidate, and reports exceptions back through the orchestrator.
 

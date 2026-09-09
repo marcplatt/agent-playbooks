@@ -82,6 +82,11 @@ class HrmInteractionDemo
     apply("work_order.submit", worker, submission(
       "work-initial", 2, "claim-blue", blue_artifacts, blue_checks
     ))
+    resolve_finding(
+      "review-initial-requested-change",
+      "The independent review confirms that the current surface now uses the requested blue accent.",
+      [{"work_order_id" => "work-initial", "revision" => 2, "check_ids" => ["check-blue-ui"]}]
+    )
     apply("milestone.review_ready", orchestrator, "review_id" => "review-blue")
     apply("milestone.review", operator,
           "review_id" => "review-blue",
@@ -112,6 +117,14 @@ class HrmInteractionDemo
     apply("work_order.submit", worker, submission(
       "work-api-mirror", 1, "claim-api-mirror", mirror_artifacts, mirror_checks
     ))
+    resolve_finding(
+      "review-blue-requested-change",
+      "The independent review confirms that the current candidate includes the requested API mirror and consumer.",
+      [
+        {"work_order_id" => "work-initial", "revision" => 2, "check_ids" => ["check-blue-ui"]},
+        {"work_order_id" => "work-api-mirror", "revision" => 1, "check_ids" => ["check-api-mirror"]}
+      ]
+    )
     apply("milestone.review_ready", orchestrator, "review_id" => "review-api-mirror")
     apply("milestone.review", operator,
           "review_id" => "review-api-mirror",
@@ -184,6 +197,22 @@ class HrmInteractionDemo
 
   def status_cursor
     cli("status", "--state-dir", @state_dir, "--role", "orchestrator").fetch("cursor")
+  end
+
+  def resolve_finding(finding_id, text, evidence_refs)
+    status = cli("status", "--state-dir", @state_dir, "--role", "reviewer", "--actor-id", "reviewer-demo")
+    candidate_digest = status.dig("projection", "milestone", "current_candidate", "candidate_digest")
+    raise "current candidate digest is unavailable" unless candidate_digest
+
+    apply(
+      "finding.resolve",
+      reviewer,
+      "finding_id" => finding_id,
+      "candidate_digest" => candidate_digest,
+      "disposition" => "fixed",
+      "text" => text,
+      "evidence_refs" => evidence_refs
+    )
   end
 
   def next_command(type, actor, data)
@@ -319,6 +348,10 @@ class HrmInteractionDemo
 
   def worker
     {"id" => "worker-demo", "role" => "worker"}
+  end
+
+  def reviewer
+    {"id" => "reviewer-demo", "role" => "reviewer"}
   end
 
   def initial_html

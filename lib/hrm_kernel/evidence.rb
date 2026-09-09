@@ -5,6 +5,7 @@ require "json"
 require "pathname"
 
 require_relative "error"
+require_relative "execution"
 
 module HrmKernel
   module Evidence
@@ -14,17 +15,19 @@ module HrmKernel
 
     module_function
 
-    def verify!(state, command)
+    def verify!(state, command, state_dir: nil)
       type = command["type"]
       case type
       when "milestone.create"
         verify_project_root!(command.dig("data", "project_root"))
-      when "work_order.submit"
-        verify_submission!(state, command.fetch("data"))
+      when "work_order.submit", "work_order.refresh_evidence"
+        verify_submission!(state, command.fetch("data"), state_dir: state_dir)
       when "milestone.review_ready"
-        verify_completed_work!(state)
+        verify_completed_work!(state, state_dir: state_dir)
+      when "milestone.assess", "finding.resolve"
+        verify_completed_work!(state, state_dir: state_dir)
       when "milestone.review"
-        verify_completed_work!(state) if command.dig("data", "decision") == "accepted"
+        verify_completed_work!(state, state_dir: state_dir) if command.dig("data", "decision") == "accepted"
       end
 
       true
@@ -42,7 +45,7 @@ module HrmKernel
       fail!("project_root cannot be accessed: #{e.message}")
     end
 
-    def verify_submission!(state, data)
+    def verify_submission!(state, data, state_dir: nil)
       milestone = milestone!(state)
       work_order_id = data["work_order_id"]
       work_order = state.fetch("work_orders", {})[work_order_id]
@@ -57,19 +60,30 @@ module HrmKernel
       artifacts.each do |artifact|
         path = artifact["path"]
         fail!("artifact path #{path.inspect} is not declared by the work order") unless declared_paths.include?(path)
-        verify_file!(milestone.fetch("project_root"), path, artifact["sha256"])
+        if native_execution?(milestone) && !File.exist?(File.join(milestone.fetch("project_root"), path))
+          verify_deleted_file!(milestone.fetch("project_root"), path, artifact["sha256"])
+        else
+          verify_file!(milestone.fetch("project_root"), path, artifact["sha256"])
+        end
       end
 
       checks.each do |check|
         path = check["artifact_path"]
         fail!("check report paths must be separate from deliverable artifacts") if paths.include?(path)
-        verify_check_report!(
-          milestone.fetch("project_root"),
-          work_order,
-          data["revision"],
-          artifacts,
-          check
-        )
+        if native_execution?(milestone)
+          verify_native_check_report!(
+            milestone, work_order, data["claim_id"], data["revision"], artifacts,
+            check, state_dir: state_dir, current_exact: true
+          )
+        else
+          verify_check_report!(
+            milestone.fetch("project_root"),
+            work_order,
+            data["revision"],
+            artifacts,
+            check
+          )
+        end
       end
 
       true
@@ -82,7 +96,7 @@ module HrmKernel
       value
     end
 
-    def verify_completed_work!(state)
+    def verify_completed_work!(state, state_dir: nil)
       milestone = milestone!(state)
       root = milestone.fetch("project_root")
 
@@ -90,16 +104,28 @@ module HrmKernel
         next unless work_order["status"] == "completed"
 
         Array(work_order["artifacts"]).each do |artifact|
-          verify_file!(root, artifact["path"], artifact["sha256"])
+          if native_execution?(milestone) && !File.exist?(File.join(root, artifact["path"]))
+            verify_deleted_file!(root, artifact["path"], artifact["sha256"])
+          else
+            verify_file!(root, artifact["path"], artifact["sha256"])
+          end
         end
         Array(work_order["checks"]).each do |check|
-          verify_check_report!(
-            root,
-            work_order,
-            work_order.fetch("revision"),
-            Array(work_order["artifacts"]),
-            check
-          )
+          if native_execution?(milestone)
+            verify_native_check_report!(
+              milestone, work_order, Array(work_order["claim_history"]).last,
+              work_order.fetch("revision"), Array(work_order["artifacts"]), check,
+              state_dir: state_dir, current_exact: true
+            )
+          else
+            verify_check_report!(
+              root,
+              work_order,
+              work_order.fetch("revision"),
+              Array(work_order["artifacts"]),
+              check
+            )
+          end
         end
       end
 
@@ -148,6 +174,102 @@ module HrmKernel
       true
     rescue JSON::ParserError => e
       fail!("check report #{relative_path.inspect} contains invalid JSON: #{e.message}")
+    end
+
+    def verify_native_check_report!(milestone, work_order, claim_id, revision, artifacts, check,
+                                    state_dir:, current_exact:)
+      fail!("native check verification requires state_dir") unless state_dir.is_a?(String)
+      relative_path = check["artifact_path"]
+      path = safe_evidence_path!(milestone.fetch("project_root"), relative_path)
+      contents = read_verified_file!(path, relative_path, check["sha256"], MAX_CHECK_REPORT_BYTES, true)
+      report = JSON.parse(contents)
+      fail!("check report #{relative_path.inspect} must be a JSON object") unless report.is_a?(Hash)
+      expected = {
+        "check_id" => check["id"],
+        "conclusion" => check["conclusion"],
+        "work_order_id" => work_order["id"],
+        "revision" => revision,
+        "artifacts" => artifacts
+      }
+      expected.each do |key, value|
+        fail!("check report #{relative_path.inspect} has mismatched #{key}") unless report[key] == value
+      end
+      descriptor = report["execution"]
+      fail!("check report #{relative_path.inspect} lacks native execution evidence") unless descriptor.is_a?(Hash)
+      runner = HrmKernel::Execution.new(
+        project_root: milestone.fetch("project_root"),
+        state_dir: state_dir
+      )
+      expected_binding = {
+        "work_order_id" => work_order.fetch("id"),
+        "claim_id" => claim_id,
+        "revision" => revision,
+        "requirement_revisions" => work_order.fetch("requirement_revisions"),
+        "work_order_contract_digest" => HrmKernel::Execution.contract_digest(milestone, work_order)
+      }
+      receipt = runner.verify_receipt!(
+        descriptor,
+        expected_binding: expected_binding,
+        current_exact: current_exact
+      )
+      fail!("native receipt check id mismatch") unless receipt["check_id"] == check["id"]
+      fail!("native receipt conclusion mismatch") unless receipt["conclusion"] == check["conclusion"]
+      verify_native_artifacts!(receipt.fetch("candidate"), work_order, artifacts)
+      true
+    rescue JSON::ParserError => e
+      fail!("check report #{relative_path.inspect} contains invalid JSON: #{e.message}")
+    end
+
+    def verify_native_artifacts!(candidate, work_order, artifacts)
+      declared = Array(work_order["paths"])
+      relevant = Array(candidate["changes"]).select do |entry|
+        declared.any? { |path| native_path_matches?(entry["path"], path) }
+      end
+      expected = relevant.map do |entry|
+        sha256 = if entry["status"] == "D"
+                   Digest::SHA256.hexdigest("deleted\0#{entry.fetch('path')}")
+                 else
+                   entry.fetch("sha256")
+                 end
+        { "path" => entry.fetch("path"), "sha256" => sha256 }
+      end.sort_by { |entry| entry["path"] }
+      actual = artifacts.sort_by { |entry| entry["path"] }
+      fail!("submitted artifacts do not match the native candidate") unless actual == expected
+      true
+    end
+
+    def native_path_matches?(path, declaration)
+      if declaration.include?("*") || declaration.include?("?") || declaration.include?("[")
+        File.fnmatch?(declaration, path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+      else
+        path == declaration
+      end
+    end
+
+    def verify_deleted_file!(root, relative_path, expected_sha256)
+      pathname = Pathname.new(relative_path)
+      clean = pathname.cleanpath.to_s
+      if pathname.absolute? || clean == "." || clean == ".." || clean.start_with?("../") || clean != relative_path
+        fail!("evidence path escapes project_root: #{relative_path.inspect}")
+      end
+      current = root
+      parts = relative_path.split(File::SEPARATOR)
+      parts[0...-1].each do |part|
+        current = File.join(current, part)
+        stat = File.lstat(current)
+        fail!("symlink evidence paths are not allowed: #{relative_path.inspect}") if stat.symlink?
+      end
+      target = File.join(root, relative_path)
+      fail!("deleted artifact #{relative_path.inspect} exists") if File.exist?(target) || File.symlink?(target)
+      expected = Digest::SHA256.hexdigest("deleted\0#{relative_path}")
+      fail!("deleted artifact digest mismatch for #{relative_path.inspect}") unless secure_equal?(expected, expected_sha256)
+      true
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP, Errno::ENOTDIR => e
+      fail!("deleted artifact path #{relative_path.inspect} cannot be verified: #{e.message}")
+    end
+
+    def native_execution?(milestone)
+      milestone["mode"] == "implementation"
     end
 
     def read_verified_file!(path, relative_path, expected_sha256, maximum_bytes, capture)

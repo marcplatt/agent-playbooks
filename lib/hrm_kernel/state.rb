@@ -13,12 +13,17 @@ module HrmKernel
       "intent.record" => "operator",
       "work_order.create" => "orchestrator",
       "work_order.amend" => "orchestrator",
+      "work_order.reopen" => "worker",
       "work_order.claim" => "worker",
       "work_order.submit" => "worker",
+      "work_order.refresh_evidence" => "worker",
       "work_order.release" => "orchestrator",
       "work_order.cancel" => "orchestrator",
       "milestone.review_ready" => "orchestrator",
+      "milestone.assess" => "reviewer",
       "milestone.review" => "operator",
+      "finding.raise" => "reviewer",
+      "finding.resolve" => "reviewer",
       "decision.request" => "orchestrator",
       "decision.withdraw" => "orchestrator",
       "decision.respond" => "operator",
@@ -28,6 +33,8 @@ module HrmKernel
     INTENT_KINDS = %w[presentation_adjustment milestone_change clarification].freeze
     DECISION_KINDS = %w[business_meaning external_effect_authority].freeze
     DISPOSITIONS = %w[accepted rejected deferred].freeze
+    ASSESSMENT_DISPOSITIONS = %w[accepted changes_requested].freeze
+    FINDING_DISPOSITIONS = %w[fixed no_change_needed].freeze
     SHA256 = /\A[0-9a-f]{64}\z/.freeze
     GLOB_CHARS = /[*?\[\]{}]/.freeze
 
@@ -40,6 +47,8 @@ module HrmKernel
         "intents" => {},
         "work_orders" => {},
         "reviews" => {},
+        "assessments" => {},
+        "findings" => {},
         "decisions" => {},
         "source_records" => {},
         "ledger" => []
@@ -78,7 +87,7 @@ module HrmKernel
       visible_order_ids = visible_work_order_ids(current, role, actor_id)
       visible_orders = current["work_orders"].select { |id, _order| visible_order_ids.include?(id) }
       related_requirement_ids = visible_orders.values.flat_map { |order| order["requirement_ids"] }.uniq
-      related_intent_ids = visible_orders.values.map { |order| order["intent_id"] }.uniq
+      related_intent_ids = visible_orders.values.flat_map { |order| order_intent_ids(order) }.uniq
       if %w[operator orchestrator reviewer].include?(role)
         related_intent_ids.concat(current["intents"].values.select { |intent| intent["status"] == "pending" }.map { |intent| intent["id"] })
       end
@@ -95,6 +104,7 @@ module HrmKernel
           "requirement_ids" => clone_value(current_requirement_ids),
           "current_requirement_ids" => clone_value(current_requirement_ids),
           "superseded_requirement_ids" => clone_value(intent["superseded_requirement_ids"]),
+          "supersedes" => clone_value(intent["supersedes"]),
           "scope_note" => intent["superseded_requirement_ids"].empty? ? nil : "Only current_requirement_ids remain authoritative.",
           "work_order_id" => intent["work_order_id"],
           "milestone_revision" => intent["milestone_revision"],
@@ -114,6 +124,13 @@ module HrmKernel
           copy["feedback"] = copy.delete("text") if copy.key?("text")
         end
       end
+
+      assessments = role == "worker" ? {} : clone_value(current["assessments"])
+      findings = if role == "worker"
+                   {}
+                 else
+                   clone_value(current["findings"]).each_value { |finding| finding.delete("source") }
+                 end
 
       decisions = current["decisions"].each_with_object({}) do |(id, decision), projected|
         if role == "worker"
@@ -140,11 +157,15 @@ module HrmKernel
         "intents" => intents,
         "work_orders" => work_orders,
         "reviews" => reviews,
+        "assessments" => assessments,
+        "findings" => findings,
         "decisions" => decisions,
         "history_counts" => {
           "intents" => current["intents"].length,
           "work_orders" => current["work_orders"].length,
           "reviews" => current["reviews"].length,
+          "assessments" => current["assessments"].length,
+          "findings" => current["findings"].length,
           "decisions" => current["decisions"].length,
           "events" => current["ledger"].length
         }
@@ -157,12 +178,17 @@ module HrmKernel
       when "intent.record" then intent_record!(state, data)
       when "work_order.create" then work_order_create!(state, data)
       when "work_order.amend" then work_order_amend!(state, data)
+      when "work_order.reopen" then work_order_reopen!(state, actor_id, data)
       when "work_order.claim" then work_order_claim!(state, actor_id, data)
       when "work_order.submit" then work_order_submit!(state, actor_id, data)
+      when "work_order.refresh_evidence" then work_order_refresh_evidence!(state, actor_id, data)
       when "work_order.release" then work_order_release!(state, data)
       when "work_order.cancel" then work_order_cancel!(state, data)
       when "milestone.review_ready" then milestone_review_ready!(state, data)
-      when "milestone.review" then milestone_review!(state, data)
+      when "milestone.assess" then milestone_assess!(state, actor_id, data)
+      when "milestone.review" then milestone_review!(state, actor_id, data)
+      when "finding.raise" then finding_raise!(state, actor_id, data)
+      when "finding.resolve" then finding_resolve!(state, actor_id, data)
       when "decision.request" then decision_request!(state, data)
       when "decision.withdraw" then decision_withdraw!(state, data)
       when "decision.respond" then decision_respond!(state, data)
@@ -172,7 +198,7 @@ module HrmKernel
     end
 
     def milestone_create!(state, data)
-      exact_keys!(data, %w[milestone_id outcome project_root requirements allowed_paths])
+      exact_keys!(data, %w[milestone_id outcome project_root requirements allowed_paths], %w[mode acceptance_scenarios])
       error!("conflict", "a milestone already exists") if state["milestone"]
       id = identifier!(data["milestone_id"], "milestone_id")
       outcome = nonempty_string!(data["outcome"], "outcome")
@@ -181,11 +207,33 @@ module HrmKernel
       allowed_paths = array!(data["allowed_paths"], "allowed_paths").map { |path| relative_path!(path, "allowed_paths", glob: true) }
       unique!(allowed_paths, "allowed_paths")
       error!("invalid_command", "allowed_paths cannot be empty") if allowed_paths.empty?
+      mode = data.key?("mode") ? enum!(data["mode"], %w[coordination implementation], "mode") : "coordination"
+      scenarios = data.key?("acceptance_scenarios") ? acceptance_scenarios!(data["acceptance_scenarios"], requirements) : {}
+      if mode == "implementation" && scenarios.empty?
+        error!("invalid_command", "implementation mode requires acceptance_scenarios")
+      end
+      if mode != "implementation" && !scenarios.empty?
+        error!("invalid_command", "acceptance_scenarios require implementation mode")
+      end
+
+      contract = {
+        "milestone_id" => id,
+        "outcome" => outcome,
+        "project_root" => project_root,
+        "requirements" => requirements,
+        "allowed_paths" => allowed_paths,
+        "mode" => mode,
+        "acceptance_scenarios" => scenarios.values
+      }
 
       state["milestone"] = {
         "id" => id,
         "outcome" => outcome,
         "project_root" => project_root,
+        "mode" => mode,
+        "initial_contract_digest" => digest(contract),
+        "acceptance_scenarios" => scenarios,
+        "requirement_amendments" => [],
         "requirements" => requirements.each_with_object({}) do |requirement, index|
           index[requirement["id"]] = requirement.merge("revision" => 1, "origin" => "initial")
         end,
@@ -204,7 +252,7 @@ module HrmKernel
     end
 
     def intent_record!(state, data)
-      exact_keys!(data, %w[intent_id kind text source requirement_ids], %w[work_order_id requirements])
+      exact_keys!(data, %w[intent_id kind text source requirement_ids], %w[work_order_id requirements supersedes])
       milestone = mutable_milestone!(state)
       id = identifier!(data["intent_id"], "intent_id")
       error!("conflict", "intent_id already exists") if state["intents"].key?(id)
@@ -213,6 +261,7 @@ module HrmKernel
       source = source!(data["source"])
       requirement_ids = identifiers!(data["requirement_ids"], "requirement_ids", allow_empty: false)
       work_order_id = data.key?("work_order_id") ? identifier!(data["work_order_id"], "work_order_id") : nil
+      supersedes = data.key?("supersedes") ? supersession_entries!(data["supersedes"], state, requirement_ids) : []
 
       if data.key?("requirements")
         error!("invalid_command", "requirements are only valid for milestone_change") unless kind == "milestone_change"
@@ -226,6 +275,13 @@ module HrmKernel
             "revision" => current ? current["revision"] + 1 : 1,
             "origin" => current ? current["origin"] : id
           )
+          milestone["requirement_amendments"] << {
+            "intent_id" => id,
+            "requirement_id" => entry["id"],
+            "previous" => clone_value(current),
+            "current" => clone_value(milestone["requirements"][entry["id"]]),
+            "source" => clone_value(source)
+          }
           changed = true
         end
         if changed
@@ -239,7 +295,9 @@ module HrmKernel
       unknown_requirements!(milestone, requirement_ids)
       if work_order_id
         order = fetch!(state["work_orders"], work_order_id, "work order")
-        error!("conflict", "intent work_order_id requirements do not match") unless same_set?(order["requirement_ids"], requirement_ids)
+        unless (requirement_ids - order["requirement_ids"]).empty?
+          error!("conflict", "intent work_order_id requirements exceed the work order")
+        end
       end
       record_source!(state, source, text)
       state["intents"][id] = {
@@ -250,12 +308,18 @@ module HrmKernel
         "source" => source,
         "requirement_ids" => requirement_ids,
         "superseded_requirement_ids" => [],
+        "supersedes" => supersedes,
         "work_order_id" => work_order_id,
         "milestone_revision" => milestone["revision"],
         "requirement_revisions" => requirement_ids.each_with_object({}) do |rid, memo|
           memo[rid] = milestone["requirements"][rid]["revision"]
         end
       }
+      supersedes.each do |entry|
+        old_intent = state["intents"][entry["intent_id"]]
+        old_intent["superseded_requirement_ids"] =
+          (old_intent["superseded_requirement_ids"] + entry["requirement_ids"]).uniq
+      end
       refresh_intent_statuses!(state)
       invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil)
     end
@@ -270,7 +334,9 @@ module HrmKernel
         "id" => id, "revision" => 1, "status" => "queued",
         "owner_id" => nil, "claim_id" => nil, "claim_history" => [],
         "last_owner_id" => nil,
-        "artifacts" => [], "checks" => [], "evidence_digest" => nil
+        "artifacts" => [], "checks" => [], "evidence_digest" => nil,
+        "evidence_history" => [],
+        "amendments" => []
       )
       refresh_intent_statuses!(state)
       invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil)
@@ -283,33 +349,39 @@ module HrmKernel
       order = fetch!(state["work_orders"], id, "work order")
       revision!(order, data["expected_revision"])
       error!("invalid_transition", "cancelled work order cannot be amended") if order["status"] == "cancelled"
-      old_intent_id = order["intent_id"]
-      old_requirement_ids = clone_value(order["requirement_ids"])
       if data.key?("effect_class") && data["effect_class"] != "local_repository"
         error!("invalid_command", "work orders are limited to local_repository effects")
       end
-      attrs = work_order_attributes!(state, milestone, id, data.merge("effect_class" => "local_repository"))
+      attrs = work_order_attributes!(
+        state, milestone, id, data.merge("effect_class" => "local_repository"),
+        inherited_intent_ids: order_intent_ids(order)
+      )
       old_history = order["claim_history"]
+      amendments = order.fetch("amendments", []) + [{
+        "revision" => order["revision"],
+        "intent_ids" => clone_value(order_intent_ids(order)),
+        "requirement_ids" => clone_value(order["requirement_ids"]),
+        "paths" => clone_value(order["paths"]),
+        "check_ids" => clone_value(order["check_ids"])
+      }]
       state["work_orders"][id] = attrs.merge(
         "id" => id, "revision" => order["revision"] + 1, "status" => "queued",
         "owner_id" => nil, "claim_id" => nil, "claim_history" => old_history,
         "last_owner_id" => order["last_owner_id"],
-        "artifacts" => [], "checks" => [], "evidence_digest" => nil
+        "artifacts" => [], "checks" => [], "evidence_digest" => nil,
+        "evidence_history" => order.fetch("evidence_history", []),
+        "amendments" => amendments
       )
-      if old_intent_id != attrs["intent_id"] && old_intent_id != "milestone_initial"
-        old_intent = state["intents"][old_intent_id]
-        displaced = old_requirement_ids & attrs["requirement_ids"]
-        old_intent["superseded_requirement_ids"] = (old_intent["superseded_requirement_ids"] + displaced).uniq
-      end
       refresh_intent_statuses!(state)
       invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil)
     end
 
-    def work_order_attributes!(state, milestone, id, data)
+    def work_order_attributes!(state, milestone, id, data, inherited_intent_ids: [])
       intent_id = identifier!(data["intent_id"], "intent_id")
       requirement_ids = identifiers!(data["requirement_ids"], "requirement_ids", allow_empty: false)
       unknown_requirements!(milestone, requirement_ids)
-      authorize_requirements!(state, milestone, intent_id, id, requirement_ids)
+      intent_ids = (inherited_intent_ids + [intent_id]).uniq
+      authorize_requirements!(state, milestone, intent_ids, id, requirement_ids)
       paths = array!(data["paths"], "paths").map { |path| relative_path!(path, "paths", glob: false) }
       unique!(paths, "paths")
       error!("invalid_command", "paths cannot be empty") if paths.empty?
@@ -321,6 +393,7 @@ module HrmKernel
       error!("invalid_command", "work orders are limited to local_repository effects") unless effect_class == "local_repository"
       {
         "intent_id" => intent_id,
+        "intent_ids" => intent_ids,
         "objective" => nonempty_string!(data["objective"], "objective"),
         "requirement_ids" => requirement_ids,
         "requirement_revisions" => requirement_ids.each_with_object({}) { |rid, memo| memo[rid] = milestone["requirements"][rid]["revision"] },
@@ -328,6 +401,58 @@ module HrmKernel
         "check_ids" => check_ids,
         "effect_class" => effect_class
       }
+    end
+
+    def work_order_reopen!(state, actor_id, data)
+      exact_keys!(data, %w[work_order_id expected_revision claim_id intent])
+      milestone = mutable_milestone!(state)
+      id = identifier!(data["work_order_id"], "work_order_id")
+      order = fetch!(state["work_orders"], id, "work order")
+      revision!(order, data["expected_revision"])
+      error!("invalid_transition", "only a completed work order may be reopened directly") unless order["status"] == "completed"
+      error!("forbidden", "only the previous worker may reopen this work order") unless order["last_owner_id"] == actor_id
+      current_order_authority!(state, order)
+      blocked = blocking_decisions(state, order["requirement_ids"])
+      unless blocked.empty?
+        error!("authority_gap", "requirements have unresolved operator decisions", details: { "decision_ids" => blocked.map { |item| item["id"] } })
+      end
+      conflicting = state["work_orders"].values.find do |candidate|
+        candidate["id"] != id && candidate["status"] == "running" && paths_overlap?(order["paths"], candidate["paths"])
+      end
+      error!("conflict", "paths overlap active work order #{conflicting['id']}") if conflicting
+
+      intent_data = hash!(data["intent"], "intent")
+      exact_keys!(intent_data, %w[intent_id kind text source requirement_ids])
+      requirement_ids = identifiers!(intent_data["requirement_ids"], "intent.requirement_ids", allow_empty: false)
+      unless (requirement_ids - order["requirement_ids"]).empty?
+        error!("authority_gap", "direct change requirements exceed the existing work order")
+      end
+      intent_record!(state, intent_data.merge("work_order_id" => id))
+      claim_id = identifier!(data["claim_id"], "claim_id")
+      if state["work_orders"].values.any? { |candidate| candidate["claim_history"].include?(claim_id) }
+        error!("conflict", "claim_id already exists")
+      end
+
+      order = state["work_orders"][id]
+      order["amendments"] << {
+        "revision" => order["revision"],
+        "intent_ids" => clone_value(order_intent_ids(order)),
+        "requirement_ids" => clone_value(order["requirement_ids"]),
+        "paths" => clone_value(order["paths"]),
+        "check_ids" => clone_value(order["check_ids"])
+      }
+      order["revision"] += 1
+      order["intent_id"] = intent_data["intent_id"]
+      order["intent_ids"] = (order_intent_ids(order) + [intent_data["intent_id"]]).uniq
+      order["status"] = "running"
+      order["owner_id"] = actor_id
+      order["claim_id"] = claim_id
+      order["claim_history"] << claim_id
+      order["artifacts"] = []
+      order["checks"] = []
+      order["evidence_digest"] = nil
+      refresh_intent_statuses!(state)
+      invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil)
     end
 
     def work_order_claim!(state, actor_id, data)
@@ -385,6 +510,45 @@ module HrmKernel
       milestone["phase"] = "remediation" if milestone["last_changes_requested_digest"]
     end
 
+    def work_order_refresh_evidence!(state, actor_id, data)
+      exact_keys!(data, %w[work_order_id revision claim_id artifacts checks])
+      milestone = mutable_milestone!(state)
+      order = fetch_order!(state, data)
+      error!("invalid_transition", "only a completed work order may refresh evidence") unless order["status"] == "completed"
+      error!("forbidden", "only the previous worker may refresh this work order's evidence") unless order["last_owner_id"] == actor_id
+      claim_id = identifier!(data["claim_id"], "claim_id")
+      error!("stale_revision", "evidence refresh claim is stale") unless order.fetch("claim_history").last == claim_id
+      current_order_authority!(state, order)
+
+      artifacts = artifact_entries!(data["artifacts"])
+      unless artifacts == order["artifacts"]
+        error!("invalid_command", "evidence refresh cannot change submitted artifacts")
+      end
+      checks = check_entries!(data["checks"])
+      check_ids = checks.map { |entry| entry["id"] }
+      unique!(check_ids, "check ids")
+      error!("invalid_command", "checks must exactly match required check_ids") unless same_set?(check_ids, order["check_ids"])
+      unique!(checks.map { |entry| entry["artifact_path"] }, "check artifact paths")
+      checks.each do |check|
+        error!("invalid_command", "all checks must pass") unless check["conclusion"] == "passed"
+        if artifacts.any? { |artifact| artifact["path"] == check["artifact_path"] }
+          error!("invalid_command", "check report must be separate from submitted artifacts")
+        end
+      end
+      evidence_digest = digest({ "revision" => order["revision"], "artifacts" => artifacts, "checks" => checks })
+      error!("conflict", "evidence refresh did not change the evidence binding") if evidence_digest == order["evidence_digest"]
+
+      order["evidence_history"] ||= []
+      order["evidence_history"] << {
+        "evidence_digest" => order["evidence_digest"],
+        "artifacts" => clone_value(order["artifacts"]),
+        "checks" => clone_value(order["checks"])
+      }
+      order["checks"] = checks
+      order["evidence_digest"] = evidence_digest
+      invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil)
+    end
+
     def work_order_release!(state, data)
       exact_keys!(data, %w[work_order_id revision claim_id reason])
       milestone = mutable_milestone!(state)
@@ -418,31 +582,52 @@ module HrmKernel
       milestone = mutable_milestone!(state)
       review_id = identifier!(data["review_id"], "review_id")
       error!("conflict", "review_id already exists") if state["reviews"].key?(review_id)
-      orders = state["work_orders"].values.reject { |order| order["status"] == "cancelled" }
-      error!("invalid_transition", "at least one work order is required") if orders.empty?
-      error!("invalid_transition", "all current work orders must be completed") unless orders.all? { |order| order["status"] == "completed" }
-      stale_orders = orders.reject { |order| order_authority_current?(state, order) }.map { |order| order["id"] }
-      error!("stale_revision", "work orders require authority reconciliation", details: { "work_order_ids" => stale_orders }) unless stale_orders.empty?
-      uncovered = milestone["requirements"].keys.reject do |requirement_id|
-        orders.any? { |order| order_covers?(state, order, milestone, requirement_id) }
-      end
-      error!("work_remaining", "requirements are not covered", details: { "requirement_ids" => uncovered }) unless uncovered.empty?
-      blocked = blocking_decisions(state, milestone["requirements"].keys)
-      error!("authority_gap", "operator decisions remain unresolved", details: { "decision_ids" => blocked.map { |item| item["id"] } }) unless blocked.empty?
-      pending = pending_intent_ids(state)
-      error!("work_remaining", "operator intents remain uncommissioned", details: { "intent_ids" => pending }) unless pending.empty?
+      orders = reviewable_orders!(state)
       snapshot = candidate_snapshot(milestone, orders)
-      if milestone["last_changes_requested_digest"] == snapshot["candidate_digest"]
-        error!("invalid_transition", "changes_requested candidate has not changed")
+      open = unresolved_findings(state)
+      unless open.empty?
+        error!("work_remaining", "review findings remain unresolved", details: { "finding_ids" => open.map { |finding| finding["id"] } })
       end
-      review = snapshot.merge("id" => review_id, "status" => "pending", "decision" => nil)
+      assessment = nil
+      if milestone["mode"] == "implementation"
+        assessment = current_accepted_assessment(state, snapshot)
+        error!("work_remaining", "current candidate lacks an independent accepted scenario assessment") unless assessment
+      end
+      review = snapshot.merge(
+        "id" => review_id,
+        "status" => "pending",
+        "decision" => nil,
+        "assessment_id" => assessment && assessment["id"],
+        "finding_ids" => []
+      )
       state["reviews"][review_id] = review
       milestone["current_review_id"] = review_id
       milestone["phase"] = "review_ready"
     end
 
-    def milestone_review!(state, data)
-      exact_keys!(data, %w[review_id decision text source])
+    def milestone_assess!(state, actor_id, data)
+      exact_keys!(data, %w[assessment_id candidate_digest scenario_dispositions])
+      milestone = mutable_milestone!(state)
+      error!("invalid_transition", "milestone.assess requires implementation mode") unless milestone["mode"] == "implementation"
+      id = identifier!(data["assessment_id"], "assessment_id")
+      error!("conflict", "assessment_id already exists") if state["assessments"].key?(id)
+      orders = reviewable_orders!(state)
+      ensure_independent_reviewer!(orders, actor_id)
+      snapshot = candidate_snapshot(milestone, orders)
+      candidate_digest = sha256!(data["candidate_digest"], "candidate_digest")
+      error!("stale_revision", "assessment candidate is stale") unless candidate_digest == snapshot["candidate_digest"]
+      dispositions = scenario_dispositions!(state, milestone, data["scenario_dispositions"], actor_id)
+      state["assessments"][id] = snapshot.merge(
+        "id" => id,
+        "assessor_id" => actor_id,
+        "scenario_dispositions" => dispositions,
+        "status" => dispositions.values.all? { |entry| entry["disposition"] == "accepted" } ? "accepted" : "changes_requested"
+      )
+      invalidate_review!(milestone, remediation: milestone["last_changes_requested_digest"] != nil) if milestone["current_review_id"]
+    end
+
+    def milestone_review!(state, actor_id, data)
+      exact_keys!(data, %w[review_id decision text source], %w[findings])
       milestone = mutable_milestone!(state)
       review_id = identifier!(data["review_id"], "review_id")
       review = fetch!(state["reviews"], review_id, "review")
@@ -462,6 +647,16 @@ module HrmKernel
         error!("work_remaining", "operator intents remain uncommissioned", details: { "intent_ids" => pending })
       end
       record_source!(state, source, text)
+      open = unresolved_findings(state)
+      if decision == "accepted" && !open.empty?
+        error!("work_remaining", "review findings remain unresolved", details: { "finding_ids" => open.map { |finding| finding["id"] } })
+      end
+      if decision == "accepted" && milestone["mode"] == "implementation"
+        assessment = current_accepted_assessment(state, current)
+        unless assessment && review["assessment_id"] == assessment["id"]
+          error!("stale_revision", "review lacks a current independent accepted assessment")
+        end
+      end
       review["status"] = "decided"
       review["decision"] = decision
       review["text"] = text
@@ -471,11 +666,97 @@ module HrmKernel
       when "accepted"
         milestone["phase"] = "closed"
       when "changes_requested"
+        finding_specs = if data.key?("findings")
+                          requested_finding_entries!(data["findings"], milestone)
+                        else
+                          [{ "finding_id" => "#{review_id}-requested-change", "requirement_ids" => milestone["requirements"].keys, "text" => text }]
+                        end
+        finding_specs.each do |spec|
+          create_finding!(
+            state,
+            id: spec["finding_id"],
+            actor_id: actor_id,
+            actor_role: "operator",
+            text: spec["text"],
+            requirement_ids: spec["requirement_ids"],
+            snapshot: current,
+            evidence_refs: [],
+            source: source,
+            review_id: review_id
+          )
+        end
+        review["finding_ids"] = finding_specs.map { |spec| spec["finding_id"] }
         milestone["phase"] = "remediation"
         milestone["last_changes_requested_digest"] = review["candidate_digest"]
       when "deferred"
         milestone["phase"] = "deferred"
       end
+    end
+
+    def finding_raise!(state, actor_id, data)
+      exact_keys!(data, %w[finding_id candidate_digest requirement_ids text], %w[evidence_refs])
+      milestone = mutable_milestone!(state)
+      orders = reviewable_orders!(state)
+      ensure_independent_reviewer!(orders, actor_id)
+      snapshot = candidate_snapshot(milestone, orders)
+      candidate_digest = sha256!(data["candidate_digest"], "candidate_digest")
+      error!("stale_revision", "finding candidate is stale") unless candidate_digest == snapshot["candidate_digest"]
+      evidence_refs = data.key?("evidence_refs") ? evidence_references!(state, data["evidence_refs"]) : []
+      create_finding!(
+        state,
+        id: data["finding_id"],
+        actor_id: actor_id,
+        actor_role: "reviewer",
+        text: data["text"],
+        requirement_ids: data["requirement_ids"],
+        snapshot: snapshot,
+        evidence_refs: evidence_refs
+      )
+      invalidate_review!(milestone, remediation: true)
+    end
+
+    def finding_resolve!(state, actor_id, data)
+      exact_keys!(data, %w[finding_id candidate_digest disposition text evidence_refs])
+      milestone = mutable_milestone!(state)
+      id = identifier!(data["finding_id"], "finding_id")
+      finding = fetch!(state["findings"], id, "finding")
+      error!("invalid_transition", "finding is already resolved") unless finding["status"] == "unresolved"
+      orders = reviewable_orders!(state)
+      ensure_independent_reviewer!(orders, actor_id)
+      snapshot = candidate_snapshot(milestone, orders)
+      candidate_digest = sha256!(data["candidate_digest"], "candidate_digest")
+      error!("stale_revision", "finding resolution candidate is stale") unless candidate_digest == snapshot["candidate_digest"]
+      disposition = enum!(data["disposition"], FINDING_DISPOSITIONS, "disposition")
+      evidence_refs = evidence_references!(state, data["evidence_refs"], allow_empty: false)
+      evidence_requirement_ids = evidence_refs.flat_map do |reference|
+        state.dig("work_orders", reference["work_order_id"], "requirement_ids")
+      end.uniq
+      unless (finding["requirement_ids"] - evidence_requirement_ids).empty?
+        error!("invalid_command", "finding resolution evidence does not cover its requirements")
+      end
+      if milestone["mode"] == "implementation"
+        required_checks = milestone["acceptance_scenarios"].values.select do |scenario|
+          !(scenario["requirement_ids"] & finding["requirement_ids"]).empty?
+        end.flat_map { |scenario| scenario["check_ids"] }.uniq
+        cited_checks = evidence_refs.flat_map { |reference| reference["check_ids"] }.uniq
+        unless (required_checks - cited_checks).empty?
+          error!("invalid_command", "finding resolution must cite applicable acceptance checks")
+        end
+      end
+      if disposition == "fixed" && snapshot["behavior_digest"] == finding["behavior_digest"]
+        error!("work_remaining", "fixed disposition requires changed behavioral artifacts")
+      end
+      finding["status"] = "resolved"
+      finding["resolution"] = {
+        "disposition" => disposition,
+        "text" => nonempty_string!(data["text"], "text"),
+        "reviewer_id" => actor_id,
+        "candidate_digest" => snapshot["candidate_digest"],
+        "behavior_digest" => snapshot["behavior_digest"],
+        "requirement_revisions" => clone_value(snapshot["requirement_revisions"]),
+        "evidence_refs" => evidence_refs
+      }
+      invalidate_review!(milestone, remediation: true) if milestone["current_review_id"]
     end
 
     def decision_request!(state, data)
@@ -608,11 +889,19 @@ module HrmKernel
       milestone = state["milestone"]
       clone_value(milestone).tap do |copy|
         copy["requirements"].each_value { |requirement| requirement.delete("origin") }
+        copy["requirement_amendments"].each { |amendment| amendment.delete("source") }
         if role == "worker"
           copy["requirements"].select! { |id, _requirement| related_requirement_ids.include?(id) }
+          copy["acceptance_scenarios"].select! do |_id, scenario|
+            !(scenario["requirement_ids"] & related_requirement_ids).empty?
+          end
           copy.delete("last_changes_requested_digest")
         end
         copy["readiness_blockers"] = readiness_blockers(state) unless role == "worker"
+        unless role == "worker"
+          candidate = current_candidate_snapshot(state)
+          copy["current_candidate"] = candidate if candidate
+        end
         copy["status"] = copy["phase"]
       end
     end
@@ -651,8 +940,78 @@ module HrmKernel
       order_snapshot = orders.sort_by { |order| order["id"] }.map do |order|
         { "work_order_id" => order["id"], "revision" => order["revision"], "evidence_digest" => order["evidence_digest"] }
       end
-      base = { "milestone_revision" => milestone["revision"], "work_orders" => order_snapshot }
+      behavior = orders.flat_map { |order| clone_value(order["artifacts"]) }
+                       .sort_by { |artifact| [artifact["path"], artifact["sha256"]] }
+      requirement_revisions = milestone["requirements"].each_with_object({}) do |(id, requirement), revisions|
+        revisions[id] = requirement["revision"]
+      end
+      base = {
+        "milestone_revision" => milestone["revision"],
+        "requirement_revisions" => requirement_revisions,
+        "work_orders" => order_snapshot,
+        "behavior_digest" => digest(behavior)
+      }
       base.merge("candidate_digest" => digest(base))
+    end
+
+    def current_candidate_snapshot(state)
+      return nil unless state["milestone"]
+      orders = state["work_orders"].values.reject { |order| order["status"] == "cancelled" }
+      return nil if orders.empty? || orders.any? { |order| order["status"] != "completed" }
+      return nil if orders.any? { |order| !order_authority_current?(state, order) }
+      candidate_snapshot(state["milestone"], orders)
+    end
+
+    def reviewable_orders!(state)
+      milestone = state["milestone"]
+      orders = state["work_orders"].values.reject { |order| order["status"] == "cancelled" }
+      error!("invalid_transition", "at least one work order is required") if orders.empty?
+      error!("invalid_transition", "all current work orders must be completed") unless orders.all? { |order| order["status"] == "completed" }
+      stale_orders = orders.reject { |order| order_authority_current?(state, order) }.map { |order| order["id"] }
+      error!("stale_revision", "work orders require authority reconciliation", details: { "work_order_ids" => stale_orders }) unless stale_orders.empty?
+      uncovered = milestone["requirements"].keys.reject do |requirement_id|
+        orders.any? { |order| order_covers?(state, order, milestone, requirement_id) }
+      end
+      error!("work_remaining", "requirements are not covered", details: { "requirement_ids" => uncovered }) unless uncovered.empty?
+      blocked = blocking_decisions(state, milestone["requirements"].keys)
+      error!("authority_gap", "operator decisions remain unresolved", details: { "decision_ids" => blocked.map { |item| item["id"] } }) unless blocked.empty?
+      pending = pending_intent_ids(state)
+      error!("work_remaining", "operator intents remain uncommissioned", details: { "intent_ids" => pending }) unless pending.empty?
+      ensure_scenario_evidence!(state, milestone) if milestone["mode"] == "implementation"
+      orders
+    end
+
+    def ensure_scenario_evidence!(state, milestone)
+      missing = milestone["acceptance_scenarios"].values.reject do |scenario|
+        passed_check_ids = state["work_orders"].values.select do |order|
+          order["status"] == "completed" && !(order["requirement_ids"] & scenario["requirement_ids"]).empty?
+        end.flat_map do |order|
+          order["checks"].select { |check| check["conclusion"] == "passed" }.map { |check| check["id"] }
+        end
+        (scenario["check_ids"] - passed_check_ids).empty?
+      end
+      unless missing.empty?
+        error!("work_remaining", "acceptance scenarios lack required passing checks", details: { "scenario_ids" => missing.map { |entry| entry["id"] } })
+      end
+    end
+
+    def ensure_independent_reviewer!(orders, actor_id)
+      worker_ids = orders.map { |order| order["last_owner_id"] }.compact.uniq
+      if worker_ids.include?(actor_id)
+        error!("forbidden", "implementation workers cannot assess or resolve their own candidate")
+      end
+    end
+
+    def current_accepted_assessment(state, snapshot)
+      state["assessments"].values.reverse.find do |assessment|
+        assessment["status"] == "accepted" &&
+          assessment["candidate_digest"] == snapshot["candidate_digest"] &&
+          assessment["requirement_revisions"] == snapshot["requirement_revisions"]
+      end
+    end
+
+    def unresolved_findings(state)
+      state["findings"].values.select { |finding| finding["status"] == "unresolved" }
     end
 
     def order_covers?(state, order, milestone, requirement_id)
@@ -662,27 +1021,41 @@ module HrmKernel
         order["requirement_revisions"][requirement_id] == milestone["requirements"][requirement_id]["revision"]
     end
 
-    def authorize_requirements!(state, milestone, intent_id, work_order_id, requirement_ids)
-      if intent_id == "milestone_initial"
-        valid = requirement_ids.all? do |id|
-          requirement = milestone["requirements"][id]
-          requirement["origin"] == "initial" && requirement["revision"] == 1
+    def authorize_requirements!(state, milestone, intent_ids, work_order_id, requirement_ids)
+      intents = intent_ids.map do |intent_id|
+        next intent_id if intent_id == "milestone_initial"
+        intent = fetch!(state["intents"], intent_id, "intent")
+        if intent["work_order_id"] && intent["work_order_id"] != work_order_id
+          error!("authority_gap", "intent is bound to another work order")
         end
-        error!("authority_gap", "milestone_initial cannot authorize changed requirements") unless valid
-        return
+        intent
       end
-      intent = fetch!(state["intents"], intent_id, "intent")
-      superseded = requirement_ids & intent["superseded_requirement_ids"]
-      error!("stale_revision", "operator intent requirements were superseded", details: { "requirement_ids" => superseded }) unless superseded.empty?
-      unless (requirement_ids - intent["requirement_ids"]).empty?
-        error!("authority_gap", "work order requirements exceed operator intent")
+      unauthorized = requirement_ids.reject do |requirement_id|
+        intents.any? do |intent|
+          if intent == "milestone_initial"
+            requirement = milestone["requirements"][requirement_id]
+            requirement["origin"] == "initial" && requirement["revision"] == 1
+          else
+            intent["requirement_ids"].include?(requirement_id) &&
+              !intent["superseded_requirement_ids"].include?(requirement_id) &&
+              intent["requirement_revisions"][requirement_id] == milestone["requirements"][requirement_id]["revision"]
+          end
+        end
       end
-      stale = (requirement_ids & intent["requirement_ids"]).reject do |id|
-        intent["requirement_revisions"][id] == milestone["requirements"][id]["revision"]
-      end
-      error!("stale_revision", "operator intent references changed requirements", details: { "requirement_ids" => stale }) unless stale.empty?
-      if intent["work_order_id"] && intent["work_order_id"] != work_order_id
-        error!("authority_gap", "intent is bound to another work order")
+      unless unauthorized.empty?
+        stale = unauthorized.select do |requirement_id|
+          intents.any? do |intent|
+            if intent == "milestone_initial"
+              milestone["requirements"][requirement_id]["origin"] == "initial"
+            else
+              intent["requirement_ids"].include?(requirement_id)
+            end
+          end
+        end
+        unless stale.empty?
+          error!("stale_revision", "work order references superseded or changed intent constraints", details: { "requirement_ids" => stale })
+        end
+        error!("authority_gap", "work order requirements exceed current operator authority", details: { "requirement_ids" => unauthorized })
       end
     end
 
@@ -714,19 +1087,17 @@ module HrmKernel
 
     def current_order_authority!(state, order)
       current_requirement_revisions!(order, state["milestone"])
-      return if order["intent_id"] == "milestone_initial"
-      intent = fetch!(state["intents"], order["intent_id"], "intent")
-      superseded = order["requirement_ids"] & intent["superseded_requirement_ids"]
-      error!("stale_revision", "work order uses superseded intent requirements", details: { "requirement_ids" => superseded }) unless superseded.empty?
+      authorize_requirements!(state, state["milestone"], order_intent_ids(order), order["id"], order["requirement_ids"])
     end
 
     def order_authority_current?(state, order)
       return false unless order["requirement_ids"].all? do |id|
         state.dig("milestone", "requirements", id, "revision") == order["requirement_revisions"][id]
       end
-      return true if order["intent_id"] == "milestone_initial"
-      intent = state["intents"][order["intent_id"]]
-      intent && (order["requirement_ids"] & intent["superseded_requirement_ids"]).empty?
+      authorize_requirements!(state, state["milestone"], order_intent_ids(order), order["id"], order["requirement_ids"])
+      true
+    rescue HrmKernel::Error
+      false
     end
 
     def blocking_decisions(state, requirement_ids)
@@ -760,6 +1131,13 @@ module HrmKernel
       blockers << { "kind" => "operator_decisions", "decision_ids" => blocked } unless blocked.empty?
       pending = pending_intent_ids(state)
       blockers << { "kind" => "pending_intents", "intent_ids" => pending } unless pending.empty?
+      open = unresolved_findings(state).map { |finding| finding["id"] }
+      blockers << { "kind" => "unresolved_findings", "finding_ids" => open } unless open.empty?
+      if milestone["mode"] == "implementation"
+        snapshot = current_candidate_snapshot(state)
+        assessment = snapshot && current_accepted_assessment(state, snapshot)
+        blockers << { "kind" => "independent_assessment" } unless assessment
+      end
       blockers
     end
 
@@ -772,7 +1150,7 @@ module HrmKernel
           intent["status"] = "superseded"
           next
         end
-        covered = current_orders.select { |order| order["intent_id"] == intent["id"] }.flat_map do |order|
+        covered = current_orders.select { |order| order_intent_ids(order).include?(intent["id"]) }.flat_map do |order|
           order["requirement_ids"].select do |requirement_id|
             order["requirement_revisions"][requirement_id] == intent["requirement_revisions"][requirement_id] &&
               state.dig("milestone", "requirements", requirement_id, "revision") == intent["requirement_revisions"][requirement_id]
@@ -791,6 +1169,10 @@ module HrmKernel
 
     def pending_intent_ids(state)
       state["intents"].values.select { |intent| intent["status"] == "pending" }.map { |intent| intent["id"] }
+    end
+
+    def order_intent_ids(order)
+      clone_value(order["intent_ids"] || [order["intent_id"]])
     end
 
     def fetch_order!(state, data)
@@ -812,6 +1194,145 @@ module HrmKernel
     def revision!(record, supplied)
       supplied = positive_integer!(supplied, "revision")
       error!("stale_revision", "expected revision #{record['revision']}, got #{supplied}") unless record["revision"] == supplied
+    end
+
+    def acceptance_scenarios!(value, requirements)
+      requirement_ids = requirements.map { |entry| entry["id"] }
+      entries = array!(value, "acceptance_scenarios").map do |entry|
+        exact_keys!(entry, %w[id text requirement_ids check_ids])
+        scenario_requirement_ids = identifiers!(entry["requirement_ids"], "acceptance_scenario.requirement_ids", allow_empty: false)
+        unknown = scenario_requirement_ids - requirement_ids
+        error!("not_found", "acceptance scenario references unknown requirements", details: { "requirement_ids" => unknown }) unless unknown.empty?
+        {
+          "id" => identifier!(entry["id"], "acceptance_scenario.id"),
+          "text" => nonempty_string!(entry["text"], "acceptance_scenario.text"),
+          "requirement_ids" => scenario_requirement_ids,
+          "check_ids" => identifiers!(entry["check_ids"], "acceptance_scenario.check_ids", allow_empty: false)
+        }
+      end
+      unique!(entries.map { |entry| entry["id"] }, "acceptance scenario ids")
+      uncovered = requirement_ids - entries.flat_map { |entry| entry["requirement_ids"] }.uniq
+      unless uncovered.empty?
+        error!("invalid_command", "acceptance scenarios must cover every requirement", details: { "requirement_ids" => uncovered })
+      end
+      entries.each_with_object({}) { |entry, result| result[entry["id"]] = entry }
+    end
+
+    def supersession_entries!(value, state, new_requirement_ids)
+      entries = array!(value, "supersedes").map do |entry|
+        exact_keys!(entry, %w[intent_id requirement_ids])
+        intent_id = identifier!(entry["intent_id"], "supersedes.intent_id")
+        intent = fetch!(state["intents"], intent_id, "intent")
+        requirement_ids = identifiers!(entry["requirement_ids"], "supersedes.requirement_ids", allow_empty: false)
+        invalid = requirement_ids - current_intent_requirement_ids(intent, state["milestone"])
+        error!("stale_revision", "supersession does not identify current intent constraints", details: { "requirement_ids" => invalid }) unless invalid.empty?
+        outside = requirement_ids - new_requirement_ids
+        error!("authority_gap", "replacement intent must name every superseded requirement", details: { "requirement_ids" => outside }) unless outside.empty?
+        { "intent_id" => intent_id, "requirement_ids" => requirement_ids }
+      end
+      unique!(entries.map { |entry| [entry["intent_id"], entry["requirement_ids"].sort] }, "supersession entries")
+      entries
+    end
+
+    def evidence_references!(state, value, allow_empty: true)
+      references = array!(value, "evidence_refs").map do |entry|
+        exact_keys!(entry, %w[work_order_id revision check_ids])
+        work_order_id = identifier!(entry["work_order_id"], "evidence_ref.work_order_id")
+        order = fetch!(state["work_orders"], work_order_id, "work order")
+        revision = positive_integer!(entry["revision"], "evidence_ref.revision")
+        error!("stale_revision", "evidence reference uses an old work order revision") unless order["revision"] == revision
+        error!("invalid_transition", "evidence reference requires completed work") unless order["status"] == "completed"
+        check_ids = identifiers!(entry["check_ids"], "evidence_ref.check_ids", allow_empty: false)
+        passed = order["checks"].select { |check| check["conclusion"] == "passed" }.map { |check| check["id"] }
+        missing = check_ids - passed
+        error!("invalid_command", "evidence reference names missing passing checks", details: { "check_ids" => missing }) unless missing.empty?
+        { "work_order_id" => work_order_id, "revision" => revision, "check_ids" => check_ids }
+      end
+      error!("invalid_command", "evidence_refs cannot be empty") if !allow_empty && references.empty?
+      unique!(references.map { |entry| [entry["work_order_id"], entry["revision"], entry["check_ids"].sort] }, "evidence references")
+      references
+    end
+
+    def scenario_dispositions!(state, milestone, value, actor_id)
+      entries = array!(value, "scenario_dispositions").map do |entry|
+        exact_keys!(entry, %w[scenario_id disposition evidence_refs finding_ids])
+        scenario_id = identifier!(entry["scenario_id"], "scenario_id")
+        scenario = fetch!(milestone["acceptance_scenarios"], scenario_id, "acceptance scenario")
+        disposition = enum!(entry["disposition"], ASSESSMENT_DISPOSITIONS, "disposition")
+        evidence_refs = evidence_references!(state, entry["evidence_refs"], allow_empty: disposition != "accepted")
+        cited_checks = evidence_refs.flat_map { |reference| reference["check_ids"] }.uniq
+        if disposition == "accepted" && !(scenario["check_ids"] - cited_checks).empty?
+          error!("invalid_command", "accepted scenario must cite every required check")
+        end
+        relevant = evidence_refs.any? do |reference|
+          !(state.dig("work_orders", reference["work_order_id"], "requirement_ids") & scenario["requirement_ids"]).empty?
+        end
+        error!("invalid_command", "scenario evidence does not cover its requirements") if disposition == "accepted" && !relevant
+        finding_ids = identifiers!(entry["finding_ids"], "finding_ids", allow_empty: disposition == "accepted")
+        if disposition == "accepted" && !finding_ids.empty?
+          error!("invalid_command", "accepted scenario cannot bind findings")
+        end
+        if disposition == "changes_requested"
+          findings = finding_ids.map { |id| fetch!(state["findings"], id, "finding") }
+          valid = findings.all? do |finding|
+            finding["status"] == "unresolved" && finding["raised_by_role"] == "reviewer" &&
+              finding["raised_by_id"] == actor_id &&
+              !(finding["requirement_ids"] & scenario["requirement_ids"]).empty?
+          end
+          error!("invalid_command", "changes_requested scenario must bind the reviewer's current unresolved findings") unless valid
+        end
+        {
+          "scenario_id" => scenario_id,
+          "disposition" => disposition,
+          "evidence_refs" => evidence_refs,
+          "finding_ids" => finding_ids
+        }
+      end
+      unique!(entries.map { |entry| entry["scenario_id"] }, "scenario disposition ids")
+      unless same_set?(entries.map { |entry| entry["scenario_id"] }, milestone["acceptance_scenarios"].keys)
+        error!("invalid_command", "assessment must disposition every acceptance scenario")
+      end
+      entries.each_with_object({}) { |entry, result| result[entry["scenario_id"]] = entry }
+    end
+
+    def requested_finding_entries!(value, milestone)
+      entries = array!(value, "findings").map do |entry|
+        exact_keys!(entry, %w[finding_id requirement_ids text])
+        requirement_ids = identifiers!(entry["requirement_ids"], "finding.requirement_ids", allow_empty: false)
+        unknown_requirements!(milestone, requirement_ids)
+        {
+          "finding_id" => identifier!(entry["finding_id"], "finding_id"),
+          "requirement_ids" => requirement_ids,
+          "text" => nonempty_string!(entry["text"], "finding.text")
+        }
+      end
+      error!("invalid_command", "changes_requested findings cannot be empty") if entries.empty?
+      unique!(entries.map { |entry| entry["finding_id"] }, "finding ids")
+      entries
+    end
+
+    def create_finding!(state, id:, actor_id:, actor_role:, text:, requirement_ids:, snapshot:, evidence_refs:, source: nil, review_id: nil)
+      id = identifier!(id, "finding_id")
+      error!("conflict", "finding_id already exists") if state["findings"].key?(id)
+      requirement_ids = identifiers!(requirement_ids, "finding.requirement_ids", allow_empty: false)
+      unknown_requirements!(state["milestone"], requirement_ids)
+      state["findings"][id] = {
+        "id" => id,
+        "status" => "unresolved",
+        "text" => nonempty_string!(text, "finding.text"),
+        "requirement_ids" => requirement_ids,
+        "requirement_revisions" => requirement_ids.each_with_object({}) do |requirement_id, result|
+          result[requirement_id] = snapshot["requirement_revisions"][requirement_id]
+        end,
+        "candidate_digest" => snapshot["candidate_digest"],
+        "behavior_digest" => snapshot["behavior_digest"],
+        "raised_by_id" => actor_id,
+        "raised_by_role" => actor_role,
+        "evidence_refs" => evidence_refs,
+        "review_id" => review_id,
+        "source" => source,
+        "resolution" => nil
+      }.compact
     end
 
     def requirement_entries!(value, allow_empty:)
@@ -893,9 +1414,9 @@ module HrmKernel
     end
 
     def validate_state!(state)
-      exact_keys!(state, %w[schema_version milestone intents work_orders reviews decisions source_records ledger])
+      exact_keys!(state, %w[schema_version milestone intents work_orders reviews assessments findings decisions source_records ledger])
       error!("invalid_state", "unsupported schema version") unless state["schema_version"] == 1
-      %w[intents work_orders reviews decisions source_records].each { |key| hash!(state[key], key) }
+      %w[intents work_orders reviews assessments findings decisions source_records].each { |key| hash!(state[key], key) }
       array!(state["ledger"], "ledger")
     end
 
@@ -916,6 +1437,7 @@ module HrmKernel
       %w[milestone_id intent_id work_order_id review_id decision_id claim_id].each do |key|
         event[key] = data[key] if data.key?(key)
       end
+      event["intent_id"] = data.dig("intent", "intent_id") if type == "work_order.reopen"
       event["milestone_revision"] = state["milestone"]["revision"] if state["milestone"]
       event
     end

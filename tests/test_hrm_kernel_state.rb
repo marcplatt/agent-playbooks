@@ -46,6 +46,7 @@ class HrmKernelStateTest < Minitest::Test
 
     state = claim(state, "claim-2", revision: 2)
     state = submit(state, "claim-2", SHA_B, revision: 2)
+    state = resolve_finding(state, "review-1-requested-change", "fixed", "The corrected behavior now passes.")
     state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-2")
     state = review(state, "review-2", "accepted", "The corrected milestone outcome is accepted.", message_id: "m-review-2")
 
@@ -231,7 +232,9 @@ class HrmKernelStateTest < Minitest::Test
       paths: [VIEW_PATH], check_ids: ["check-old"]
     )
     state = apply_command(state, "intent.record", operator,
-                          intent_data("intent-new", "m-new-intent", "Use the replacement title treatment."))
+                          intent_data("intent-new", "m-new-intent", "Use the replacement title treatment.").merge(
+                            "supersedes" => [{"intent_id" => "intent-old", "requirement_ids" => ["req-view"]}]
+                          ))
     state = amend_order(
       state, "intent-new", 1,
       requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-new"]
@@ -267,7 +270,9 @@ class HrmKernelStateTest < Minitest::Test
       requirement_ids: ["req-api"], paths: [API_PATH], check_ids: ["check-api"]
     )
     state = apply_command(state, "intent.record", operator,
-                          intent_data("intent-new", "m-partial-new", "Replace the view treatment."))
+                          intent_data("intent-new", "m-partial-new", "Replace the view treatment.").merge(
+                            "supersedes" => [{"intent_id" => "intent-old", "requirement_ids" => ["req-view"]}]
+                          ))
     state = amend_order(
       state, "intent-new", 1,
       requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-new-view"]
@@ -296,7 +301,9 @@ class HrmKernelStateTest < Minitest::Test
     )
     state = create_order(state, intent_id: "intent-old")
     state = apply_command(state, "intent.record", operator,
-                          intent_data("intent-new", "m-removed-new", "Replace only the view treatment."))
+                          intent_data("intent-new", "m-removed-new", "Replace only the view treatment.").merge(
+                            "supersedes" => [{"intent_id" => "intent-old", "requirement_ids" => ["req-view"]}]
+                          ))
     state = amend_order(
       state, "intent-new", 1,
       requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-new-view"]
@@ -310,15 +317,17 @@ class HrmKernelStateTest < Minitest::Test
     assert_includes blocker.fetch("intent_ids"), "intent-old"
   end
 
-  def test_amendment_cannot_implicitly_inherit_requirement_outside_new_intent
+  def test_additive_amendment_retains_existing_requirement_authority
     state = milestone_state
     state = create_order(state)
     state = apply_command(state, "intent.record", operator,
                           intent_data("intent-view-only", "m-view-only", "Replace only the view treatment."))
 
-    assert_kernel_error("authority_gap") do
-      amend_order(state, "intent-view-only", 1)
-    end
+    state = amend_order(state, "intent-view-only", 1)
+
+    order = HrmKernel::State.project(state, role: "orchestrator").dig("work_orders", "work-1")
+    assert_equal ["milestone_initial", "intent-view-only"], order.fetch("intent_ids")
+    assert_equal ["req-view", "req-api"], order.fetch("requirement_ids")
   end
 
   def test_amending_a_reviewed_order_removes_the_invalidated_pending_review
@@ -798,7 +807,7 @@ class HrmKernelStateTest < Minitest::Test
     state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-1")
     state = review(state, "review-1", "changes_requested", "Correct the color.", message_id: "m-changes")
 
-    assert_kernel_error("invalid_transition") do
+    assert_kernel_error("work_remaining") do
       apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-2")
     end
   end
@@ -980,6 +989,311 @@ class HrmKernelStateTest < Minitest::Test
     refute projection.dig("work_orders", "work-1").key?("claim_history")
   end
 
+  def test_additive_feedback_survives_repeated_amendment_cycles
+    state = milestone_state
+    state = apply_command(state, "intent.record", operator,
+                          intent_data("intent-blue", "m-blue", "Use the approved blue accent."))
+    state = create_order(
+      state, intent_id: "intent-blue", requirement_ids: ["req-view"],
+      paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+    state = apply_command(state, "intent.record", operator,
+                          intent_data("intent-bold", "m-bold", "Also make the title bold."))
+    state = amend_order(
+      state, "intent-bold", 1,
+      requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+    state = apply_command(state, "intent.record", operator,
+                          intent_data("intent-space", "m-space", "Also increase title spacing."))
+    state = amend_order(
+      state, "intent-space", 2,
+      requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+
+    projection = HrmKernel::State.project(state, role: "reviewer")
+    assert_equal %w[intent-blue intent-bold intent-space], projection.fetch("intents").keys.sort
+    assert_equal %w[intent-blue intent-bold intent-space],
+                 projection.dig("work_orders", "work-1", "intent_ids")
+    assert projection.fetch("intents").values.all? { |intent| intent["status"] == "commissioned" }
+    assert state.fetch("intents").values.all? { |intent| intent["superseded_requirement_ids"].empty? }
+  end
+
+  def test_only_explicit_operator_supersession_replaces_an_active_constraint
+    state = milestone_state
+    state = apply_command(state, "intent.record", operator,
+                          intent_data("intent-blue", "m-explicit-blue", "Use blue."))
+    state = create_order(
+      state, intent_id: "intent-blue", requirement_ids: ["req-view"],
+      paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+    state = apply_command(state, "intent.record", operator,
+                          intent_data("intent-green-additive", "m-green-additive", "Use green."))
+    state = amend_order(
+      state, "intent-green-additive", 1,
+      requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+    assert_empty state.dig("intents", "intent-blue", "superseded_requirement_ids")
+
+    state = apply_command(
+      state,
+      "intent.record",
+      operator,
+      intent_data("intent-green-final", "m-green-final", "Replace blue with green.").merge(
+        "supersedes" => [{"intent_id" => "intent-blue", "requirement_ids" => ["req-view"]}]
+      )
+    )
+    state = amend_order(
+      state, "intent-green-final", 2,
+      requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+
+    refute HrmKernel::State.project(state, role: "operator").fetch("intents").key?("intent-blue")
+    assert_equal ["req-view"], state.dig("intents", "intent-blue", "superseded_requirement_ids")
+  end
+
+  def test_metadata_only_resubmission_cannot_resolve_requested_change_as_fixed
+    state = milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-original")
+    state = submit(state, "claim-original", SHA_A)
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-original")
+    state = review(state, "review-original", "changes_requested", "The visible behavior is wrong.", message_id: "m-wrong")
+    original_behavior = state.dig("findings", "review-original-requested-change", "behavior_digest")
+
+    state = amend_order(state, "milestone_initial", 1)
+    state = claim(state, "claim-report-only", revision: 2)
+    state = submit(state, "claim-report-only", SHA_A, revision: 2)
+    current = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    assert_equal original_behavior, current.fetch("behavior_digest")
+
+    assert_kernel_error("work_remaining") do
+      resolve_finding(state, "review-original-requested-change", "fixed", "Only the report changed.")
+    end
+    assert_kernel_error("work_remaining") do
+      apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-bypass")
+    end
+  end
+
+  def test_no_change_needed_requires_current_independent_behavioral_evidence
+    state = milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-original")
+    state = submit(state, "claim-original", SHA_A)
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-original")
+    state = review(state, "review-original", "changes_requested", "Verify the apparent mismatch.", message_id: "m-verify")
+
+    candidate = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    assert_kernel_error("invalid_command") do
+      apply_command(
+        state, "finding.resolve", reviewer,
+        "finding_id" => "review-original-requested-change",
+        "candidate_digest" => candidate.fetch("candidate_digest"),
+        "disposition" => "no_change_needed",
+        "text" => "Dismiss without evidence.",
+        "evidence_refs" => []
+      )
+    end
+
+    state = resolve_finding(
+      state, "review-original-requested-change", "no_change_needed",
+      "Independent current checks demonstrate that the requested behavior already holds."
+    )
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-verified")
+    assert_equal "review_ready", state.dig("milestone", "phase")
+  end
+
+  def test_implementation_mode_requires_current_independent_scenario_assessment
+    state = implementation_milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-implementation")
+    state = submit(state, "claim-implementation", SHA_A)
+    candidate = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+
+    assert_kernel_error("work_remaining") do
+      apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-unassessed")
+    end
+    assert_kernel_error("forbidden") do
+      assess_candidate(state, candidate, reviewer_id: "worker-1")
+    end
+
+    state = assess_candidate(state, candidate)
+    assessment = state.dig("assessments", "assessment-1")
+    assert_equal candidate.fetch("candidate_digest"), assessment.fetch("candidate_digest")
+    assert_equal candidate.fetch("requirement_revisions"), assessment.fetch("requirement_revisions")
+    assert_equal "reviewer-1", assessment.fetch("assessor_id")
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-assessed")
+    state = review(state, "review-assessed", "accepted", "The behavior is accepted.", message_id: "m-accepted-implementation")
+    assert_equal "closed", state.dig("milestone", "phase")
+  end
+
+  def test_unchanged_completed_work_can_refresh_stale_evidence_but_requires_reassessment
+    state = implementation_milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-implementation")
+    state = submit(state, "claim-implementation", SHA_A)
+    original = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    state = assess_candidate(state, original)
+
+    changed_artifacts = submit_data("claim-implementation", SHA_B)
+    assert_kernel_error("invalid_command") do
+      apply_command(state, "work_order.refresh_evidence", worker("worker-1"), changed_artifacts)
+    end
+
+    refresh = submit_data("claim-implementation", SHA_A)
+    refresh["checks"] = check_results(SHA_B)
+    state = apply_command(state, "work_order.refresh_evidence", worker("worker-1"), refresh)
+    order = state.dig("work_orders", "work-1")
+    assert_equal 1, order.fetch("revision")
+    assert_equal [{ "path" => VIEW_PATH, "sha256" => SHA_A }, { "path" => API_PATH, "sha256" => SHA_A }], order.fetch("artifacts")
+    assert_equal 1, order.fetch("evidence_history").length
+    refute_equal order.dig("evidence_history", 0, "evidence_digest"), order.fetch("evidence_digest")
+
+    current = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    refute_equal original.fetch("candidate_digest"), current.fetch("candidate_digest")
+    assert_kernel_error("work_remaining") do
+      apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-stale-assessment")
+    end
+    state = assess_candidate(state, current, assessment_id: "assessment-refreshed")
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-refreshed")
+    assert_equal "assessment-refreshed", state.dig("reviews", "review-refreshed", "assessment_id")
+  end
+
+  def test_reviewer_finding_blocks_implementation_until_behavior_changes_and_is_reassessed
+    state = implementation_milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-first")
+    state = submit(state, "claim-first", SHA_A)
+    candidate = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    state = apply_command(
+      state, "finding.raise", reviewer,
+      "finding_id" => "finding-visible-value",
+      "candidate_digest" => candidate.fetch("candidate_digest"),
+      "requirement_ids" => ["req-view"],
+      "text" => "The visible value does not match the accepted scenario.",
+      "evidence_refs" => current_evidence_refs(state)
+    )
+    state = assess_candidate(
+      state, candidate,
+      dispositions: {
+        "scenario-view" => ["changes_requested", ["finding-visible-value"]],
+        "scenario-api" => ["accepted", []]
+      }
+    )
+    assert_kernel_error("work_remaining") do
+      apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-with-finding")
+    end
+
+    state = amend_order(state, "milestone_initial", 1)
+    state = claim(state, "claim-fixed", revision: 2)
+    state = submit(state, "claim-fixed", SHA_B, revision: 2)
+    state = resolve_finding(state, "finding-visible-value", "fixed", "The visible behavior now matches.")
+    current = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    state = assess_candidate(state, current, assessment_id: "assessment-2")
+    state = apply_command(state, "milestone.review_ready", orchestrator, "review_id" => "review-fixed")
+    assert_equal "review_ready", state.dig("milestone", "phase")
+  end
+
+  def test_same_worker_can_reopen_completed_order_from_direct_operator_source
+    state = milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-first")
+    state = submit(state, "claim-first", SHA_A)
+    state = apply_command(
+      state,
+      "work_order.reopen",
+      worker("worker-1"),
+      "work_order_id" => "work-1",
+      "expected_revision" => 1,
+      "claim_id" => "claim-direct",
+      "intent" => intent_data("intent-direct", "m-direct", "Also make the title bold.")
+    )
+
+    order = state.dig("work_orders", "work-1")
+    assert_equal "running", order.fetch("status")
+    assert_equal "worker-1", order.fetch("owner_id")
+    assert_equal ["milestone_initial", "intent-direct"], order.fetch("intent_ids")
+    assert_equal [VIEW_PATH, API_PATH], order.fetch("paths")
+    assert_equal source("m-direct"), state.dig("intents", "intent-direct", "source")
+    assert_empty state.fetch("decisions")
+  end
+
+  def test_direct_reopen_cannot_bypass_an_unresolved_business_decision
+    state = milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-first")
+    state = submit(state, "claim-first", SHA_A)
+    state = request_decision(state)
+
+    assert_kernel_error("authority_gap") do
+      direct_reopen(state, "intent-blocked", "m-direct-blocked")
+    end
+    refute state.fetch("intents").key?("intent-blocked")
+    assert_equal "completed", state.dig("work_orders", "work-1", "status")
+  end
+
+  def test_direct_reopen_cannot_overlap_another_active_writer
+    state = milestone_state
+    state = create_order(
+      state, requirement_ids: ["req-view"], paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+    state = claim(state, "claim-first")
+    state = submit(
+      state, "claim-first", SHA_A,
+      paths: [VIEW_PATH], check_ids: ["check-view"]
+    )
+    state = create_order(
+      state, work_order_id: "work-overlap", requirement_ids: ["req-view"],
+      paths: [VIEW_PATH], check_ids: ["check-overlap"]
+    )
+    state = claim(
+      state, "claim-overlap", worker_id: "worker-2", work_order_id: "work-overlap"
+    )
+
+    error = assert_kernel_error("conflict") do
+      direct_reopen(state, "intent-overlap", "m-direct-overlap")
+    end
+    assert_match(/work-overlap/, error.message)
+    refute state.fetch("intents").key?("intent-overlap")
+  end
+
+  def test_direct_reopen_rejects_stale_requirement_authority
+    state = milestone_state
+    state = create_order(state)
+    state = claim(state, "claim-first")
+    state = submit(state, "claim-first", SHA_A)
+    state = change_view_requirement(state, intent_id: "intent-requirement-change", message_id: "m-stale-direct")
+
+    assert_kernel_error("stale_revision") do
+      direct_reopen(state, "intent-stale-direct", "m-stale-direct-feedback")
+    end
+    refute state.fetch("intents").key?("intent-stale-direct")
+  end
+
+  def test_initial_contract_is_frozen_while_operator_requirement_amendments_are_retained
+    state = milestone_state
+    initial_digest = state.dig("milestone", "initial_contract_digest")
+    initial_outcome = state.dig("milestone", "outcome")
+    state = change_view_requirement(state, intent_id: "intent-requirement-change", message_id: "m-contract-change")
+
+    assert_equal initial_digest, state.dig("milestone", "initial_contract_digest")
+    assert_equal initial_outcome, state.dig("milestone", "outcome")
+    amendment = state.dig("milestone", "requirement_amendments").fetch(0)
+    assert_equal "req-view", amendment.fetch("requirement_id")
+    assert_equal 1, amendment.dig("previous", "revision")
+    assert_equal 2, amendment.dig("current", "revision")
+    assert_equal source("m-contract-change"), amendment.fetch("source")
+
+    assert_kernel_error("forbidden") do
+      apply_command(
+        state, "intent.record", orchestrator,
+        intent_data("intent-bad-change", "m-bad-change", "Change the requirement.").merge(
+          "kind" => "milestone_change",
+          "requirements" => [{"id" => "req-view", "text" => "Orchestrator rewrite."}]
+        )
+      )
+    end
+  end
+
   private
 
   def operator
@@ -988,6 +1302,10 @@ class HrmKernelStateTest < Minitest::Test
 
   def orchestrator
     {"id" => "orchestrator-1", "role" => "orchestrator"}
+  end
+
+  def reviewer(id = "reviewer-1")
+    {"id" => id, "role" => "reviewer"}
   end
 
   def worker(id)
@@ -1014,6 +1332,31 @@ class HrmKernelStateTest < Minitest::Test
 
   def milestone_state
     apply_command(HrmKernel::State.initial, "milestone.create", operator, milestone_data)
+  end
+
+  def implementation_milestone_state
+    apply_command(
+      HrmKernel::State.initial,
+      "milestone.create",
+      operator,
+      milestone_data.merge(
+        "mode" => "implementation",
+        "acceptance_scenarios" => [
+          {
+            "id" => "scenario-view",
+            "text" => "The product view visibly shows the approved presentation.",
+            "requirement_ids" => ["req-view"],
+            "check_ids" => ["check-view"]
+          },
+          {
+            "id" => "scenario-api",
+            "text" => "The API returns the same approved value.",
+            "requirement_ids" => ["req-api"],
+            "check_ids" => ["check-api"]
+          }
+        ]
+      )
+    )
   end
 
   def completed_initial_state
@@ -1151,6 +1494,70 @@ class HrmKernelStateTest < Minitest::Test
       "decision" => decision,
       "text" => text,
       "source" => source(message_id)
+    )
+  end
+
+  def resolve_finding(state, finding_id, disposition, text, reviewer_id: "reviewer-1")
+    order = state.fetch("work_orders").values.find { |candidate| candidate["status"] == "completed" }
+    candidate = HrmKernel::State.project(state, role: "reviewer").dig("milestone", "current_candidate")
+    apply_command(
+      state,
+      "finding.resolve",
+      reviewer(reviewer_id),
+      "finding_id" => finding_id,
+      "candidate_digest" => candidate.fetch("candidate_digest"),
+      "disposition" => disposition,
+      "text" => text,
+      "evidence_refs" => [{
+        "work_order_id" => order.fetch("id"),
+        "revision" => order.fetch("revision"),
+        "check_ids" => order.fetch("check_ids")
+      }]
+    )
+  end
+
+  def direct_reopen(state, intent_id, message_id)
+    apply_command(
+      state,
+      "work_order.reopen",
+      worker("worker-1"),
+      "work_order_id" => "work-1",
+      "expected_revision" => 1,
+      "claim_id" => "claim-#{intent_id}",
+      "intent" => intent_data(intent_id, message_id, "Also apply this bounded correction.")
+    )
+  end
+
+  def current_evidence_refs(state)
+    state.fetch("work_orders").values.select { |order| order["status"] == "completed" }.map do |order|
+      {
+        "work_order_id" => order.fetch("id"),
+        "revision" => order.fetch("revision"),
+        "check_ids" => order.fetch("check_ids")
+      }
+    end
+  end
+
+  def assess_candidate(state, candidate, reviewer_id: "reviewer-1", assessment_id: "assessment-1", dispositions: nil)
+    dispositions ||= {
+      "scenario-view" => ["accepted", []],
+      "scenario-api" => ["accepted", []]
+    }
+    evidence_refs = current_evidence_refs(state)
+    apply_command(
+      state,
+      "milestone.assess",
+      reviewer(reviewer_id),
+      "assessment_id" => assessment_id,
+      "candidate_digest" => candidate.fetch("candidate_digest"),
+      "scenario_dispositions" => dispositions.map do |scenario_id, (disposition, finding_ids)|
+        {
+          "scenario_id" => scenario_id,
+          "disposition" => disposition,
+          "evidence_refs" => evidence_refs,
+          "finding_ids" => finding_ids
+        }
+      end
     )
   end
 

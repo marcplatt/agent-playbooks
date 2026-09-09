@@ -21,12 +21,14 @@ module HrmKernel
                when "apply" then apply(argv, stdin)
                when "status" then status(argv)
                when "verify" then verify(argv)
+               when "host-dispatch", "host-status", "host-collect" then host(command, argv, stdin)
+               when "check", "submit", "assess" then coordinate(command, argv, stdin)
                else
                  raise HrmKernel::Error, "unknown command #{command.inspect}"
                end
       stdout.puts(JSON.generate(output))
       0
-    rescue HrmKernel::Error, OptionParser::ParseError, JSON::ParserError, SystemCallError => e
+    rescue HrmKernel::Error, OptionParser::ParseError, JSON::ParserError, SystemCallError, KeyError, ArgumentError => e
       failure = { "error" => e.message }
       failure["code"] = if e.is_a?(HrmKernel::Error)
                           e.code
@@ -42,6 +44,11 @@ module HrmKernel
 
     def apply(argv, stdin)
       options = parse_options(argv, input: true)
+      parsed = input_object(options, stdin)
+      Store.new(options.fetch(:state_dir)).transact(parsed)
+    end
+
+    def input_object(options, stdin)
       input = options.fetch(:input)
       json = if input == "-"
                read_bounded(stdin, "standard input")
@@ -51,7 +58,31 @@ module HrmKernel
       parsed = JSON.parse(json)
       raise HrmKernel::Error, "input must be a JSON object" unless parsed.is_a?(Hash)
 
-      Store.new(options.fetch(:state_dir)).transact(parsed)
+      parsed
+    end
+
+    def host(command, argv, stdin)
+      require_relative "../lib/hrm_kernel/host"
+      options = parse_options(argv, input: true)
+      input = input_object(options, stdin)
+      adapter = Host.new(state_dir: options.fetch(:state_dir))
+      case command
+      when "host-dispatch" then adapter.dispatch(input)
+      when "host-status" then adapter.poll(job_id: input.fetch("job_id"))
+      when "host-collect" then adapter.collect(job_id: input.fetch("job_id"))
+      end
+    end
+
+    def coordinate(command, argv, stdin)
+      require_relative "../lib/hrm_kernel/coordinator"
+      options = parse_options(argv, input: true)
+      input = input_object(options, stdin)
+      coordinator = Coordinator.new(state_dir: options.fetch(:state_dir))
+      case command
+      when "check" then coordinator.check(input)
+      when "submit" then coordinator.submit(input)
+      when "assess" then coordinator.assess(input)
+      end
     end
 
     def status(argv)
@@ -108,7 +139,16 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb status --state-dir DIR --role orchestrator|worker|operator|reviewer [--actor-id ID]
           ruby scripts/hrm_kernel.rb verify --state-dir DIR
 
-        This CLI trusts the local caller's asserted actor identity. It does not authenticate it.
+          ruby scripts/hrm_kernel.rb host-dispatch --state-dir DIR --input JOB.json
+          ruby scripts/hrm_kernel.rb host-status --state-dir DIR --input JOB_ID.json
+          ruby scripts/hrm_kernel.rb host-collect --state-dir DIR --input JOB_ID.json
+          ruby scripts/hrm_kernel.rb check --state-dir DIR --input CHECK_ID.json
+          ruby scripts/hrm_kernel.rb submit --state-dir DIR --input JOB_ID.json
+          ruby scripts/hrm_kernel.rb assess --state-dir DIR --input REVIEW_JOB_ID.json
+
+        RC34 uses fresh ap-hrm-interaction/2 ledgers. Earlier ledgers are never upgraded in place.
+        Native checks and Codex task identities are recorded by the local host adapter.
+        Operator input remains a trusted local caller boundary; human acceptance is never inferred.
       HELP
       status
     end
