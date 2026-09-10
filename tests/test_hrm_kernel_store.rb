@@ -58,6 +58,21 @@ class HrmKernelStoreTest < Minitest::Test
     assert_equal lines.first.fetch("event_hash"), lines.last.fetch("previous_hash")
   end
 
+  def test_verified_commands_returns_ordered_detached_ledger_commands
+    create = command("milestone.create", operator, milestone_data, id: "create-history")
+    intent = command("intent.record", operator, intent_data("intent-history"), id: "intent-history")
+    @store.transact(create)
+    @store.transact(intent)
+
+    commands = @store.verified_commands
+
+    assert_equal %w[create-history intent-history], commands.map { |entry| entry.fetch("command_id") }
+    commands.first.fetch("data")["outcome"] = "mutated detached copy"
+    assert_equal create.fetch("data").fetch("outcome"),
+      @store.verified_commands.first.fetch("data").fetch("outcome")
+    assert_equal 2, @store.verify!.fetch("cursor")
+  end
+
   def test_reusing_command_id_with_different_content_fails_without_append
     original = command("milestone.create", operator, milestone_data, id: "same-id")
     @store.transact(original)

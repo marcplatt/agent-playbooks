@@ -1,23 +1,23 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.39 - bounded native scratch links and stopped RC.38 continuation
-version: "0.8.0-rc39"
+title: AP-INTERACT RC.40 - history-aware completed contributions and stopped RC.39 continuation
+version: "0.9.0-rc40"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC39
+experiment_id: AP-INTERACT-RC40
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.39** develops the [RC.38 experiment](../experiments/ap-interact-rc38/README.md).
-It uses software version `0.8.0-rc39` and protocol `ap-hrm-interaction/2`.
-It preserves submitted contributions across a stopped environment transition,
-requires fresh validation in the replacement environment, and removes only bounded
-same-run scratch symlinks before authenticating native receipts. The
-[RC.39 experiment record](../experiments/ap-interact-rc39/README.md) defines the
-transition, incomplete-attempt archive and receipt contracts. Production Canary
-acceptance remains unproved.
+**AP-INTERACT RC.40** develops the [RC.39 experiment](../experiments/ap-interact-rc39/README.md).
+It uses software version `0.9.0-rc40` and protocol `ap-hrm-interaction/2`.
+It preserves authenticated completed-contribution history when an authorized later
+work-order amendment supersedes the completed revision. The current amended revision
+still requires completion and fresh active-environment validation. The
+[RC.40 experiment record](../experiments/ap-interact-rc40/README.md) defines the
+stopped transition and evidence-lineage contract. Production Canary acceptance
+remains unproved.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
 or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
@@ -95,25 +95,26 @@ engineering or host failure, but cannot override review, decision, preflight or
 turn-budget gates. Publication during a synchronized driver step returns an
 explicit retry error; the caller must retry the same input ID.
 
-For the supported RC.38 to RC.39 environment transition, stop the old controller between steps,
+For the supported RC.39 to RC.40 environment transition, stop the old controller between steps,
 allow its native jobs to finish and preserve the original state. Invoke
 `driver-continue --state-dir SOURCE --destination-state-dir DESTINATION --input CONTINUATION.json`
-from a clean committed RC.39 checkout. The source kernel must match its declared
-clean RC.38 pin. Supply an explicit `environment_replacement` with a new
+from a clean committed RC.40 checkout. The source kernel must match its declared
+clean RC.39 pin. Supply an explicit `environment_replacement` with a new
 `environment_id`, exact `read_roots`, `environment_allowlist`, `preflight_checks`,
 and `check_repository`. The repository object names the exact pinned Git executable
 and schema `ap-hrm-isolated-head-candidate/1`. The new environment requires fresh
 successful preflight; neither Astra nor the technical-input journal can grant it.
 
 The continuation keeps the source ledger byte-for-byte, including submitted
-contributions, original claims and evidence, while retaining the consumed turn
-budget and every human gate. Old jobs and check receipts become historical. Active
-job registries and model-resume fields are cleared, so cloning does not resume a
-worker, Astra task or provider effect. A running claim must be released and freshly
-dispatched. A completed contribution remains completed but is listed under
-`technical_validation.pending_work_order_ids` until `revalidate` records successful
-current-environment receipts. Revalidation cannot change its artifacts, paths,
-requirements, ownership, revision, effect class or review state.
+contributions, amendments, original claims and evidence, while retaining the
+consumed turn budget, failed requests, unread technical input and every human gate.
+Old jobs and check receipts become historical. Active job registries and
+model-resume fields are cleared, so cloning does not resume a worker, Astra task or
+provider effect. A still-completed contribution must be revalidated in the active
+environment. If a later amendment superseded it, the old contribution remains
+authenticated historical provenance only; the current revision must be completed
+and freshly validated. Historical evidence never transfers eligibility to the
+amended revision.
 
 Receipt-less RC.38 attempts that failed during post-process scratch cleanup never
 become native evidence. The RC.39 continuation accepts them only when private,
@@ -142,10 +143,10 @@ still names only configuration copied into `{run_root}`.
 The source lock establishes an observed safe boundary; it cannot prove an old
 external controller will never restart. Keep that controller stopped. The earlier
 RC.35 to RC.36 and RC.36 to RC.37 transitions remain available from their frozen
-kernel checkouts. See the RC.39 experiment record for exact JSON contracts and
+kernel checkouts. See the RC.40 experiment record for exact JSON contracts and
 limitations.
 
-The RC.39 replacement retains this exact repository policy beside the replacement
+The RC.40 replacement retains this exact repository policy beside the replacement
 environment ID, roots, allowlist and preflight checks:
 
 ```json
@@ -405,7 +406,7 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [RC.39 dispatcher](../templates/hrm-interaction-agents.md)
+Adoption is explicit. Use the [RC.40 dispatcher](../templates/hrm-interaction-agents.md)
 in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
 Estimating, this is an experimental project-profile recommendation only. Preserve
 the installed global and repository policies unless their own adoption change is
@@ -425,6 +426,14 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.9.0-rc40 — 2026-09-10:** Authenticates preserved completed contributions
+  against their original hash-linked submit or refresh command and derives their
+  current disposition from verified work-order amendment lineage. Adds an explicit
+  stopped RC.39-to-RC.40 continuation that preserves ledger, artifacts, failed
+  requests, technical-input cursor and remaining budget. Superseded evidence stays
+  historical; the current revision requires fresh completion and validation, and
+  no model task or provider effect resumes.
 
 - **0.8.0-rc39 — 2026-09-10:** Accepts bounded owned same-run scratch symlinks only after native process cleanup, removes them without following directory links, and authenticates their descriptors in new receipts. Adds an explicit stopped RC.38-to-RC.39 continuation that preserves ledger, contributions, human gates and remaining budget while archiving receipt-less cleanup failures without claiming a test exit or current evidence. No model task resumes and fresh environment validation remains mandatory.
 

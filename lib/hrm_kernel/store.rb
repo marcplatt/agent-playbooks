@@ -112,6 +112,18 @@ module HrmKernel
       end
     end
 
+    # Trusted kernel components use the verified command sequence to bind
+    # historical evidence that a later work-order amendment removes from the
+    # current projection. This does not expose an alternate mutation path.
+    def verified_commands
+      with_exclusive_lock do
+        replay = replay_ledger
+        replay.fetch(:commands_by_id).values.sort_by { |entry| entry.fetch("cursor") }.map do |entry|
+          deep_copy(entry.fetch("command"))
+        end
+      end
+    end
+
     # Serialize a short trusted driver mutation with operator input. Native checks
     # stay outside this guard. Nested Store instances on this thread reuse the
     # same lock, so Host/Coordinator transactions remain atomic with the check.

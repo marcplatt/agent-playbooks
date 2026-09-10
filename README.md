@@ -61,7 +61,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
-## AP-INTERACT RC.39 — implementation and review runtime candidate
+## AP-INTERACT RC.40 — implementation and review runtime candidate
 
 [Experiment record](experiments/ap-interact-rc33/README.md) preserves PR #10 as an
 archived RC.33 experiment, including its audit findings and historical AE canary
@@ -72,7 +72,7 @@ runtime policy or proof of project adoption.
 `ap-hrm-interaction/2` local service for additive operator intent, bounded host work,
 native check receipts, independent scenario assessment, first-class findings, and
 review/remediation cycles. Run `ruby scripts/hrm_kernel.rb --help` for its interface.
-RC.39 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
+RC.40 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
 profile requests GPT-6 Astra for orchestration and GPT-5.6 Sol for workers and
 independent review; the host receipt records the requested model and available task
 identity evidence without claiming stronger model authentication.
@@ -104,6 +104,14 @@ only owned same-run scratch links after the native process group ends, removes t
 before receipt creation, and authenticates their descriptors. Its stopped RC.38
 continuation preserves work, authority and budget while keeping receipt-less
 cleanup failures explicitly ineligible as evidence.
+
+The [RC.40 history-aware successor](experiments/ap-interact-rc40/README.md)
+authenticates preserved completed contributions against their original hash-linked
+submit or refresh command. A later work-order amendment keeps that contribution as
+historical provenance while the active revision remains unfinished and requires
+fresh native validation. Its stopped RC.39 continuation preserves the ledger,
+artifacts, failed requests, technical-input cursor and remaining turn budget, and
+resumes no model task or provider effect.
 
 The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
 records the actual native worker run, engineering failures, corrections, and

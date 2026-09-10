@@ -812,6 +812,135 @@ class HrmKernelRunContinuationTest < Minitest::Test
     refute File.exist?(@destination)
   end
 
+  def test_rc39_to_rc40_preserves_amended_history_and_derives_lineage_after_later_amendments
+    config_path = File.join(@source, "driver", "config.json")
+    config = read_json(config_path)
+    config["max_turns"] = 40
+    write_json(config_path, config)
+    make_source_kernel_rc36
+    rc37 = File.join(@temporary, "history-source-rc37")
+    continue_run(destination: rc37, new_run_id: "history-source-rc37",
+      environment_replacement: replacement_environment)
+
+    @source = rc37
+    rc38 = File.join(@temporary, "history-source-rc38")
+    @destination = rc38
+    complete_rc37_contribution
+    make_source_kernel_rc37
+    continue_run(destination: rc38, new_run_id: "history-source-rc38",
+      environment_replacement: replacement_environment_rc38)
+
+    @source = rc38
+    rc39 = File.join(@temporary, "history-source-rc39")
+    @destination = rc39
+    make_source_kernel_rc38
+    continue_run(destination: rc39, new_run_id: "history-source-rc39",
+      environment_replacement: replacement_environment_rc39)
+
+    @source = rc39
+    @destination = File.join(@temporary, "history-target-rc40")
+    make_source_kernel_rc39
+    store = HrmKernel::Store.new(@source)
+    store.transact(
+      "command_id" => "amend-submitted-r2", "type" => "work_order.amend",
+      "actor" => { "id" => "astra-orchestrator", "role" => "orchestrator" },
+      "data" => { "work_order_id" => "submitted", "intent_id" => "milestone_initial",
+        "objective" => "Expand the completed contribution contract", "requirement_ids" => ["behavior"],
+        "paths" => ["app.txt", "sibling.txt"], "check_ids" => ["check"], "expected_revision" => 1 }
+    )
+    runtime_path = File.join(@source, "driver", "runtime.json")
+    runtime = read_json(runtime_path)
+    supervisor = HrmKernel::SupervisorInput.new(directory: File.join(@source, "driver"))
+    2.times do |index|
+      supervisor.append({
+        "input_id" => "rc40-observation-#{index + 1}", "kind" => "technical_observation",
+        "source" => { "adapter_id" => "test-adapter", "reference" => "rc40-#{index + 1}" },
+        "summary" => "RC40 technical observation #{index + 1}"
+      }, observed_cursor: index.zero? ? 0 : 1)
+    end
+    runtime.merge!("round" => 22, "observed_technical_input_cursor" => 1,
+      "orchestrator_technical_input_cursor" => nil)
+    write_json(runtime_path, runtime)
+    request_id = "failed-host-dispatch"
+    request_root = File.join(@source, "driver", "requests", request_id)
+    FileUtils.mkdir_p(request_root, mode: 0o700)
+    write_json(File.join(request_root, "request.json"), {
+      "request_id" => request_id, "operation" => "dispatch", "input_json" => "{}"
+    })
+    write_json(File.join(request_root, "receipt.json"), {
+      "request_id" => request_id, "operation" => "dispatch", "ok" => false,
+      "error" => "native host dispatch failed"
+    })
+    source_ledger = File.binread(File.join(@source, HrmKernel::Store::LEDGER_NAME))
+    source_state = store.read.fetch("state")
+    source_journal = File.binread(File.join(@source, "driver", HrmKernel::SupervisorInput::LEDGER_NAME))
+
+    manifest = continue_run(new_run_id: "history-target-rc40",
+      environment_replacement: replacement_environment_rc40)
+
+    assert_equal "ap-hrm-run-continuation/5", manifest.fetch("schema_version")
+    assert_equal "driver/continuation/rc40", manifest.fetch("archive_root")
+    assert_equal source_ledger, File.binread(File.join(@destination, HrmKernel::Store::LEDGER_NAME))
+    assert_equal source_state, HrmKernel::Store.new(@destination).read.fetch("state")
+    assert_equal source_journal,
+      File.binread(File.join(@destination, "driver", HrmKernel::SupervisorInput::LEDGER_NAME))
+    assert File.file?(File.join(@destination, "driver", "requests", request_id, "receipt.json"))
+    target_config = read_json(File.join(@destination, "driver", "config.json"))
+    target_runtime = read_json(File.join(@destination, "driver", "runtime.json"))
+    assert_equal 40, target_config.fetch("max_turns")
+    assert_equal 22, target_runtime.fetch("round")
+    assert_equal 1, target_runtime.fetch("observed_technical_input_cursor")
+    assert_equal 2, manifest.fetch("supervisor_input_cursor")
+    assert_equal 1, manifest.fetch("acknowledged_supervisor_input_cursor")
+    assert_equal [], target_runtime.fetch("jobs")
+    assert_nil target_runtime["resume_job"]
+    contributions = target_config.dig("continuation", "environment_transition", "completed_contributions")
+    assert_equal [1], contributions.map { |entry| entry.fetch("revision") }
+    assert_equal HrmKernel::ContributionHistory::KEYS.sort, contributions.fetch(0).keys.sort
+
+    driver = HrmKernel::Driver.new(state_dir: @destination)
+    transition = driver.send(:environment_transition, target_config, target_runtime)
+    status = transition.fetch("contribution_statuses").fetch(0)
+    assert_equal "superseded_by_work_order_revision", status.fetch("current_disposition")
+    assert_equal 2, status.fetch("current_revision")
+
+    target_store = HrmKernel::Store.new(@destination)
+    target_store.transact(
+      "command_id" => "amend-submitted-r3", "type" => "work_order.amend",
+      "actor" => { "id" => "astra-orchestrator", "role" => "orchestrator" },
+      "data" => { "work_order_id" => "submitted", "intent_id" => "milestone_initial",
+        "objective" => "Revise the active contract again", "requirement_ids" => ["behavior"],
+        "paths" => ["app.txt", "sibling.txt"], "check_ids" => ["check"], "expected_revision" => 2 }
+    )
+    target_store.transact(
+      "command_id" => "claim-submitted-r3", "type" => "work_order.claim",
+      "actor" => { "id" => "worker-new-owner", "role" => "worker" },
+      "data" => { "work_order_id" => "submitted", "revision" => 3, "claim_id" => "claim-submitted-r3" }
+    )
+    later = driver.send(:environment_transition, target_config, target_runtime)
+    later_status = later.fetch("contribution_statuses").fetch(0)
+    assert_equal "superseded_by_work_order_revision", later_status.fetch("current_disposition")
+    assert_equal 3, later_status.fetch("current_revision")
+    assert_equal "running", later_status.fetch("current_status")
+    current = target_store.read.dig("state", "work_orders", "submitted")
+    assert_nil current["evidence_digest"]
+    assert_empty current["artifacts"]
+    assert_equal "worker-new-owner", current["last_owner_id"]
+    assert_equal [1, 2], current.fetch("amendments").map { |entry| entry.fetch("revision") }
+    prompt = driver.send(:environment_transition_prompt, target_config, target_runtime)
+    assert_equal "superseded_by_work_order_revision",
+      prompt.fetch("historical_contribution_statuses").fetch(0).fetch("current_disposition")
+    assert_match(/current amended revision/, prompt.fetch("required_handling"))
+
+    tampered = JSON.parse(JSON.generate(contributions))
+    tampered.fetch(0)["evidence_digest"] = "0" * 64
+    error = assert_raises(HrmKernel::Error) do
+      HrmKernel::ContributionHistory.verify!(tampered,
+        state: target_store.read.fetch("state"), commands: target_store.verified_commands)
+    end
+    assert_match(/absent from the verified ledger/, error.message)
+  end
+
   def test_historical_attempt_order_uses_dispatch_order_not_job_names
     source = {
       "environment_replacement" => { "environment_id" => "new" },
@@ -1047,6 +1176,18 @@ class HrmKernelRunContinuationTest < Minitest::Test
     @source_revision = git(@kernel, "rev-parse", "HEAD").strip
   end
 
+  def make_source_kernel_rc39
+    File.write(File.join(@kernel, "kernel.txt"), "RC39\n")
+    File.write(File.join(@kernel, "playbooks", "hrm-interaction-kernel.md"), <<~MARKDOWN)
+      ---
+      title: AP-INTERACT RC.39 - test source kernel
+      ---
+    MARKDOWN
+    git(@kernel, "add", "kernel.txt", "playbooks/hrm-interaction-kernel.md")
+    git(@kernel, "commit", "--quiet", "-m", "frozen RC39 source kernel")
+    @source_revision = git(@kernel, "rev-parse", "HEAD").strip
+  end
+
   def complete_rc37_contribution(unrelated_candidate: false)
     File.write(File.join(@project, ".gitignore"), "/.codex/hrm-runs/\n")
     File.write(File.join(@project, "check.rb"), 'abort unless File.read("app.txt") == "submitted\\n"')
@@ -1150,6 +1291,13 @@ class HrmKernelRunContinuationTest < Minitest::Test
     replacement = JSON.parse(JSON.generate(replacement_environment_rc38))
     replacement["environment_id"] = "test-rc39"
     replacement.fetch("preflight_checks").each { |check| check["environment_id"] = "test-rc39" }
+    replacement
+  end
+
+  def replacement_environment_rc40
+    replacement = JSON.parse(JSON.generate(replacement_environment_rc39))
+    replacement["environment_id"] = "test-rc40"
+    replacement.fetch("preflight_checks").each { |check| check["environment_id"] = "test-rc40" }
     replacement
   end
 

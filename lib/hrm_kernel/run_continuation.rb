@@ -11,6 +11,7 @@ require "time"
 require "tmpdir"
 
 require_relative "error"
+require_relative "contribution_history"
 require_relative "execution"
 require_relative "host"
 require_relative "store"
@@ -26,12 +27,14 @@ module HrmKernel
     SCHEMA_VERSION = "ap-hrm-run-continuation/2"
     RC38_SCHEMA_VERSION = "ap-hrm-run-continuation/3"
     RC39_SCHEMA_VERSION = "ap-hrm-run-continuation/4"
+    RC40_SCHEMA_VERSION = "ap-hrm-run-continuation/5"
     PROVENANCE_SCHEMA = "ap-hrm-supervisor-continuation/1"
     TRANSITIONS = {
       "AP-INTERACT RC.35" => { "target" => "AP-INTERACT RC.36", "environment_replacement" => false },
       "AP-INTERACT RC.36" => { "target" => "AP-INTERACT RC.37", "environment_replacement" => true },
       "AP-INTERACT RC.37" => { "target" => "AP-INTERACT RC.38", "environment_replacement" => true },
-      "AP-INTERACT RC.38" => { "target" => "AP-INTERACT RC.39", "environment_replacement" => true }
+      "AP-INTERACT RC.38" => { "target" => "AP-INTERACT RC.39", "environment_replacement" => true },
+      "AP-INTERACT RC.39" => { "target" => "AP-INTERACT RC.40", "environment_replacement" => true }
     }.freeze
     ENVIRONMENT_FIELDS = %w[environment_id read_roots environment_allowlist preflight_checks].freeze
     RC38_ENVIRONMENT_FIELDS = (ENVIRONMENT_FIELDS + %w[check_repository]).freeze
@@ -49,6 +52,8 @@ module HrmKernel
     RC38_MANIFEST_PATH = File.join(RC38_CONTINUATION_DIRECTORY, "manifest.json")
     RC39_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc39")
     RC39_MANIFEST_PATH = File.join(RC39_CONTINUATION_DIRECTORY, "manifest.json")
+    RC40_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc40")
+    RC40_MANIFEST_PATH = File.join(RC40_CONTINUATION_DIRECTORY, "manifest.json")
 
     class << self
       def clone(source_state_dir:, destination_state_dir:, new_run_id:, source_kernel_root:,
@@ -195,6 +200,7 @@ module HrmKernel
       store = Store.new(@source)
       store_receipt = store.verify!
       state = store.read.fetch("state")
+      commands = store.verified_commands
       config_bytes = read_private(File.join(@source, "driver", "config.json"))
       runtime_bytes = read_private(File.join(@source, "driver", "runtime.json"))
       preflight_bytes = read_private(File.join(@source, "driver", "preflight.json"))
@@ -219,7 +225,7 @@ module HrmKernel
       end
       verify_preflight_records!(config, preflight)
       verify_driver_requests!
-      verification = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source_version) ? :historical_continuation : :current
+      verification = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39].include?(source_version) ? :historical_continuation : :current
       Evidence.verify_completed_work!(state, state_dir: @source, verification: verification)
 
       supervisor = SupervisorInput.new(directory: File.join(@source, "driver")).snapshot
@@ -239,7 +245,7 @@ module HrmKernel
 
       if environment_replacement
         environment_replacement = validate_environment_replacement!(environment_replacement, config, source_version)
-        reject_old_environment_completion!(state, allow_completed: %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source_version))
+        reject_old_environment_completion!(state, allow_completed: %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39].include?(source_version))
       end
 
       verify_source_unchanged!(tree)
@@ -250,6 +256,7 @@ module HrmKernel
         "preflight_bytes" => preflight_bytes,
         "statuses" => statuses, "tree" => tree,
         "state" => state,
+        "commands" => commands,
         "source_kernel_version" => source_version,
         "source_kernel_revision" => source_revision,
         "target_kernel_version" => target_version,
@@ -287,6 +294,12 @@ module HrmKernel
         manifest = parse_object(read_private(manifest_path), "source RC38 continuation manifest")
         fail!("source continuation target version is not RC38") unless manifest["target_kernel_version"] == source_version
         verify_prior_continuation!(manifest, archive: RC38_CONTINUATION_DIRECTORY, schema: RC38_SCHEMA_VERSION)
+      elsif source_version == "AP-INTERACT RC.39"
+        manifest_path = File.join(@source, RC39_MANIFEST_PATH)
+        fail!("RC39 continuation provenance is missing") unless File.file?(manifest_path)
+        manifest = parse_object(read_private(manifest_path), "source RC39 continuation manifest")
+        fail!("source continuation target version is not RC39") unless manifest["target_kernel_version"] == source_version
+        verify_prior_continuation!(manifest, archive: RC39_CONTINUATION_DIRECTORY, schema: RC39_SCHEMA_VERSION)
       end
       if source_version == "AP-INTERACT RC.36"
         archive = File.join(@source, RC37_CONTINUATION_DIRECTORY)
@@ -299,6 +312,10 @@ module HrmKernel
       if source_version == "AP-INTERACT RC.38"
         archive = File.join(@source, RC39_CONTINUATION_DIRECTORY)
         fail!("RC39 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
+      end
+      if source_version == "AP-INTERACT RC.39"
+        archive = File.join(@source, RC40_CONTINUATION_DIRECTORY)
+        fail!("RC40 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
       end
     end
 
@@ -315,7 +332,7 @@ module HrmKernel
     end
 
     def validate_environment_replacement!(replacement, source_config, source_version)
-      fields = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source_version) ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
+      fields = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39].include?(source_version) ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
       fail!("environment replacement fields are invalid") unless replacement.keys.sort == fields.sort
       fail!("source environment configuration is incomplete") unless ENVIRONMENT_FIELDS.all? { |field| source_config.key?(field) }
       fail!("source environment_id is invalid") unless source_config["environment_id"].is_a?(String) &&
@@ -496,7 +513,9 @@ module HrmKernel
     def request_record(source)
       environment = environment_transition_record(source)
       body = {
-        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.38"
+        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.39"
+                              RC40_SCHEMA_VERSION
+                            elsif source.fetch("source_kernel_version") == "AP-INTERACT RC.38"
                               RC39_SCHEMA_VERSION
                             elsif source.fetch("source_kernel_version") == "AP-INTERACT RC.37"
                               RC38_SCHEMA_VERSION
@@ -555,7 +574,11 @@ module HrmKernel
         "fresh_preflight_required" => true,
         "source_preflight_attribution" => "historical_only"
       }
-      if %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source["source_kernel_version"])
+      if source["source_kernel_version"] == "AP-INTERACT RC.39"
+        previous = source.dig("config", "continuation", "environment_transition", "completed_contributions")
+        record["completed_contributions"] = ContributionHistory.build(
+          previous: previous, state: source.fetch("state"), commands: source.fetch("commands"))
+      elsif %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source["source_kernel_version"])
         record["completed_contributions"] = completed_contributions(source["state"])
       end
       record
@@ -622,7 +645,7 @@ module HrmKernel
       end
 
       runtime = JSON.parse(source.fetch("runtime_bytes"))
-      fresh_context = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION].include?(request["schema_version"])
+      fresh_context = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION, RC40_SCHEMA_VERSION].include?(request["schema_version"])
       resume_job = fresh_context ? nil : safe_astra_resume_job(source.fetch("statuses"), runtime)
       runtime.delete("pending_dispatch")
       runtime.delete("pending_job_registration")
@@ -653,12 +676,14 @@ module HrmKernel
     end
 
     def continuation_archive(request)
+      return RC40_CONTINUATION_DIRECTORY if request["schema_version"] == RC40_SCHEMA_VERSION
       return RC39_CONTINUATION_DIRECTORY if request["schema_version"] == RC39_SCHEMA_VERSION
       return RC38_CONTINUATION_DIRECTORY if request["schema_version"] == RC38_SCHEMA_VERSION
       request["schema_version"] == SCHEMA_VERSION ? RC37_CONTINUATION_DIRECTORY : CONTINUATION_DIRECTORY
     end
 
     def manifest_path(request)
+      return RC40_MANIFEST_PATH if request["schema_version"] == RC40_SCHEMA_VERSION
       return RC39_MANIFEST_PATH if request["schema_version"] == RC39_SCHEMA_VERSION
       return RC38_MANIFEST_PATH if request["schema_version"] == RC38_SCHEMA_VERSION
       request["schema_version"] == SCHEMA_VERSION ? RC37_MANIFEST_PATH : MANIFEST_PATH
@@ -761,7 +786,7 @@ module HrmKernel
     end
 
     def finalize_destination!(root, source, request)
-      resume_job = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION].include?(request["schema_version"]) ? nil :
+      resume_job = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION, RC40_SCHEMA_VERSION].include?(request["schema_version"]) ? nil :
         safe_astra_resume_job(source.fetch("statuses"), source.fetch("runtime"))
       fresh = request["schema_version"] != LEGACY_SCHEMA_VERSION
       archive = continuation_archive(request)

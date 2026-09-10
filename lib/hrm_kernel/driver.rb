@@ -2,6 +2,7 @@
 
 require_relative "host"
 require_relative "coordinator"
+require_relative "contribution_history"
 require_relative "execution"
 require_relative "continuation"
 require_relative "supervisor_input"
@@ -578,9 +579,11 @@ module HrmKernel
       end
       if configured.key?("completed_contributions")
         fail!("completed contribution attribution changed") unless configured["completed_contributions"] == historical["completed_contributions"]
-        validate_completed_contributions!(configured.fetch("completed_contributions"))
+        contribution_statuses = validate_completed_contributions!(configured.fetch("completed_contributions"))
       end
-      { "configured" => configured, "historical" => historical }
+      result = { "configured" => configured, "historical" => historical }
+      result["contribution_statuses"] = contribution_statuses if contribution_statuses
+      result
     rescue JSON::GeneratorError
       fail!("historical environment registry is not JSON")
     end
@@ -588,34 +591,20 @@ module HrmKernel
     def environment_transition_prompt(config, runtime)
       transition = environment_transition(config, runtime)
       return nil unless transition
-      transition.fetch("historical").merge(
+      prompt = transition.fetch("historical").merge(
         "authority" => "This is trusted-adapter technical provenance for an environment replacement, not operator intent, approval, changed business requirements, or effect authority.",
         "pending_environment_validation" => Evidence.validation_projection(@store.read.fetch("state"), state_dir: @store.directory),
         "required_handling" => transition.dig("configured", "completed_contributions") ?
-          "Old jobs and checks are historical diagnostics only. Preserve completed submissions and use revalidate for their fresh active-environment checks. Release running claims before fresh dispatch. Do not resume any historical model task. Human gates and ledger authority remain unchanged." :
+          "Old jobs and checks are historical diagnostics only. Preserve completed submissions and use revalidate for a still-completed current revision. A superseded contribution remains historical only; complete and freshly validate the current amended revision. Release running claims before fresh dispatch. Do not resume any historical model task. Human gates and ledger authority remain unchanged." :
           "Old jobs, check plans, receipts, submissions and assessments are historical diagnostics only. Commission fresh attempts and fresh checks in the active environment. Use historical_resume_job_id only for the same live work-order revision and claim; otherwise release that claim and dispatch a fresh worker. Human gates and the existing ledger authority remain unchanged."
       )
+      prompt["historical_contribution_statuses"] = transition["contribution_statuses"] if transition["contribution_statuses"]
+      prompt
     end
 
     def validate_completed_contributions!(contributions)
-      keys = %w[artifacts_sha256 check_ids claim_id evidence_digest last_owner_id required_action revision work_order_id]
-      fail!("completed contribution registry is malformed") unless contributions.is_a?(Array) && contributions.length <= 256
-      state = @store.read.fetch("state")
-      contributions.each do |entry|
-        fail!("completed contribution registry is malformed") unless entry.is_a?(Hash) && entry.keys.sort == keys.sort &&
-          Host::IDENTIFIER.match?(entry["work_order_id"].to_s) && Host::IDENTIFIER.match?(entry["claim_id"].to_s) &&
-          Host::IDENTIFIER.match?(entry["last_owner_id"].to_s) && entry["revision"].is_a?(Integer) && entry["revision"].positive? &&
-          Host.strings?(entry["check_ids"]) && entry["required_action"] == "fresh_native_revalidation_under_active_environment"
-        order = state.fetch("work_orders")[entry["work_order_id"]]
-        fail!("completed contribution no longer matches its work order") unless order && order["status"] == "completed" &&
-          order["revision"] == entry["revision"] && Array(order["claim_history"]).include?(entry["claim_id"]) &&
-          order["last_owner_id"] == entry["last_owner_id"] && order["check_ids"] == entry["check_ids"]
-        versions = [{ "evidence_digest" => order["evidence_digest"], "artifacts" => order["artifacts"] }] + Array(order["evidence_history"])
-        bound = versions.any? do |version|
-          version["evidence_digest"] == entry["evidence_digest"] && Host.digest(version.fetch("artifacts")) == entry["artifacts_sha256"]
-        end
-        fail!("completed contribution evidence history changed") unless bound
-      end
+      ContributionHistory.verify!(contributions,
+        state: @store.read.fetch("state"), commands: @store.verified_commands)
     end
 
     def execution_for(config)
