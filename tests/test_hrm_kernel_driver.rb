@@ -95,6 +95,21 @@ class HrmKernelDriverTest < Minitest::Test
           else
             abort "launch-retry technical evidence was delivered more than once" unless observations.empty?
           end
+        elsif control["task"] == "environment-transition-test"
+          case round
+          when 1
+            requests << apply.call("create-order", "work_order.create", {"work_order_id" => "implement", "intent_id" => "milestone_initial", "objective" => "Implement behavior", "requirement_ids" => ["behavior"], "paths" => ["app.txt"], "check_ids" => ["behavior-check"], "effect_class" => "local_repository"})
+            requests << dispatch.call("partial-worker", "worker")
+          when 2
+            transition = control.fetch("environment_transition")
+            abort "transition authority was mislabeled" unless transition.fetch("authority").include?("not operator intent")
+            abort "old checks were not historical" unless transition.fetch("required_handling").include?("historical diagnostics only")
+            request = dispatch.call("replacement-worker", "worker")
+            input = JSON.parse(request.fetch("input_json"))
+            input["historical_resume_job_id"] = "partial-worker"
+            request["input_json"] = JSON.generate(input)
+            requests << request
+          end
         elsif control["task"] == "conflict-test"
           requests << apply.call("same-id", "work_order.create", {"work_order_id" => "implement", "intent_id" => "milestone_initial", "objective" => "objective #{round}", "requirement_ids" => ["behavior"], "paths" => ["app.txt"], "check_ids" => ["behavior-check"], "effect_class" => "local_repository"}) if round <= 2
         else
@@ -454,6 +469,47 @@ class HrmKernelDriverTest < Minitest::Test
     assert_equal "completed", @store.read.dig("state", "work_orders", "implement", "status")
   end
 
+  def test_environment_transition_resumes_same_claim_with_fresh_job_and_blocks_old_evidence
+    @driver.start(configuration.merge("prompt" => "environment-transition-test"))
+    @driver.step
+    wait_for_job("test-astra-1")
+    @driver.step
+    old_status = wait_for_job("partial-worker")
+    assert_equal "blocked", old_status["result_status"]
+    install_environment_transition(old_status)
+
+    @driver = HrmKernel::Driver.new(state_dir: @state_dir, codex_path: @fake)
+    @driver.step
+    wait_for_job("test-astra-2")
+    result = @driver.step
+    dispatch_receipt = JSON.parse(File.read(File.join(@state_dir, "driver", "requests", "dispatch-replacement-worker", "receipt.json")))
+    assert dispatch_receipt["ok"], dispatch_receipt.inspect
+    assert_includes result["jobs"], "replacement-worker", result.inspect
+    replacement = JSON.parse(File.read(File.join(@state_dir, "host-jobs", "replacement-worker", "job.json")))
+    assert_equal "31234567-89ab-cdef-0123-456789abcdef", replacement["resume_thread_id"]
+    assert_equal "replacement-native-test", replacement.dig("check_plan", "environment_id")
+    assert_equal [], JSON.parse(File.read(File.join(@state_dir, "driver", "runtime.json"))).fetch("jobs") & ["partial-worker"]
+
+    coordinator = HrmKernel::Coordinator.new(state_dir: @state_dir, host: @driver.instance_variable_get(:@host))
+    errors = [
+      assert_raises(HrmKernel::Error) { coordinator.check("job_id" => "partial-worker", "check_id" => "behavior-check") },
+      assert_raises(HrmKernel::Error) { coordinator.submit("job_id" => "partial-worker") },
+      assert_raises(HrmKernel::Error) { coordinator.assess("job_id" => "partial-worker") }
+    ]
+    errors.each { |error| assert_match(/historical diagnostic evidence only/, error.message) }
+  end
+
+  def test_environment_transition_metadata_fails_closed
+    @driver.start(configuration)
+    config = JSON.parse(File.read(File.join(@state_dir, "driver", "config.json")))
+    runtime = JSON.parse(File.read(File.join(@state_dir, "driver", "runtime.json")))
+    config["continuation"] = {"environment_transition" => {"active_environment_id" => config["environment_id"]}}
+    HrmKernel::Host.atomic_json(File.join(@state_dir, "driver", "config.json"), config)
+    HrmKernel::Host.atomic_json(File.join(@state_dir, "driver", "runtime.json"), runtime)
+    error = assert_raises(HrmKernel::Error) { @driver.step }
+    assert_match(/metadata is incomplete/, error.message)
+  end
+
   private
 
   def configuration
@@ -492,6 +548,64 @@ class HrmKernelDriverTest < Minitest::Test
       raise "driver timeout: #{result.inspect}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
       sleep 0.01
     end
+  end
+
+  def wait_for_job(id)
+    host = @driver.instance_variable_get(:@host)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+    loop do
+      status = host.poll(job_id: id)
+      return status if %w[succeeded failed].include?(status["status"])
+      raise "job timeout: #{id}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.01
+    end
+  end
+
+  def install_environment_transition(old_status)
+    config_path = File.join(@state_dir, "driver", "config.json")
+    runtime_path = File.join(@state_dir, "driver", "runtime.json")
+    preflight_path = File.join(@state_dir, "driver", "preflight.json")
+    config = JSON.parse(File.read(config_path))
+    runtime = JSON.parse(File.read(runtime_path))
+    order = @store.read.dig("state", "work_orders", "implement")
+    source_id = config.fetch("environment_id")
+    active_id = "replacement-native-test"
+    config["environment_id"] = active_id
+    config["preflight_checks"].each { |check| check["environment_id"] = active_id }
+    configured = {
+      "source_environment_id" => source_id, "active_environment_id" => active_id,
+      "source_environment_sha256" => "1" * 64,
+      "active_environment_sha256" => HrmKernel::Host.digest(config.slice("environment_id", "read_roots", "environment_allowlist", "preflight_checks")),
+      "historical_job_ids" => ["partial-worker"], "old_checks_eligible_for_new_claims" => false,
+      "fresh_preflight_required" => true
+    }
+    config["continuation"] = {"environment_transition" => configured}
+    historical_job = old_status.slice("job_id", "role", "work_order_id", "revision", "claim_id", "status", "result_status", "thread_id")
+    runtime["historical_environment"] = configured.slice(
+      "source_environment_id", "active_environment_id", "source_environment_sha256", "active_environment_sha256",
+      "old_checks_eligible_for_new_claims"
+    ).merge(
+      "jobs" => [historical_job],
+      "work_orders" => [{"work_order_id" => "implement", "status" => order["status"], "revision" => order["revision"],
+        "claim_id" => order["claim_id"], "last_owner_id" => order["last_owner_id"], "required_action" => "resume_or_release",
+        "historical_resume_job_ids" => ["partial-worker"]}]
+    )
+    runtime["jobs"] = []
+    runtime["seen_jobs"] = []
+    runtime["history"] = []
+    runtime["orchestrator_job"] = nil
+    runtime["resume_job"] = "test-astra-1"
+    runtime["feedback"] = [{"kind" => "versioned_environment_transition"}]
+    execution = HrmKernel::Execution.new(project_root: @project, state_dir: @state_dir,
+      read_roots: config.fetch("read_roots"), environment_allowlist: config.fetch("environment_allowlist"),
+      forbidden_read_path: File.join(@state_dir, "driver", "isolation-sentinel.txt"),
+      forbidden_write_path: File.join(@state_dir, "driver", "isolation-sentinel.txt"))
+    receipts = config.fetch("preflight_checks").map do |spec|
+      {"id" => spec.fetch("id"), "execution" => execution.preflight(spec: spec)}
+    end
+    HrmKernel::Host.atomic_json(config_path, config)
+    HrmKernel::Host.atomic_json(runtime_path, runtime)
+    HrmKernel::Host.atomic_json(preflight_path, receipts)
   end
 
   def git(*argv)

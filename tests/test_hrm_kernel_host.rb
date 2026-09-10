@@ -340,6 +340,20 @@ class HrmKernelHostTest < Minitest::Test
     assert_raises(HrmKernel::Error) { @host.dispatch(specification("link", context_paths: ["secret-link"], forbidden_roots: [forbidden])) }
   end
 
+  def test_forbidden_executor_dependency_is_retained_for_checks_but_not_granted_to_model
+    forbidden = File.join(@temporary, "private-executor-environment")
+    FileUtils.mkdir_p(forbidden)
+    marker = File.join(forbidden, "runtime.txt")
+    File.write(marker, "trusted runner dependency")
+    dispatch("executor-only", prompt: "read-forbidden:#{marker}", forbidden_roots: [forbidden],
+      execution_read_roots: [forbidden])
+    await_job("executor-only")
+    assert_equal "forbidden read denied", @host.collect(job_id: "executor-only").dig("result", "summary")
+    job = @host.job_record(job_id: "executor-only")
+    assert_equal [forbidden], job["execution_read_roots"]
+    assert_equal "deny", job.dig("permission_profile", "filesystem", forbidden)
+  end
+
   def test_execution_uses_only_frozen_check_plan
     dispatch("checks")
     context = @host.check_context(job_id: "checks", check_id: "unit")

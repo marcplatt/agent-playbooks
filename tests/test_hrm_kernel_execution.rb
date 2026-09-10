@@ -320,6 +320,25 @@ class HrmKernelExecutionTest < Minitest::Test
     end
   end
 
+  def test_explicit_disposable_home_supports_python_without_operator_home_access
+    execution = runner(environment_allowlist: %w[HOME], read_roots: ["/Library/Developer/CommandLineTools"])
+    smoke = spec.merge(
+      "environment_id" => "python-disposable-home-v2",
+      "argv" => [File.realpath("/usr/bin/python3"), "-S", "-c",
+                 "from pathlib import Path; import os; p = Path.home(); assert str(p) == os.environ['HOME']; (p / 'scratch.txt').write_text('ok'); print('home-ready')"],
+      "env" => { "HOME" => "{run_root}" },
+      "configuration_paths" => [],
+      "startup_success_marker" => "home-ready"
+    )
+    result = execution.preflight(spec: smoke)
+    assert_equal "passed", result["conclusion"]
+    refute result["reused"]
+    receipt = execution.verify_preflight!(result.slice("receipt_path", "receipt_sha256"), spec: smoke)
+    assert_equal true, receipt["startup_completed"]
+    assert_equal "blocked", receipt.dig("isolation", "forbidden_read")
+    assert_equal "blocked", receipt.dig("isolation", "forbidden_write")
+  end
+
   private
 
   def runner(environment_allowlist: %w[RUN_ROOT], read_roots: [])

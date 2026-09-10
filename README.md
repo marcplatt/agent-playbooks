@@ -87,6 +87,12 @@ supervisor evidence and explicit continuation of a stopped RC.35 run into a new
 state directory. It preserves operator decisions and historical evidence. The AE
 trial is paused with real production acceptance still pending.
 
+The [RC.37 environment transition](experiments/ap-interact-rc37/README.md) addresses
+the next observed trial failure: a frozen environment that cannot run required
+repository checks. Explicit replacement requires fresh preflight and preserves
+the original run and human authority. It does not repair production code by
+working around the test harness.
+
 The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
 records the actual native worker run, engineering failures, corrections, and
 remaining review boundaries. The operator clarified that this was a simulation,

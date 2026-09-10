@@ -1,21 +1,22 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.36 - supervisor evidence and versioned continuation
-version: "0.5.0-rc36"
+title: AP-INTERACT RC.37 - explicit execution environment transition
+version: "0.6.1-rc37"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC36
+experiment_id: AP-INTERACT-RC37
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.36** develops the [RC.35 experiment](../experiments/ap-interact-rc35/README.md).
-It uses software version `0.5.0-rc36` and protocol `ap-hrm-interaction/2`. It adds
-trusted technical supervisor observations and an explicit continuation into a new
-private state root. The [RC.36 experiment record](../experiments/ap-interact-rc36/README.md)
-describes the paused AE trial that motivated these repairs. Production Canary
-acceptance remains unproved.
+**AP-INTERACT RC.37** develops the [RC.36 experiment](../experiments/ap-interact-rc36/README.md).
+It uses software version `0.6.1-rc37` and protocol `ap-hrm-interaction/2`.
+It adds an explicit, supervised execution-environment transition for a stopped
+run, with fresh preflight and preserved historical evidence. The
+[RC.37 experiment record](../experiments/ap-interact-rc37/README.md) describes the
+actual environment limitation found by AE. Production Canary acceptance remains
+unproved.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
 or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
@@ -93,16 +94,23 @@ engineering or host failure, but cannot override review, decision, preflight or
 turn-budget gates. Publication during a synchronized driver step returns an
 explicit retry error; the caller must retry the same input ID.
 
-For the supported RC.35 to RC.36 transition, stop the old controller between steps,
+For the supported RC.36 to RC.37 environment transition, stop the old controller between steps,
 allow its native jobs to finish and preserve the original state. Invoke
 `driver-continue --state-dir SOURCE --destination-state-dir DESTINATION --input CONTINUATION.json`
-from a clean committed RC.36 checkout. The source kernel must match its declared
-clean RC.35 pin. The continuation preserves historical ledger and receipts, records
+from a clean committed RC.37 checkout. The source kernel must match its declared
+clean RC.36 pin. Supply an explicit `environment_replacement` with a new
+`environment_id`, exact `read_roots`, `environment_allowlist` and
+`preflight_checks`. The new environment requires fresh successful preflight;
+the technical-input journal itself cannot grant this replacement. The continuation preserves historical ledger and receipts, records
 both kernel identities and the supervisor's stop assertion, and retains consumed
 turns and human gates. It requires a fresh Astra projection rather than replaying
 copied requests. The source lock establishes an observed safe boundary; it cannot
 prove an old external controller will never restart. Keep that controller stopped.
 See the experiment record for input examples and limitations.
+The earlier RC.35 to RC.36 transition remains available from its frozen RC.36
+checkout. Old-environment jobs in an RC.37 continuation are historical, not current
+check or submission evidence. Keep any unresolved obligations visible until
+fresh attempts and validation satisfy them.
 
 ### Automatic driver
 
@@ -112,6 +120,11 @@ poll `driver-step`). The configuration freezes environment ID, dependency reads,
 environment variable names, startup checks, model reasoning settings, parallelism
 and a maximum turn count. Preflight must pass before any claim or model launch;
 restart re-verifies its signed receipts, executable and policy bindings.
+Choose preflights that exercise representative project imports and check tools.
+A version print alone does not establish that the required project checks can run.
+If a runtime needs a home directory, declare `HOME` explicitly and use
+`HOME: "{run_root}"` for disposable check storage; never substitute the operator's
+real home or grant unrelated private directories.
 
 The driver resumes the exact Astra task UUID and transports its structured
 requests. It does not plan work or supply a known implementation. It records request
@@ -327,7 +340,7 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [RC.36 dispatcher](../templates/hrm-interaction-agents.md)
+Adoption is explicit. Use the [RC.37 dispatcher](../templates/hrm-interaction-agents.md)
 in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
 Estimating, this is an experimental project-profile recommendation only. Preserve
 the installed global and repository policies unless their own adoption change is
@@ -347,6 +360,15 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.6.1-rc37 — 2026-09-09:** Corrects stopped-run copying of ordinary test
+  scratch inside private execution directories, preserving original permissions
+  and bytes while keeping control records strictly private.
+
+- **0.6.0-rc37 — 2026-09-09:** Supports an explicit execution-environment
+  transition with a new environment identity, fresh preflight and retained
+  evidence. Historical checks do not become new-environment evidence. Preserves
+  the original run, operator authority and consumed turn budget.
 
 - **0.5.0-rc36 — 2026-09-09:** Adds separate technical supervisor input,
   stale-response rejection on technical changes, explicit stopped-run continuation,

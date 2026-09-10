@@ -652,7 +652,8 @@ module HrmKernel
     end
 
     def permission_profile(spec, root, order, tool_tmp)
-      denied = [@state_dir, *spec.fetch("forbidden_roots")].uniq
+      explicitly_denied = spec.fetch("forbidden_roots")
+      denied = [@state_dir, *explicitly_denied].uniq
       Find.find(root) do |path|
         if File.symlink?(path)
           denied << path if SENSITIVE_SOURCE.match?(File.basename(path)) || (File.exist?(path) && SENSITIVE_SOURCE.match?(File.basename(File.realpath(path))))
@@ -663,7 +664,13 @@ module HrmKernel
       filesystem = { ":root" => "deny", ":minimal" => "read", root => "read" }
       spec.fetch("execution_read_roots").each do |path|
         resolved = File.exist?(path) ? File.realpath(path) : File.expand_path(path)
-        fail!("dependency read root would reopen protected state") if resolved == "/" || denied.any? { |item| beneath?(resolved, item) }
+        state_overlap = beneath?(resolved, @state_dir) || beneath?(@state_dir, resolved)
+        fail!("dependency read root would reopen protected state") if resolved == "/" || state_overlap
+        # A frozen check executable may live beneath a broadly denied private
+        # parent. Keep that root on the signed job for trusted Execution, while
+        # omitting it from the native model's filesystem grants. The explicit
+        # deny below remains authoritative for model commands.
+        next if explicitly_denied.any? { |item| beneath?(resolved, item) || beneath?(item, resolved) }
         filesystem[resolved] = "read"
       end
       Array(order && order["paths"]).each do |relative|

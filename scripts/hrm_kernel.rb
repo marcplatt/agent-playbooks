@@ -109,7 +109,7 @@ module HrmKernel
       require_relative "../lib/hrm_kernel/run_continuation"
       options = parse_continuation_options(argv)
       input = input_object(options, stdin)
-      allowed = %w[new_run_id source_kernel_root source_kernel_revision controller_stopped supervisor_provenance production]
+      allowed = %w[new_run_id source_kernel_root source_kernel_revision controller_stopped supervisor_provenance environment_replacement production]
       raise HrmKernel::Error, "unknown driver continuation fields" unless (input.keys - allowed).empty?
       HrmKernel::RunContinuation.clone(
         source_state_dir: options.fetch(:state_dir),
@@ -119,6 +119,7 @@ module HrmKernel
         source_kernel_revision: input.fetch("source_kernel_revision"),
         controller_stopped: input.fetch("controller_stopped"),
         supervisor_provenance: input.fetch("supervisor_provenance"),
+        environment_replacement: input["environment_replacement"],
         production: input.fetch("production", true)
       )
     end
@@ -206,7 +207,8 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb driver-status --state-dir DIR
           ruby scripts/hrm_kernel.rb driver-run --state-dir DIR
 
-        RC36 adopts technical supervisor input explicitly through driver-input; existing RC35 state is not rewritten by inspection.
+        RC37 supports explicit stopped RC36 environment replacement through driver-continue, with fresh preflight.
+        Technical supervisor evidence uses driver-input and grants no execution or operator authority.
         Protocol ap-hrm-interaction/2 operator ledgers remain separate and are never upgraded in place.
         Native checks and Codex task identities are recorded by the local host adapter.
         Operator input remains a trusted local caller boundary; human acceptance is never inferred.
