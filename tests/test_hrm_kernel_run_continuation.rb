@@ -38,6 +38,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
   end
 
   def teardown
+    FileUtils.chmod_R(0o700, @temporary) if File.exist?(@temporary)
     FileUtils.remove_entry(@temporary)
   end
 
@@ -500,6 +501,81 @@ class HrmKernelRunContinuationTest < Minitest::Test
     refute File.exist?(@destination)
   end
 
+  def test_rc37_to_rc38_preserves_completed_submission_and_budget_but_requires_fresh_validation
+    make_source_kernel_rc36
+    rc37 = File.join(@temporary, "rc37-state")
+    continue_run(destination: rc37, new_run_id: "rc37-run", environment_replacement: replacement_environment)
+    @source = rc37
+    @destination = File.join(@temporary, "rc38-state")
+    complete_rc37_contribution
+    runtime_path = File.join(@source, "driver", "runtime.json")
+    runtime = read_json(runtime_path)
+    runtime.merge!("round" => 2, "outcome" => "active", "resume_job" => nil,
+      "orchestrator_job" => nil, "last_orchestrator_job" => nil)
+    write_json(runtime_path, runtime)
+    make_source_kernel_rc37
+    before_ledger = File.binread(File.join(@source, "events.jsonl"))
+
+    manifest = continue_run(new_run_id: "rc38-run", environment_replacement: replacement_environment_rc38)
+
+    assert_equal "ap-hrm-run-continuation/3", manifest["schema_version"]
+    assert_equal before_ledger, File.binread(File.join(@destination, "events.jsonl"))
+    assert_equal "driver/continuation/rc38", manifest["archive_root"]
+    assert_nil manifest["resumed_astra_job_id"]
+    config = read_json(File.join(@destination, "driver", "config.json"))
+    continued = read_json(File.join(@destination, "driver", "runtime.json"))
+    assert_equal "test-rc38", config["environment_id"]
+    assert_equal HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA, config.dig("check_repository", "schema_version")
+    assert_equal 2, continued["round"]
+    assert_equal 3, config["max_turns"]
+    assert_nil continued["resume_job"]
+    assert_nil continued["last_orchestrator_job"]
+    assert_equal [], continued["jobs"]
+    order = HrmKernel::Store.new(@destination).read.dig("state", "work_orders", "submitted")
+    assert_equal "completed", order["status"]
+    assert_equal 1, order["revision"]
+    assert_empty order["evidence_history"]
+    transition = config.dig("continuation", "environment_transition")
+    assert_equal ["submitted"], transition.fetch("completed_contributions").map { |item| item["work_order_id"] }
+    projection = HrmKernel::Store.new(@destination).project(role: "orchestrator").fetch("projection")
+    assert_equal ["submitted"], projection.dig("technical_validation", "pending_work_order_ids")
+    assert_includes projection.dig("milestone", "readiness_blockers").map { |item| item["kind"] }, "fresh_environment_validation"
+    assert_equal [], continued.dig("historical_environment", "work_orders", 0, "historical_resume_job_ids")
+    assert_equal "fresh_native_revalidation_under_active_environment",
+      continued.dig("historical_environment", "work_orders", 0, "required_action")
+    assert_equal manifest, continue_run(new_run_id: "rc38-run", environment_replacement: replacement_environment_rc38)
+  end
+
+  def test_cli_accepts_rc38_isolated_repository_environment
+    make_source_kernel_rc36
+    rc37 = File.join(@temporary, "cli-source-rc37")
+    continue_run(destination: rc37, new_run_id: "cli-source-rc37", environment_replacement: replacement_environment)
+    @source = rc37
+    @destination = File.join(@temporary, "cli-target-rc38")
+    make_source_kernel_rc37
+    input = File.join(@temporary, "rc38-continuation-input.json")
+    write_json(input, {
+      "new_run_id" => "cli-target-rc38", "source_kernel_root" => @kernel,
+      "source_kernel_revision" => @source_revision, "controller_stopped" => true,
+      "supervisor_provenance" => {
+        "schema_version" => "ap-hrm-supervisor-continuation/1", "supervisor_id" => "rc38-supervisor",
+        "commission_id" => "cli-rc38-commission", "asserted_at" => "2026-09-10T12:00:00Z",
+        "source" => "CLI RC38 acceptance"
+      },
+      "environment_replacement" => replacement_environment_rc38, "production" => false
+    })
+    script = File.realpath(File.join(__dir__, "..", "scripts", "hrm_kernel.rb"))
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby, script, "driver-continue", "--state-dir", @source,
+      "--destination-state-dir", @destination, "--input", input
+    )
+    assert status.success?, stderr
+    result = JSON.parse(stdout)
+    assert_equal "ap-hrm-run-continuation/3", result["schema_version"]
+    assert_equal "test-rc38", read_json(File.join(@destination, "driver", "config.json"))["environment_id"]
+    assert File.file?(File.join(@destination, "driver", "continuation", "rc38", "manifest.json"))
+  end
+
   def test_historical_attempt_order_uses_dispatch_order_not_job_names
     source = {
       "environment_replacement" => { "environment_id" => "new" },
@@ -711,6 +787,68 @@ class HrmKernelRunContinuationTest < Minitest::Test
     @source_revision = git(@kernel, "rev-parse", "HEAD").strip
   end
 
+  def make_source_kernel_rc37
+    File.write(File.join(@kernel, "kernel.txt"), "RC37\n")
+    File.write(File.join(@kernel, "playbooks", "hrm-interaction-kernel.md"), <<~MARKDOWN)
+      ---
+      title: AP-INTERACT RC.37 - test source kernel
+      ---
+    MARKDOWN
+    git(@kernel, "add", "kernel.txt", "playbooks/hrm-interaction-kernel.md")
+    git(@kernel, "commit", "--quiet", "-m", "frozen RC37 source kernel")
+    @source_revision = git(@kernel, "rev-parse", "HEAD").strip
+  end
+
+  def complete_rc37_contribution
+    File.write(File.join(@project, ".gitignore"), "/.codex/hrm-runs/\n")
+    File.write(File.join(@project, "check.rb"), 'abort unless File.read("app.txt") == "submitted\\n"')
+    git(@project, "init", "--quiet")
+    git(@project, "config", "user.email", "continuation-test@example.invalid")
+    git(@project, "config", "user.name", "Continuation Test")
+    git(@project, "add", ".")
+    git(@project, "commit", "--quiet", "-m", "candidate baseline")
+    store = HrmKernel::Store.new(@source)
+    store.transact(
+      "command_id" => "create-submitted", "type" => "work_order.create",
+      "actor" => { "id" => "astra-orchestrator", "role" => "orchestrator" },
+      "data" => { "work_order_id" => "submitted", "intent_id" => "milestone_initial",
+        "objective" => "Submit preserved contribution", "requirement_ids" => ["behavior"],
+        "paths" => ["app.txt"], "check_ids" => ["check"], "effect_class" => "local_repository" }
+    )
+    store.transact(
+      "command_id" => "claim-submitted", "type" => "work_order.claim",
+      "actor" => { "id" => "worker-submitted", "role" => "worker" },
+      "data" => { "work_order_id" => "submitted", "revision" => 1, "claim_id" => "claim-submitted" }
+    )
+    File.write(File.join(@project, "app.txt"), "submitted\n")
+    state = store.read.fetch("state")
+    order = state.fetch("work_orders").fetch("submitted")
+    spec = { "id" => "check", "environment_id" => "test-rc37",
+      "argv" => [File.realpath(RbConfig.ruby), "check.rb"], "env" => {}, "cwd" => @project,
+      "timeout_seconds" => 10, "max_output_bytes" => 16_384, "configuration_paths" => [] }
+    runner = HrmKernel::Execution.new(project_root: @project, state_dir: @source,
+      forbidden_read_path: File.join(@source, "driver", "isolation-sentinel.txt"),
+      forbidden_write_path: File.join(@source, "driver", "isolation-sentinel.txt"))
+    candidate = runner.capture_candidate(work_order: order, milestone: state.fetch("milestone"),
+      claim_id: "claim-submitted", revision: 1, requirement_revisions: order.fetch("requirement_revisions"),
+      check_plan: { "environment_id" => "test-rc37", "checks" => [spec] }, authorized_paths: ["app.txt"])
+    outcome = runner.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+    artifacts = [{ "path" => "app.txt", "sha256" => Digest::SHA256.file(File.join(@project, "app.txt")).hexdigest }]
+    relative = ".codex/hrm-runs/native-checks/submitted.json"
+    report_path = File.join(@project, relative)
+    FileUtils.mkdir_p(File.dirname(report_path))
+    write_json(report_path, { "check_id" => "check", "conclusion" => "passed",
+      "work_order_id" => "submitted", "revision" => 1, "artifacts" => artifacts,
+      "execution" => outcome.slice("receipt_path", "receipt_sha256") })
+    store.transact(
+      "command_id" => "submit-preserved", "type" => "work_order.submit",
+      "actor" => { "id" => "worker-submitted", "role" => "worker" },
+      "data" => { "work_order_id" => "submitted", "revision" => 1, "claim_id" => "claim-submitted",
+        "artifacts" => artifacts, "checks" => [{ "id" => "check", "conclusion" => "passed",
+          "artifact_path" => relative, "sha256" => Digest::SHA256.file(report_path).hexdigest }] }
+    )
+  end
+
   def replacement_environment
     {
       "environment_id" => "test-rc37", "read_roots" => [], "environment_allowlist" => ["HOME"],
@@ -723,6 +861,41 @@ class HrmKernelRunContinuationTest < Minitest::Test
     }
   end
 
+  def replacement_environment_rc38
+    git_executable = bundled_git_executable
+    git_environment = {
+      "PATH" => "#{File.dirname(git_executable)}:/usr/bin:/bin",
+      "GIT_CONFIG_NOSYSTEM" => "1", "GIT_CONFIG_GLOBAL" => "/dev/null",
+      "GIT_CONFIG_SYSTEM" => "/dev/null", "GIT_ATTR_NOSYSTEM" => "1",
+      "GIT_OPTIONAL_LOCKS" => "0", "GIT_NO_LAZY_FETCH" => "1", "GIT_TERMINAL_PROMPT" => "0",
+      "HOME" => "{run_root}", "PYTHONPYCACHEPREFIX" => "{run_root}/pycache"
+    }
+    smoke = <<~'RUBY'
+      require "fileutils"
+      root = ENV.fetch("HOME")
+      repository = File.join(root, "git-fixture")
+      FileUtils.mkdir_p(repository)
+      git = "git"
+      abort unless system(git, "-C", repository, "init", "--quiet")
+      File.write(File.join(repository, "fixture.txt"), "ok\n")
+      abort unless system(git, "-C", repository, "-c", "user.name=RC38", "-c", "user.email=rc38@example.invalid", "add", "fixture.txt")
+      abort unless system(git, "-C", repository, "-c", "user.name=RC38", "-c", "user.email=rc38@example.invalid", "commit", "--quiet", "-m", "fixture")
+      abort unless `#{git} -C #{repository} ls-files fixture.txt`.strip == "fixture.txt"
+      abort unless `#{git} -C #{repository} show HEAD:fixture.txt` == "ok\n"
+      puts "rc38-ready"
+    RUBY
+    {
+      "environment_id" => "test-rc38", "read_roots" => [],
+      "environment_allowlist" => git_environment.keys,
+      "preflight_checks" => [{ "id" => "ruby-rc38", "environment_id" => "test-rc38",
+        "argv" => [File.realpath(RbConfig.ruby), "-e", smoke], "env" => git_environment,
+        "cwd" => @project, "timeout_seconds" => 10, "max_output_bytes" => 65_536,
+        "configuration_paths" => [], "startup_success_marker" => "rc38-ready" }],
+      "check_repository" => { "schema_version" => HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA,
+        "kind" => "isolated_head_candidate", "git_executable" => git_executable }
+    }
+  end
+
   def byte_snapshot(root)
     Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
       [".", ".."].include?(File.basename(path)) || (File.directory?(path) && !File.symlink?(path))
@@ -730,6 +903,10 @@ class HrmKernelRunContinuationTest < Minitest::Test
       value = File.symlink?(path) ? "symlink:#{File.readlink(path)}" : Digest::SHA256.file(path).hexdigest
       [path.delete_prefix(root + "/"), value]
     end
+  end
+
+  def bundled_git_executable
+    File.realpath(File.join(Dir.home, ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/bin/git"))
   end
 
   def mode_snapshot(root)

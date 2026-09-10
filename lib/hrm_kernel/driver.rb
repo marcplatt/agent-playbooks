@@ -115,7 +115,11 @@ module HrmKernel
               break
             end
             begin
-              if %w[apply host-dispatch submit assess].include?(request["operation"])
+              if request["operation"] == "revalidate"
+                value = perform(request, config, runtime, expected_cursor: expected_cursor)
+                expected_cursor = value.dig("result", "cursor") if value["ok"] && value.dig("result", "refreshed")
+                runtime["feedback"] << value
+              elsif %w[apply host-dispatch submit assess].include?(request["operation"])
                 mutation = @store.at_cursor(expected_cursor) { perform(request, config, runtime) }
                 expected_cursor = mutation.fetch("cursor")
                 runtime["feedback"] << mutation.fetch("value")
@@ -270,7 +274,7 @@ module HrmKernel
       output
     end
 
-    def perform(request, config, runtime)
+    def perform(request, config, runtime, expected_cursor: nil)
       id = request.fetch("request_id")
       fail!("invalid driver request id") unless Host::IDENTIFIER.match?(id)
       directory = File.join(@directory, "requests", id)
@@ -317,12 +321,16 @@ module HrmKernel
                    when "submit" then @coordinator.submit(input).slice("cursor", "event_hash", "replayed")
                    when "assess" then @coordinator.assess(input).slice("cursor", "event_hash", "replayed")
                    end
+                 when "revalidate"
+                   fail!("candidate revalidation must wait for active writers") if runtime["jobs"].any? { |job_id| job = @host.poll(job_id: job_id); job["role"] == "worker" && job["status"] == "running" }
+                   @coordinator.revalidate(input, expected_cursor: expected_cursor)
                  when "status" then @store.project(role: "orchestrator")
                  when "verify" then @store.verify!
                  else fail!("unsupported driver operation")
                  end
         record = { "request_id" => id, "operation" => request["operation"], "ok" => true, "result" => result }
       rescue HrmKernel::Error, SystemCallError, ArgumentError, KeyError => error
+        raise if error.is_a?(HrmKernel::Error) && error.code == "stale_driver_response"
         recover_job_registration(runtime) if runtime["pending_job_registration"]
         record = { "request_id" => id, "operation" => request["operation"], "ok" => false, "error" => error.message }
       end
@@ -452,13 +460,14 @@ module HrmKernel
       transition_packet = environment_transition_prompt(config, runtime)
       packet = {
         "task" => config.fetch("prompt"),
-        "transport" => "Return requests as {request_id, operation, input_json}; input_json is a serialized object. Operations: apply, host-dispatch, host-status, host-collect, check, submit, assess, status, verify. Only orchestrator-role apply commands are authorized, actor {id: astra-orchestrator, role: orchestrator}. Operator input/review can only arrive through the trusted local operator CLI, never a model request.",
+        "transport" => "Return requests as {request_id, operation, input_json}; input_json is a serialized object. Operations: apply, host-dispatch, host-status, host-collect, check, submit, revalidate, assess, status, verify. Only orchestrator-role apply commands are authorized, actor {id: astra-orchestrator, role: orchestrator}. Operator input/review can only arrive through the trusted local operator CLI, never a model request.",
         "request_guide" => {
           "apply" => "input_json encodes {command_id, type, actor:{id:astra-orchestrator,role:orchestrator}, data}. Use unique request/command IDs; failed request receipts are immutable, so use a new request ID after correcting input.",
           "work_order.create" => "data:{work_order_id,intent_id,objective,requirement_ids,paths,check_ids,effect_class:local_repository}. The initial operator intent already exists as milestone_initial. Use existing intent IDs from the projection; never invent operator input or call intent.record.",
           "host-dispatch" => "input_json encodes {job_id,role:worker|reviewer,model:gpt-5.6-sol,prompt,context_paths:[],max_context_bytes:65536,check_plan:{environment_id,checks:[]}}. Workers also need work_order_id; same-worker continuation within the active environment adds resume_job_id. After a versioned environment transition, historical_resume_job_id may continue only the same running work-order revision and claim on its verified prior thread; it still creates a fresh job with the active environment and fresh check plan. If that binding is unavailable, release the old claim and commission a fresh worker. A context byte limit is a ceiling, not a target. Checks use {id,environment_id,argv,env,cwd,timeout_seconds,max_output_bytes,configuration_paths}. configuration_paths refers only to existing configuration copied inside the disposable execution run_root. For ordinary project files such as pyproject.toml, use configuration_paths:[] and select the project-readable source through argv flags. An env value of {run_root} selects the disposable execution directory, including for HOME; it grants no access to the caller's actual home. Do not weaken read, write or environment bounds. Reviewer checks may be empty.",
           "check" => "input_json:{job_id,check_id}; normally automatic after collection. A corrected candidate needs a resumed worker result and fresh checks before submission.",
           "submit" => "input_json:{job_id} for an implemented worker with passed current checks; then dispatch a fresh reviewer.",
+          "revalidate" => "input_json:{revalidation_id,work_order_id,check_plan:{environment_id,checks:[...]}} for a preserved completed contribution listed as pending_environment_validation. This runs fresh trusted checks and refreshes evidence without launching or resuming a worker. It cannot alter artifacts, requirements, ownership, revision, effects or human gates.",
           "pending_verification" => "Workers cannot run trusted tests. If a worker reported implemented and only left test verification pending, use the native check receipts and fresh reviewer; do not resume just to have the worker restate a passed check. Preserve actual unfinished behavior as engineering work.",
           "assess" => "input_json:{job_id} for the completed fresh reviewer; then apply milestone.review_ready with data:{review_id}. Human acceptance is a later operator action.",
           "other_commands" => "Read bounded relevant portions of the kernel source only when amending, releasing, resolving findings or requesting a genuine business decision."
@@ -483,7 +492,7 @@ module HrmKernel
     def validate_config(input)
       fail!("driver configuration must be an object") unless input.is_a?(Hash)
       config = JSON.parse(JSON.generate(input))
-      allowed = %w[run_id prompt environment_id read_roots environment_allowlist forbidden_roots preflight_checks max_turns max_parallel_workers orchestrator_reasoning_effort worker_reasoning_effort]
+      allowed = %w[run_id prompt environment_id read_roots environment_allowlist forbidden_roots preflight_checks check_repository max_turns max_parallel_workers orchestrator_reasoning_effort worker_reasoning_effort]
       fail!("unknown driver configuration fields") unless (config.keys - allowed).empty?
       %w[run_id prompt environment_id].each { |key| fail!("#{key} must be nonempty text") unless config[key].is_a?(String) && !config[key].empty? }
       fail!("invalid run id") unless Host::IDENTIFIER.match?(config["run_id"]) && config["run_id"].length <= 40
@@ -513,6 +522,10 @@ module HrmKernel
       fail!("environment transition metadata is incomplete") unless configured.is_a?(Hash) && historical.is_a?(Hash)
       config_keys = %w[active_environment_id active_environment_sha256 fresh_preflight_required historical_job_ids old_checks_eligible_for_new_claims source_environment_id source_environment_sha256]
       runtime_keys = %w[active_environment_id active_environment_sha256 jobs old_checks_eligible_for_new_claims source_environment_id source_environment_sha256 work_orders]
+      if configured.key?("completed_contributions") || historical.key?("completed_contributions")
+        config_keys << "completed_contributions"
+        runtime_keys << "completed_contributions"
+      end
       fail!("configured environment transition is malformed") unless configured.keys.sort == config_keys.sort
       fail!("historical environment registry is malformed") unless historical.keys.sort == runtime_keys.sort
       fail!("historical environment registry exceeds its bound") if JSON.generate(historical).bytesize > MAX_HISTORICAL_ENVIRONMENT_BYTES
@@ -527,7 +540,9 @@ module HrmKernel
       %w[source_environment_sha256 active_environment_sha256].each do |key|
         fail!("environment transition digest is invalid") unless configured[key].is_a?(String) && /\A[0-9a-f]{64}\z/.match?(configured[key])
       end
-      active_environment = config.slice("environment_id", "read_roots", "environment_allowlist", "preflight_checks")
+      environment_fields = %w[environment_id read_roots environment_allowlist preflight_checks]
+      environment_fields << "check_repository" if config.key?("check_repository")
+      active_environment = config.slice(*environment_fields)
       fail!("active environment configuration changed after replacement") unless
         Host.digest(active_environment) == configured["active_environment_sha256"]
       unless configured["fresh_preflight_required"].equal?(true) &&
@@ -561,6 +576,10 @@ module HrmKernel
       if ((active_jobs + seen_jobs) & ids).any?
         fail!("historical jobs entered the active Driver registry")
       end
+      if configured.key?("completed_contributions")
+        fail!("completed contribution attribution changed") unless configured["completed_contributions"] == historical["completed_contributions"]
+        validate_completed_contributions!(configured.fetch("completed_contributions"))
+      end
       { "configured" => configured, "historical" => historical }
     rescue JSON::GeneratorError
       fail!("historical environment registry is not JSON")
@@ -571,8 +590,32 @@ module HrmKernel
       return nil unless transition
       transition.fetch("historical").merge(
         "authority" => "This is trusted-adapter technical provenance for an environment replacement, not operator intent, approval, changed business requirements, or effect authority.",
-        "required_handling" => "Old jobs, check plans, receipts, submissions and assessments are historical diagnostics only. Commission fresh attempts and fresh checks in the active environment. Use historical_resume_job_id only for the same live work-order revision and claim; otherwise release that claim and dispatch a fresh worker. Human gates and the existing ledger authority remain unchanged."
+        "pending_environment_validation" => Evidence.validation_projection(@store.read.fetch("state"), state_dir: @store.directory),
+        "required_handling" => transition.dig("configured", "completed_contributions") ?
+          "Old jobs and checks are historical diagnostics only. Preserve completed submissions and use revalidate for their fresh active-environment checks. Release running claims before fresh dispatch. Do not resume any historical model task. Human gates and ledger authority remain unchanged." :
+          "Old jobs, check plans, receipts, submissions and assessments are historical diagnostics only. Commission fresh attempts and fresh checks in the active environment. Use historical_resume_job_id only for the same live work-order revision and claim; otherwise release that claim and dispatch a fresh worker. Human gates and the existing ledger authority remain unchanged."
       )
+    end
+
+    def validate_completed_contributions!(contributions)
+      keys = %w[artifacts_sha256 check_ids claim_id evidence_digest last_owner_id required_action revision work_order_id]
+      fail!("completed contribution registry is malformed") unless contributions.is_a?(Array) && contributions.length <= 256
+      state = @store.read.fetch("state")
+      contributions.each do |entry|
+        fail!("completed contribution registry is malformed") unless entry.is_a?(Hash) && entry.keys.sort == keys.sort &&
+          Host::IDENTIFIER.match?(entry["work_order_id"].to_s) && Host::IDENTIFIER.match?(entry["claim_id"].to_s) &&
+          Host::IDENTIFIER.match?(entry["last_owner_id"].to_s) && entry["revision"].is_a?(Integer) && entry["revision"].positive? &&
+          Host.strings?(entry["check_ids"]) && entry["required_action"] == "fresh_native_revalidation_under_active_environment"
+        order = state.fetch("work_orders")[entry["work_order_id"]]
+        fail!("completed contribution no longer matches its work order") unless order && order["status"] == "completed" &&
+          order["revision"] == entry["revision"] && Array(order["claim_history"]).include?(entry["claim_id"]) &&
+          order["last_owner_id"] == entry["last_owner_id"] && order["check_ids"] == entry["check_ids"]
+        versions = [{ "evidence_digest" => order["evidence_digest"], "artifacts" => order["artifacts"] }] + Array(order["evidence_history"])
+        bound = versions.any? do |version|
+          version["evidence_digest"] == entry["evidence_digest"] && Host.digest(version.fetch("artifacts")) == entry["artifacts_sha256"]
+        end
+        fail!("completed contribution evidence history changed") unless bound
+      end
     end
 
     def execution_for(config)
@@ -580,7 +623,8 @@ module HrmKernel
       Host.atomic_write(sentinel, "Private harmless preflight sentinel.\n") unless File.exist?(sentinel)
       Execution.new(project_root: config.fetch("project_root"), state_dir: @store.directory,
                     read_roots: config.fetch("read_roots"), environment_allowlist: config.fetch("environment_allowlist"),
-                    forbidden_read_path: sentinel, forbidden_write_path: sentinel)
+                    forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+                    repository_view: config["check_repository"])
     end
 
     def verify_environment!(config)

@@ -22,6 +22,10 @@ module HrmKernel
     MAX_OUTPUT_BYTES = 16 * 1024 * 1024
     READ_CHUNK_BYTES = 16 * 1024
     RUN_ROOT_TOKEN = "{run_root}"
+    CANDIDATE_ROOT_TOKEN = "{candidate_root}"
+    REPOSITORY_VIEW_SCHEMA = "ap-hrm-isolated-head-candidate/1"
+    MAX_REPOSITORY_OBJECTS = 20_000
+    MAX_REPOSITORY_OBJECT_BYTES = 256 * 1024 * 1024
     SENSITIVE_BASENAME = /\A(?:\.env(?:\..*)?|credentials[^\/]*\.json|[^\/]*\.(?:db|sqlite|sqlite3|pem|key))\z/i
     SYSTEM_READ_ROOTS = [
       "/usr/bin",
@@ -42,6 +46,7 @@ module HrmKernel
 
     def initialize(project_root:, state_dir:, read_roots: [], environment_allowlist: [],
                    forbidden_read_path: nil, forbidden_write_path: nil,
+                   repository_view: nil,
                    sandbox_executable: "/usr/bin/sandbox-exec")
       @project_root = canonical_directory!(project_root, "project_root")
       @state_dir = canonical_private_directory!(state_dir)
@@ -53,6 +58,10 @@ module HrmKernel
       @forbidden_read_path = optional_canonical_file(forbidden_read_path, "forbidden_read_path")
       @forbidden_write_path = optional_canonical_file(forbidden_write_path, "forbidden_write_path")
       @sandbox_executable = canonical_executable!(sandbox_executable, "sandbox_executable")
+      @repository_view = validate_repository_view!(repository_view)
+      if @repository_view && @read_roots.any? { |root| within?(@project_root, root) || within?(root, @project_root) }
+        fail!("isolated repository checks may not grant the source project as a dependency root")
+      end
       ensure_supported_platform!
       @sensitive_existing_files = discover_sensitive_existing_files.freeze
       prepare_execution_directory!
@@ -121,12 +130,16 @@ module HrmKernel
         return descriptor.merge("conclusion" => receipt["conclusion"], "reused" => true)
       end
 
-      materialized_spec = materialize_spec(spec, run_root)
+      repository = prepare_repository_view!(run_root, candidate)
+      execution_root = repository ? repository.fetch("root") : @project_root
+      materialized_spec = materialize_spec(spec, run_root, execution_root)
       validate_configuration_paths!(materialized_spec, run_root)
-      profile = sandbox_profile(run_root)
-      isolation = preflight_isolation!(profile, run_root)
+      profile = sandbox_profile(run_root, project_root: execution_root)
+      isolation = preflight_isolation!(profile, run_root, project_root: execution_root)
       result = execute_process(materialized_spec, profile, run_root)
+      privatize_run_scratch!(run_root, except: repository && repository.fetch("root"))
       verify_candidate_manifest!(candidate, exact: true)
+      verify_repository_view!(repository.fetch("receipt"), candidate) if repository
 
       stdout_path = write_private_exclusive!(run_root, "stdout.bin", result.delete("stdout"))
       stderr_path = write_private_exclusive!(run_root, "stderr.bin", result.delete("stderr"))
@@ -145,6 +158,7 @@ module HrmKernel
         "binding" => binding,
         "check_id" => spec.fetch("id"),
         "environment_id" => spec.fetch("environment_id"),
+        "repository_view" => repository && repository.fetch("receipt"),
         "candidate_digest" => candidate.fetch("candidate_digest"),
         "candidate" => candidate,
         "execution_spec_digest" => digest(spec),
@@ -190,6 +204,7 @@ module HrmKernel
       profile = sandbox_profile(run_root)
       isolation = preflight_isolation!(profile, run_root)
       result = execute_process(materialized_spec, profile, run_root)
+      privatize_run_scratch!(run_root)
       startup_marker = spec["startup_success_marker"]
       startup_completed = startup_marker.nil? ? nil : result.fetch("stdout").include?(startup_marker)
       stdout_path = write_private_exclusive!(run_root, "preflight-stdout.bin", result.delete("stdout"))
@@ -281,6 +296,7 @@ module HrmKernel
       expected_authentication = receipt_authentication(unsigned)
       fail!("native receipt authentication failed") unless secure_equal?(authentication["hmac_sha256"], expected_authentication["hmac_sha256"])
       fail!("native receipt schema is unsupported") unless receipt["schema_version"] == RECEIPT_SCHEMA
+      verify_repository_view_receipt!(receipt["repository_view"], candidate || receipt["candidate"])
       fail!("native receipt binding mismatch") if binding && receipt["binding"] != binding
       if expected_binding
         expected_binding.each do |key, value|
@@ -293,6 +309,7 @@ module HrmKernel
       plan = candidate["check_plan"]
       spec = plan.is_a?(Hash) && Array(plan["checks"]).find { |entry| entry["id"] == receipt["check_id"] }
       fail!("native receipt check is absent from its frozen plan") unless spec.is_a?(Hash)
+      fail!("native receipt environment differs from its frozen check") unless receipt["environment_id"] == spec["environment_id"]
       fail!("native receipt execution spec mismatch") unless receipt["execution_spec_digest"] == digest(spec)
       frozen_plan_digest = digest({ "check_plan" => plan, "execution_policy" => candidate["execution_policy"] })
       fail!("native receipt check plan mismatch") unless receipt.dig("binding", "check_plan_digest") == frozen_plan_digest
@@ -409,6 +426,11 @@ module HrmKernel
       env.each do |name, value|
         fail!("execution environment values must be strings") unless value.is_a?(String) && !value.include?("\0")
       end
+      if @repository_view
+        repository_environment.each do |name, value|
+          fail!("repository check environment #{name} is not pinned") unless env[name] == value
+        end
+      end
       cwd = canonical_directory!(spec["cwd"], "execution cwd")
       fail!("execution cwd must be within project_root") unless within?(cwd, @project_root)
       timeout = spec["timeout_seconds"]
@@ -438,7 +460,7 @@ module HrmKernel
     end
 
     def policy_manifest
-      {
+      manifest = {
         "runner" => "sandbox-exec-default-deny-v2",
         "sandbox_executable" => @sandbox_executable,
         "sandbox_executable_sha256" => Digest::SHA256.file(@sandbox_executable).hexdigest,
@@ -451,23 +473,25 @@ module HrmKernel
         "write" => "disposable_run_root_only",
         "sensitive_existing_files" => "data_read_denied"
       }
+      manifest["repository_view"] = @repository_view if @repository_view
+      manifest
     end
 
     def check_plan_digest(plan)
       digest({ "check_plan" => plan, "execution_policy" => policy_manifest })
     end
 
-    def git_changes
-      conflicts = git_output("diff", "--name-only", "--diff-filter=U", "-z", "HEAD", "--")
+    def git_changes(root = @project_root, executable = "/usr/bin/git")
+      conflicts = git_output_at(root, executable, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "--diff-filter=U", "-z", "HEAD", "--")
       fail!("candidate contains unresolved Git conflicts") unless conflicts.empty?
-      tracked = parse_name_status(git_output("diff", "--name-status", "--no-renames", "-z", "HEAD", "--"))
-      untracked = git_output("ls-files", "--others", "--exclude-standard", "-z", "--").split("\0").reject(&:empty?).map do |path|
-        change_entry("?", path)
+      tracked = parse_name_status(git_output_at(root, executable, "diff", "--no-ext-diff", "--no-textconv", "--name-status", "--no-renames", "-z", "HEAD", "--"), root)
+      untracked = git_output_at(root, executable, "ls-files", "--others", "--exclude-standard", "-z", "--").split("\0").reject(&:empty?).map do |path|
+        change_entry("?", path, root)
       end
       (tracked + untracked).sort_by { |entry| entry["path"] }
     end
 
-    def parse_name_status(output)
+    def parse_name_status(output, root = @project_root)
       fields = output.split("\0")
       entries = []
       index = 0
@@ -475,19 +499,19 @@ module HrmKernel
         status = fields[index]
         path = fields[index + 1]
         fail!("Git returned an incomplete candidate record") unless status && path
-        entries << change_entry(status, path)
+        entries << change_entry(status, path, root)
         index += 2
       end
       entries
     end
 
-    def change_entry(status, path)
+    def change_entry(status, path, root = @project_root)
       relative = safe_relative_path!(path)
       fail!("unsupported Git candidate status #{status.inspect}") unless status.match?(/\A[AMDT?]\z/)
       entry = { "status" => status, "path" => relative }
       return entry.merge("sha256" => nil, "bytes" => nil) if status == "D"
 
-      full = File.join(@project_root, relative)
+      full = File.join(root, relative)
       safe_regular_file!(full, "candidate path")
       entry.merge("sha256" => Digest::SHA256.file(full).hexdigest, "bytes" => File.size(full))
     end
@@ -529,8 +553,10 @@ module HrmKernel
       true
     end
 
-    def sandbox_profile(run_root)
-      read_roots = [@project_root, run_root, *@read_roots, *SYSTEM_READ_ROOTS.select { |path| File.exist?(path) }].uniq
+    def sandbox_profile(run_root, project_root: @project_root)
+      repository_executable = @repository_view && @repository_view["git_executable"]
+      read_roots = [project_root, run_root, *@read_roots, repository_executable,
+                    *SYSTEM_READ_ROOTS.select { |path| File.exist?(path) }].compact.uniq
       rules = ["(version 1)", "(deny default)", "(allow process*)", "(deny network*)", "(allow sysctl-read)"]
       rules << '(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))'
       rules << '(allow mach-register (global-name-prefix "org.chromium.Chromium.MachPortRendezvousServer."))'
@@ -543,10 +569,16 @@ module HrmKernel
         rules << "(allow file-read* (literal #{profile_string(path)}))"
       end
       read_roots.each { |path| rules << "(allow file-read* (subpath #{profile_string(path)}))" }
-      @sensitive_existing_files.each do |path|
+      discover_sensitive_existing_files(project_root).each do |path|
         rules << "(deny file-read-data (literal #{profile_string(path)}))"
       end
       rules << "(allow file-write* (subpath #{profile_string(run_root)}) (literal \"/dev/null\"))"
+      if @repository_view && project_root != @project_root
+        rules << "(deny file-write* (subpath #{profile_string(project_root)}))"
+        %w[receipt.json stdout.bin stderr.bin].each do |name|
+          rules << "(deny file-write* (literal #{profile_string(File.join(run_root, name))}))"
+        end
+      end
       rules.join(" ")
     end
 
@@ -562,18 +594,20 @@ module HrmKernel
       end.uniq.sort
     end
 
-    def preflight_isolation!(profile, run_root)
+    def preflight_isolation!(profile, run_root, project_root: @project_root)
       fail!("forbidden read sentinel is required") unless @forbidden_read_path
       fail!("forbidden write sentinel is required") unless @forbidden_write_path
-      fail!("forbidden read sentinel is accidentally readable by policy") if readable_root?(@forbidden_read_path, run_root)
+      if readable_root?(@forbidden_read_path, run_root, project_root: project_root)
+        fail!("forbidden read sentinel is accidentally readable by policy")
+      end
       fail!("forbidden write sentinel is inside the disposable run root") if within?(@forbidden_write_path, run_root)
 
-      read_result = execute_raw(["/bin/cat", @forbidden_read_path], {}, @project_root, 10, 4096, profile)
+      read_result = execute_raw(["/bin/cat", @forbidden_read_path], {}, project_root, 10, 4096, profile)
       if read_result["exit_status"].zero? || read_result["timed_out"]
         fail!("sandbox preflight did not block forbidden read")
       end
       before = [Digest::SHA256.file(@forbidden_write_path).hexdigest, File.stat(@forbidden_write_path).mtime]
-      write_result = execute_raw(["/usr/bin/touch", @forbidden_write_path], {}, @project_root, 10, 4096, profile)
+      write_result = execute_raw(["/usr/bin/touch", @forbidden_write_path], {}, project_root, 10, 4096, profile)
       after = [Digest::SHA256.file(@forbidden_write_path).hexdigest, File.stat(@forbidden_write_path).mtime]
       if write_result["exit_status"].zero? || before != after || write_result["timed_out"]
         fail!("sandbox preflight did not block forbidden write")
@@ -591,7 +625,7 @@ module HrmKernel
           exit 8
         end
       RUBY
-      network_result = execute_raw([File.realpath(RbConfig.ruby), "-e", network_probe], {}, @project_root, 10, 4096, profile)
+      network_result = execute_raw([File.realpath(RbConfig.ruby), "-e", network_probe], {}, project_root, 10, 4096, profile)
       if !network_result["exit_status"].zero? || network_result["timed_out"]
         fail!("sandbox preflight did not block network")
       end
@@ -624,15 +658,20 @@ module HrmKernel
       )
     end
 
-    def materialize_spec(spec, run_root)
+    def materialize_spec(spec, run_root, candidate_root = @project_root)
       materialized = canonical_value(spec)
-      materialized["argv"] = materialized.fetch("argv").map { |value| value.gsub(RUN_ROOT_TOKEN, run_root) }
+      materialized["argv"] = materialized.fetch("argv").map do |value|
+        value.gsub(RUN_ROOT_TOKEN, run_root).gsub(CANDIDATE_ROOT_TOKEN, candidate_root)
+      end
       materialized["env"] = materialized.fetch("env").each_with_object({}) do |(name, value), memo|
-        memo[name] = value.gsub(RUN_ROOT_TOKEN, run_root)
+        memo[name] = value.gsub(RUN_ROOT_TOKEN, run_root).gsub(CANDIDATE_ROOT_TOKEN, candidate_root)
       end
       materialized["configuration_paths"] = materialized.fetch("configuration_paths").map do |value|
         value.gsub(RUN_ROOT_TOKEN, run_root)
       end
+      source_cwd = canonical_directory!(materialized.fetch("cwd"), "execution cwd")
+      relative_cwd = Pathname.new(source_cwd).relative_path_from(Pathname.new(@project_root)).to_s
+      materialized["cwd"] = relative_cwd == "." ? candidate_root : File.join(candidate_root, relative_cwd)
       materialized
     end
 
@@ -658,13 +697,254 @@ module HrmKernel
       end
     end
 
-    def discover_sensitive_existing_files
+    def validate_repository_view!(value)
+      return nil if value.nil?
+      view = stringify_hash!(canonical_value(value), "repository view")
+      expected_keys!(view, %w[schema_version kind git_executable])
+      fail!("repository view schema is unsupported") unless view["schema_version"] == REPOSITORY_VIEW_SCHEMA
+      fail!("repository view kind is unsupported") unless view["kind"] == "isolated_head_candidate"
+      view["git_executable"] = canonical_executable!(view.fetch("git_executable"), "repository view Git executable")
+      view.freeze
+    end
+
+    def repository_environment
+      git_directory = File.dirname(@repository_view.fetch("git_executable"))
+      {
+        "PATH" => "#{git_directory}:/usr/bin:/bin",
+        "GIT_CONFIG_NOSYSTEM" => "1",
+        "GIT_CONFIG_GLOBAL" => "/dev/null",
+        "GIT_CONFIG_SYSTEM" => "/dev/null",
+        "GIT_ATTR_NOSYSTEM" => "1",
+        "GIT_OPTIONAL_LOCKS" => "0",
+        "GIT_NO_LAZY_FETCH" => "1",
+        "GIT_TERMINAL_PROMPT" => "0"
+      }
+    end
+
+    # Materialize only the exact candidate HEAD commit and the tree/blob closure
+    # reachable from it. The commit's parent names remain in the commit bytes, but
+    # their objects, refs, reflogs, remotes and configuration are not copied.
+    def prepare_repository_view!(run_root, candidate)
+      return nil unless @repository_view
+      git = @repository_view.fetch("git_executable")
+      root = File.join(run_root, "candidate")
+      remove_repository_view!(root, run_root) if File.exist?(root) || File.symlink?(root)
+      Dir.mkdir(root, 0o700)
+      top = git_output_at(@project_root, git, "rev-parse", "--show-toplevel").strip
+      fail!("repository view source is not the candidate Git top-level") unless File.realpath(top) == @project_root
+      git_checked!(git, root, "init", "--quiet")
+      FileUtils.rm_rf(File.join(root, ".git", "hooks"))
+      FileUtils.rm_rf(File.join(root, ".git", "logs"))
+      FileUtils.rm_rf(File.join(root, ".git", "objects", "info", "alternates"))
+      File.open(File.join(root, ".git", "config"), "wb", 0o600) do |file|
+        file.write("[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = false\n")
+      end
+
+      head = candidate.fetch("head_sha")
+      tree = candidate.fetch("head_tree")
+      ids = git_output_at(@project_root, git, "rev-list", "--objects", "--no-object-names", "#{tree}^{tree}")
+            .lines.map(&:strip).reject(&:empty?).uniq
+      fail!("repository view object set is empty") if ids.empty?
+      ids.unshift(head)
+      ids.uniq!
+      fail!("repository view exceeds object count bound") if ids.length > MAX_REPOSITORY_OBJECTS
+      total_bytes = 0
+      ids.each do |oid|
+        fail!("repository view contains an invalid object id") unless oid.match?(/\A[0-9a-f]{40}\z/)
+        type = git_output_at(@project_root, git, "cat-file", "-t", oid).strip
+        fail!("repository view contains an unsupported object type") unless %w[blob tree commit].include?(type)
+        size = Integer(git_output_at(@project_root, git, "cat-file", "-s", oid).strip, 10)
+        total_bytes += size
+        fail!("repository view exceeds object byte bound") if total_bytes > MAX_REPOSITORY_OBJECT_BYTES
+        bytes = git_output_at(@project_root, git, "cat-file", type, oid, binary: true)
+        fail!("repository object size changed while copying") unless bytes.bytesize == size
+        copied = git_output_at(root, git, "hash-object", "--no-filters", "-w", "-t", type, "--stdin", stdin_data: bytes).strip
+        fail!("repository object identity changed while copying") unless copied == oid
+      end
+
+      git_checked!(git, root, "symbolic-ref", "HEAD", "refs/heads/candidate")
+      git_checked!(git, root, "update-ref", "refs/heads/candidate", head)
+      git_checked!(git, root, "read-tree", "HEAD")
+      materialize_head_tree!(root, git, head)
+      overlay_candidate!(root, git, candidate.fetch("changes"))
+      isolated_changes = git_changes(root, git)
+      fail!("isolated repository candidate differs from the captured candidate") unless isolated_changes == candidate.fetch("changes")
+      parent_available = git_status_at(root, git, "cat-file", "-e", "#{head}^")
+      fail!("repository view unexpectedly contains parent history") if parent_available.success?
+      protect_repository_metadata!(root)
+      metadata = repository_metadata_snapshot(root)
+
+      relative = Pathname.new(root).relative_path_from(Pathname.new(@state_dir)).to_s
+      receipt = {
+        "schema_version" => REPOSITORY_VIEW_SCHEMA,
+        "kind" => "isolated_head_candidate",
+        "source_project_root" => @project_root,
+        "validation_root" => relative,
+        "head_sha" => head,
+        "head_tree" => tree,
+        "candidate_digest" => candidate.fetch("candidate_digest"),
+        "candidate_changes_sha256" => digest(candidate.fetch("changes")),
+        "object_count" => ids.length,
+        "object_bytes" => total_bytes,
+        "object_ids_sha256" => Digest::SHA256.hexdigest(ids.sort.join("\n") << "\n"),
+        "metadata_entries" => metadata.fetch("entries"),
+        "metadata_sha256" => metadata.fetch("sha256"),
+        "parent_objects" => "omitted",
+        "git_executable" => executable_identity(git)
+      }
+      { "root" => root, "receipt" => receipt }
+    rescue ArgumentError
+      fail!("repository view contains an invalid object size")
+    end
+
+    def materialize_head_tree!(root, git, head)
+      output = git_output_at(root, git, "ls-tree", "-r", "-z", head, binary: true)
+      output.split("\0").reject(&:empty?).each do |record|
+        metadata, relative = record.split("\t", 2)
+        mode, type, oid = metadata.to_s.split(" ", 3)
+        path = safe_relative_path!(relative)
+        unless type == "blob" && %w[100644 100755].include?(mode)
+          fail!("repository view supports only regular tracked files")
+        end
+        destination = File.join(root, path)
+        FileUtils.mkdir_p(File.dirname(destination), mode: 0o700)
+        bytes = git_output_at(root, git, "cat-file", "blob", oid, binary: true)
+        File.open(destination, File::WRONLY | File::CREAT | File::EXCL, mode == "100755" ? 0o700 : 0o600) do |file|
+          file.binmode
+          file.write(bytes)
+        end
+      end
+    end
+
+    def overlay_candidate!(root, git, changes)
+      changes.each do |entry|
+        relative = safe_relative_path!(entry.fetch("path"))
+        destination = File.join(root, relative)
+        if entry.fetch("status") == "D"
+          FileUtils.rm_f(destination)
+          next
+        end
+        source = File.join(@project_root, relative)
+        safe_regular_file!(source, "candidate overlay path")
+        FileUtils.mkdir_p(File.dirname(destination), mode: 0o700)
+        FileUtils.copy_file(source, destination)
+        File.chmod(File.stat(source).mode & 0o111 == 0 ? 0o600 : 0o700, destination)
+        next unless entry.fetch("status") == "A"
+
+        empty = git_output_at(root, git, "hash-object", "--no-filters", "-w", "--stdin", stdin_data: "").strip
+        mode = File.stat(source).mode & 0o111 == 0 ? "100644" : "100755"
+        git_checked!(git, root, "update-index", "--add", "--cacheinfo", "#{mode},#{empty},#{relative}")
+      end
+    end
+
+    def verify_repository_view_receipt!(view, candidate)
+      if @repository_view.nil?
+        fail!("native receipt unexpectedly uses a repository view") if view
+        return true
+      end
+      verify_repository_view!(view, candidate)
+    end
+
+    def verify_repository_view!(view, candidate)
+      fail!("native receipt repository view is missing") unless view.is_a?(Hash)
+      expected = %w[candidate_changes_sha256 candidate_digest git_executable head_sha head_tree kind metadata_entries metadata_sha256 object_bytes object_count object_ids_sha256 parent_objects schema_version source_project_root validation_root]
+      fail!("native receipt repository view is malformed") unless view.keys.sort == expected.sort
+      fail!("native receipt repository view schema changed") unless view["schema_version"] == REPOSITORY_VIEW_SCHEMA && view["kind"] == "isolated_head_candidate"
+      fail!("native receipt repository source changed") unless view["source_project_root"] == @project_root
+      fail!("native receipt repository candidate changed") unless view["candidate_digest"] == candidate["candidate_digest"] &&
+        view["candidate_changes_sha256"] == digest(candidate.fetch("changes")) && view["head_sha"] == candidate["head_sha"] &&
+        view["head_tree"] == candidate["head_tree"]
+      fail!("native receipt repository history policy changed") unless view["parent_objects"] == "omitted"
+      fail!("native receipt repository Git identity changed") unless view["git_executable"] == executable_identity(@repository_view.fetch("git_executable"))
+      root = safe_state_directory!(view.fetch("validation_root"))
+      fail!("native receipt repository root name changed") unless File.basename(root) == "candidate"
+      metadata = repository_metadata_snapshot(root)
+      unless metadata["entries"] == view["metadata_entries"] && metadata["sha256"] == view["metadata_sha256"]
+        fail!("native receipt repository metadata changed")
+      end
+      git = @repository_view.fetch("git_executable")
+      fail!("native receipt repository HEAD changed") unless git_output_at(root, git, "rev-parse", "HEAD").strip == candidate["head_sha"]
+      fail!("native receipt repository tree changed") unless git_output_at(root, git, "rev-parse", "HEAD^{tree}").strip == candidate["head_tree"]
+      fail!("native receipt repository candidate drifted") unless git_changes(root, git) == candidate.fetch("changes")
+      fail!("native receipt repository unexpectedly gained parent history") if git_status_at(root, git, "cat-file", "-e", "#{candidate.fetch('head_sha')}^").success?
+      true
+    end
+
+    def protect_repository_metadata!(root)
+      metadata_root = File.join(root, ".git")
+      paths = Dir.glob(File.join(metadata_root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
+        %w[. ..].include?(File.basename(path))
+      end.sort_by { |path| -path.count(File::SEPARATOR) }
+      paths.each do |path|
+        stat = File.lstat(path)
+        fail!("repository metadata may not contain symlinks or special files") unless stat.file? || stat.directory?
+        File.chmod(stat.directory? ? 0o500 : 0o400, path)
+      end
+      File.chmod(0o500, metadata_root)
+    end
+
+    def remove_repository_view!(root, run_root)
+      fail!("repository view cleanup escaped its run root") unless within?(root, run_root)
+      fail!("repository view cleanup refuses a symlink") if File.symlink?(root)
+      paths = Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
+        %w[. ..].include?(File.basename(path))
+      end.sort_by { |path| -path.count(File::SEPARATOR) }
+      paths.each do |path|
+        stat = File.lstat(path)
+        fail!("repository view cleanup found a symlink or special file") unless stat.file? || stat.directory?
+        File.chmod(stat.directory? ? 0o700 : 0o600, path)
+      end
+      File.chmod(0o700, root)
+      FileUtils.remove_entry(root)
+    end
+
+    def privatize_run_scratch!(run_root, except: nil)
+      paths = Dir.glob(File.join(run_root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
+        %w[. ..].include?(File.basename(path)) || (except && within?(path, except))
+      end.sort_by { |path| -path.count(File::SEPARATOR) }
+      paths.each do |path|
+        stat = File.lstat(path)
+        fail!("execution scratch contains a symlink or special file") unless stat.file? || stat.directory?
+        fail!("execution scratch has an unsafe owner") unless stat.uid == Process.uid
+        File.chmod(stat.directory? ? 0o700 : (stat.mode & 0o111 == 0 ? 0o600 : 0o700), path)
+      end
+    end
+
+    def repository_metadata_snapshot(root)
+      metadata_root = File.join(root, ".git")
+      fail!("repository metadata root is unsafe") unless File.directory?(metadata_root) && !File.symlink?(metadata_root)
+      entries = Dir.glob(File.join(metadata_root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
+        %w[. ..].include?(File.basename(path))
+      end.sort.map do |path|
+        relative = Pathname.new(path).relative_path_from(Pathname.new(metadata_root)).to_s
+        forbidden = %w[commondir config.worktree shallow info/grafts objects/info/alternates objects/info/http-alternates]
+        if forbidden.include?(relative) || relative.start_with?("refs/replace/")
+          fail!("repository metadata contains a forbidden control entry")
+        end
+        stat = File.lstat(path)
+        if stat.directory?
+          { "path" => relative, "type" => "directory", "mode" => stat.mode & 0o777,
+            "uid" => stat.uid, "nlink" => stat.nlink }
+        elsif stat.file?
+          fail!("repository metadata contains a hard-linked file") unless stat.nlink == 1
+          { "path" => relative, "type" => "file", "mode" => stat.mode & 0o777,
+            "uid" => stat.uid, "nlink" => stat.nlink, "bytes" => stat.size,
+            "sha256" => Digest::SHA256.file(path).hexdigest }
+        else
+          fail!("repository metadata may not contain symlinks or special files")
+        end
+      end
+      fail!("repository metadata exceeds entry bound") if entries.length > MAX_REPOSITORY_OBJECTS * 3
+      { "entries" => entries.length, "sha256" => digest(entries) }
+    end
+
+    def discover_sensitive_existing_files(root = @project_root)
       # Dependency roots are selected by the host plan and may legitimately
       # contain packaged key/database fixtures. Existing project-local runtime
       # data is the user-data risk this deny list isolates.
-      [@project_root].each_with_object([]) do |root, paths|
-        next if File.file?(root)
-        Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH).each do |path|
+      [root].each_with_object([]) do |candidate_root, paths|
+        next if File.file?(candidate_root)
+        Dir.glob(File.join(candidate_root, "**", "*"), File::FNM_DOTMATCH).each do |path|
           basename = File.basename(path)
           next unless basename.match?(SENSITIVE_BASENAME)
           begin
@@ -721,6 +1001,8 @@ module HrmKernel
           kill_process_group(wait_thread.pid, "KILL") unless wait_thread.join(0.25)
           status = wait_thread.value
         ensure
+          kill_process_group(wait_thread.pid, "TERM")
+          kill_process_group(wait_thread.pid, "KILL")
           stdout_text = stdout_reader.value
           stderr_text = stderr_reader.value
         end
@@ -880,8 +1162,10 @@ module HrmKernel
       fail!("path cannot be accessed: #{e.message}")
     end
 
-    def readable_root?(path, run_root)
-      [@project_root, run_root, *@read_roots, *SYSTEM_READ_ROOTS.select { |root| File.exist?(root) }].any? { |root| within?(path, File.realpath(root)) }
+    def readable_root?(path, run_root, project_root: @project_root)
+      repository_executable = @repository_view && @repository_view["git_executable"]
+      [project_root, run_root, *@read_roots, repository_executable,
+       *SYSTEM_READ_ROOTS.select { |root| File.exist?(root) }].compact.any? { |root| within?(path, File.realpath(root)) }
     end
 
     def within?(path, root)
@@ -893,9 +1177,55 @@ module HrmKernel
     end
 
     def git_output(*arguments)
-      output, error, status = Open3.capture3({ "LC_ALL" => "C" }, "/usr/bin/git", "-C", @project_root, *arguments, unsetenv_others: true)
+      git_output_at(@project_root, "/usr/bin/git", *arguments)
+    end
+
+    def git_output_at(root, executable, *arguments, binary: false, stdin_data: nil)
+      environment = trusted_git_environment(root)
+      options = { unsetenv_others: true }
+      options[:stdin_data] = stdin_data unless stdin_data.nil?
+      output, error, status = Open3.capture3(environment, executable, *trusted_git_arguments(root, arguments), **options)
       fail!("Git candidate inspection failed: #{error.strip}") unless status.success?
+      output.force_encoding(Encoding::BINARY) if binary
       output
+    end
+
+    def git_checked!(executable, root, *arguments)
+      git_output_at(root, executable, *arguments)
+      true
+    end
+
+    def git_status_at(root, executable, *arguments)
+      _output, _error, status = Open3.capture3(
+        trusted_git_environment(root), executable, *trusted_git_arguments(root, arguments), unsetenv_others: true
+      )
+      status
+    end
+
+    def trusted_git_environment(root)
+      {
+        "LC_ALL" => "C", "GIT_CONFIG_NOSYSTEM" => "1", "GIT_CONFIG_GLOBAL" => "/dev/null",
+        "GIT_CONFIG_SYSTEM" => "/dev/null", "GIT_ATTR_NOSYSTEM" => "1", "GIT_OPTIONAL_LOCKS" => "0",
+        "GIT_NO_LAZY_FETCH" => "1", "GIT_TERMINAL_PROMPT" => "0", "HOME" => File.dirname(root)
+      }
+    end
+
+    def trusted_git_arguments(root, arguments)
+      global = ["--no-pager", "--no-replace-objects", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+      if File.directory?(File.join(root, ".git"))
+        global + ["--git-dir=#{File.join(root, '.git')}", "--work-tree=#{root}", *arguments]
+      else
+        global + ["-C", root, *arguments]
+      end
+    end
+
+    def safe_state_directory!(relative)
+      relative = safe_relative_path!(relative)
+      path = File.expand_path(File.join(@state_dir, relative))
+      fail!("repository view path escapes state_dir") unless within?(path, @state_dir)
+      each_component_no_symlink!(@state_dir, relative)
+      fail!("repository view path is not a directory") unless File.directory?(path)
+      path
     end
 
     def canonical_value(value)

@@ -110,6 +110,11 @@ class HrmKernelDriverTest < Minitest::Test
             request["input_json"] = JSON.generate(input)
             requests << request
           end
+        elsif control["task"] == "revalidation-race-test"
+          if round == 1
+            requests << request.call("refresh-preserved", "revalidate", {"revalidation_id" => "refresh-preserved", "work_order_id" => "preserved", "check_plan" => {}})
+            requests << apply.call("obsolete-after-refresh", "work_order.create", {"work_order_id" => "obsolete", "intent_id" => "milestone_initial", "objective" => "Stale request", "requirement_ids" => ["behavior"], "paths" => ["app.txt"], "check_ids" => ["behavior-check"], "effect_class" => "local_repository"})
+          end
         elsif control["task"] == "conflict-test"
           requests << apply.call("same-id", "work_order.create", {"work_order_id" => "implement", "intent_id" => "milestone_initial", "objective" => "objective #{round}", "requirement_ids" => ["behavior"], "paths" => ["app.txt"], "check_ids" => ["behavior-check"], "effect_class" => "local_repository"}) if round <= 2
         else
@@ -418,6 +423,36 @@ class HrmKernelDriverTest < Minitest::Test
     assert_equal "engineering_stalled", finish["outcome"]
     assert_empty @store.read.dig("state", "work_orders")
     refute File.exist?(File.join(@state_dir, "driver", "requests", "obsolete-order", "request.json"))
+  end
+
+  def test_operator_input_after_revalidation_uses_the_exact_transaction_cursor_and_discards_remaining_requests
+    @driver.start(configuration.merge("prompt" => "revalidation-race-test"))
+    coordinator = @driver.instance_variable_get(:@coordinator)
+    store = @store
+    coordinator.define_singleton_method(:revalidate) do |_input, expected_cursor:|
+      mutation = store.at_cursor(expected_cursor) do
+        store.transact("command_id" => "preserved-refresh", "type" => "work_order.create",
+          "actor" => {"id" => "astra-orchestrator", "role" => "orchestrator"}, "data" => {
+            "work_order_id" => "preserved", "intent_id" => "milestone_initial", "objective" => "Preserved transaction",
+            "requirement_ids" => ["behavior"], "paths" => ["app.txt"], "check_ids" => ["behavior-check"],
+            "effect_class" => "local_repository"
+          })
+      end
+      store.transact("command_id" => "operator-during-refresh", "type" => "intent.record",
+        "actor" => {"id" => "human", "role" => "operator"}, "data" => {
+          "intent_id" => "post-refresh-clarification", "kind" => "clarification", "text" => "Replan after the fresh evidence transaction",
+          "source" => {"thread_id" => "human-task", "message_id" => "operator-during-refresh"}, "requirement_ids" => ["behavior"]
+        })
+      {"revalidation_id" => "refresh-preserved", "work_order_id" => "preserved", "refreshed" => true,
+       "cursor" => mutation.fetch("cursor")}
+    end
+
+    assert_equal "engineering_stalled", finish["outcome"]
+    assert @store.read.dig("state", "work_orders", "preserved")
+    refute @store.read.dig("state", "work_orders", "obsolete")
+    refute File.exist?(File.join(@state_dir, "driver", "requests", "obsolete-after-refresh", "request.json"))
+    packet = JSON.parse(File.read(File.join(@state_dir, "host-jobs", "test-astra-2", "prompt.json")))
+    assert_includes packet.fetch("task"), "stale_orchestrator_response"
   end
 
   def test_restart_dispatches_the_durable_pending_identity_once

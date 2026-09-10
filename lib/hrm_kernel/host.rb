@@ -52,7 +52,7 @@ module HrmKernel
       "summary" => TEXT,
       "requests" => { "type" => "array", "maxItems" => 16, "items" => object_schema(
         "request_id" => TEXT,
-        "operation" => { "type" => "string", "enum" => %w[apply host-dispatch host-status host-collect check submit assess status verify] },
+        "operation" => { "type" => "string", "enum" => %w[apply host-dispatch host-status host-collect check submit revalidate assess status verify] },
         "input_json" => TEXT
       ) }
     ).freeze
@@ -327,7 +327,7 @@ module HrmKernel
         ids = result["requests"].map do |request|
           invalid.call("invalid orchestrator request") unless request.is_a?(Hash) && request.keys.sort == %w[input_json operation request_id] &&
             request["request_id"].is_a?(String) && IDENTIFIER.match?(request["request_id"]) &&
-            %w[apply host-dispatch host-status host-collect check submit assess status verify].include?(request["operation"]) &&
+            %w[apply host-dispatch host-status host-collect check submit revalidate assess status verify].include?(request["operation"]) &&
             request["input_json"].is_a?(String) && JSON.parse(request["input_json"]).is_a?(Hash)
           request["request_id"]
         end
@@ -617,7 +617,7 @@ module HrmKernel
       line = File.open(File.join(@state_dir, Store::LEDGER_NAME), &:gets)
       initial = JSON.parse(line).dig("command", "data")
       {
-        "host_contract" => "AP-INTERACT RC35 bounded Codex #{spec['role']}",
+        "host_contract" => "AP-INTERACT RC38 bounded Codex #{spec['role']}",
         "instructions" => [
           spec["role"] == "orchestrator" ? "Coordinate the original milestone from this projection and actual job/check feedback. Project sources are read-only. Return structured requests to the trusted driver; never act as the operator, manufacture a review/receipt, or reduce the declared outcome. Technical gaps and partial returns stay engineering work. Use bounded continuations, then smaller assignments when progress stalls. A blocked disposition is not automatically an operator approval request." : spec["role"] == "worker" ? "Implement only your declared work-order files. Do not commit, push, run tests, launch servers, or call providers. The kernel execution runner performs checks after you return." : "Independently review the exact candidate read-only. Do not edit files, run tests, launch servers, or call providers.",
           "Start with the supplied packet. Inspect needed project sources and declared dependency roots in bounded excerpts; do not preload full history. Return context_requests when needed context is unavailable. Technical discovery does not require operator approval.",

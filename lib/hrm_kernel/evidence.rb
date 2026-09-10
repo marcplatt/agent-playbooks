@@ -96,40 +96,37 @@ module HrmKernel
       value
     end
 
-    def verify_completed_work!(state, state_dir: nil)
+    def verify_completed_work!(state, state_dir: nil, current_exact: true)
       milestone = milestone!(state)
       root = milestone.fetch("project_root")
 
       state.fetch("work_orders", {}).each_value do |work_order|
         next unless work_order["status"] == "completed"
-
-        Array(work_order["artifacts"]).each do |artifact|
-          if native_execution?(milestone) && !File.exist?(File.join(root, artifact["path"]))
-            verify_deleted_file!(root, artifact["path"], artifact["sha256"])
-          else
-            verify_file!(root, artifact["path"], artifact["sha256"])
-          end
-        end
-        Array(work_order["checks"]).each do |check|
-          if native_execution?(milestone)
-            verify_native_check_report!(
-              milestone, work_order, Array(work_order["claim_history"]).last,
-              work_order.fetch("revision"), Array(work_order["artifacts"]), check,
-              state_dir: state_dir, current_exact: true
-            )
-          else
-            verify_check_report!(
-              root,
-              work_order,
-              work_order.fetch("revision"),
-              Array(work_order["artifacts"]),
-              check
-            )
-          end
-        end
+        verify_completed_order!(milestone, work_order, state_dir: state_dir, current_exact: current_exact)
       end
 
       true
+    end
+
+    def validation_projection(state, state_dir:)
+      active = active_environment_id(state_dir)
+      return nil unless active
+      milestone = milestone!(state)
+      completed = state.fetch("work_orders", {}).values.select { |order| order["status"] == "completed" }
+      pending = completed.reject do |order|
+        begin
+          verify_completed_order!(milestone, order, state_dir: state_dir, current_exact: true)
+          true
+        rescue HrmKernel::Error
+          false
+        end
+      end
+      {
+        "active_environment_id" => active,
+        "old_checks_eligible" => false,
+        "pending_work_order_ids" => pending.map { |order| order.fetch("id") }.sort,
+        "review_eligible" => pending.empty?
+      }
     end
 
     def milestone!(state)
@@ -198,7 +195,8 @@ module HrmKernel
       fail!("check report #{relative_path.inspect} lacks native execution evidence") unless descriptor.is_a?(Hash)
       runner = HrmKernel::Execution.new(
         project_root: milestone.fetch("project_root"),
-        state_dir: state_dir
+        state_dir: state_dir,
+        repository_view: active_environment_config(state_dir)&.fetch("check_repository", nil)
       )
       expected_binding = {
         "work_order_id" => work_order.fetch("id"),
@@ -214,6 +212,10 @@ module HrmKernel
       )
       fail!("native receipt check id mismatch") unless receipt["check_id"] == check["id"]
       fail!("native receipt conclusion mismatch") unless receipt["conclusion"] == check["conclusion"]
+      active_environment = active_environment_id(state_dir)
+      if active_environment && receipt["environment_id"] != active_environment
+        fail!("native receipt belongs to historical environment #{receipt['environment_id'].inspect}; active environment is #{active_environment.inspect}")
+      end
       verify_native_artifacts!(receipt.fetch("candidate"), work_order, artifacts)
       true
     rescue JSON::ParserError => e
@@ -270,6 +272,58 @@ module HrmKernel
 
     def native_execution?(milestone)
       milestone["mode"] == "implementation"
+    end
+
+    def verify_completed_order!(milestone, work_order, state_dir:, current_exact:)
+      root = milestone.fetch("project_root")
+      Array(work_order["artifacts"]).each do |artifact|
+        if native_execution?(milestone) && !File.exist?(File.join(root, artifact["path"]))
+          verify_deleted_file!(root, artifact["path"], artifact["sha256"])
+        else
+          verify_file!(root, artifact["path"], artifact["sha256"])
+        end
+      end
+      Array(work_order["checks"]).each do |check|
+        if native_execution?(milestone)
+          verify_native_check_report!(
+            milestone, work_order, Array(work_order["claim_history"]).last,
+            work_order.fetch("revision"), Array(work_order["artifacts"]), check,
+            state_dir: state_dir, current_exact: current_exact
+          )
+        else
+          verify_check_report!(root, work_order, work_order.fetch("revision"), Array(work_order["artifacts"]), check)
+        end
+      end
+      true
+    end
+
+    def active_environment_id(state_dir)
+      active_environment_config(state_dir)&.fetch("environment_id")
+    end
+
+    def active_environment_config(state_dir)
+      return nil unless state_dir.is_a?(String)
+      path = File.join(state_dir, "driver", "config.json")
+      return nil unless File.exist?(path)
+      flags = File::RDONLY
+      flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
+      bytes = File.open(path, flags) do |file|
+        stat = file.stat
+        fail!("Driver configuration is not a private regular file") unless stat.file? && stat.uid == Process.uid && (stat.mode & 0o077).zero?
+        fail!("Driver configuration exceeds evidence bound") if stat.size > MAX_CHECK_REPORT_BYTES
+        file.read(MAX_CHECK_REPORT_BYTES + 1)
+      end
+      config = JSON.parse(bytes)
+      transition = config.dig("continuation", "environment_transition")
+      return nil unless transition
+      fail!("environment transition configuration is malformed") unless transition.is_a?(Hash) &&
+        transition["active_environment_id"].is_a?(String) && transition["old_checks_eligible_for_new_claims"].equal?(false)
+      fail!("active validation environment differs from Driver configuration") unless transition["active_environment_id"] == config["environment_id"]
+      config
+    rescue JSON::ParserError => error
+      fail!("Driver configuration contains invalid JSON: #{error.message}")
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP => error
+      fail!("Driver configuration cannot be read: #{error.message}")
     end
 
     def read_verified_file!(path, relative_path, expected_sha256, maximum_bytes, capture)

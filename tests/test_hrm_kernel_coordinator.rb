@@ -82,7 +82,10 @@ class HrmKernelCoordinatorTest < Minitest::Test
 
   def teardown
     @jobs.each { |id| wait_job(id) rescue nil }
-    FileUtils.remove_entry(@temporary) if File.exist?(@temporary)
+    if File.exist?(@temporary)
+      FileUtils.chmod_R(0o700, @temporary)
+      FileUtils.remove_entry(@temporary)
+    end
   end
 
   def test_implementation_native_check_submit_independent_assessment_and_review_ready
@@ -256,7 +259,80 @@ class HrmKernelCoordinatorTest < Minitest::Test
     assert_equal "reviewer-current", ready.dig("projection", "reviews", "current-human-review", "assessment_id")
   end
 
+  def test_completed_contribution_is_preserved_and_locally_revalidated_in_active_environment
+    implement_and_submit
+    before = @store.read.fetch("state").fetch("work_orders").fetch("implement")
+    host_entries = Dir.children(File.join(@state_dir, "host-jobs")).sort
+    active_plan = plan
+    active_plan["environment_id"] = "isolated-ruby-rc38"
+    active_plan["checks"].each { |check| check["environment_id"] = "isolated-ruby-rc38" }
+    git_executable = bundled_git_executable
+    git_environment = {
+      "PATH" => "#{File.dirname(git_executable)}:/usr/bin:/bin",
+      "GIT_CONFIG_NOSYSTEM" => "1", "GIT_CONFIG_GLOBAL" => "/dev/null",
+      "GIT_CONFIG_SYSTEM" => "/dev/null", "GIT_ATTR_NOSYSTEM" => "1",
+      "GIT_OPTIONAL_LOCKS" => "0", "GIT_NO_LAZY_FETCH" => "1", "GIT_TERMINAL_PROMPT" => "0"
+    }
+    active_plan["checks"].each { |check| check["env"].merge!(git_environment) }
+    driver = File.join(@state_dir, "driver")
+    HrmKernel::Host.private_directory!(driver)
+    HrmKernel::Host.atomic_json(File.join(driver, "config.json"), {
+      "run_id" => "rc38-test", "prompt" => "preserve submission", "project_root" => @project,
+      "environment_id" => "isolated-ruby-rc38", "read_roots" => [],
+      "environment_allowlist" => (%w[RUN_ROOT FAIL_CHECK TARGET EXPECTED] + git_environment.keys),
+      "preflight_checks" => active_plan.fetch("checks"), "forbidden_roots" => [@state_dir],
+      "check_repository" => { "schema_version" => HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA,
+        "kind" => "isolated_head_candidate", "git_executable" => git_executable },
+      "max_turns" => 8, "max_parallel_workers" => 1,
+      "continuation" => { "environment_transition" => {
+        "active_environment_id" => "isolated-ruby-rc38",
+        "old_checks_eligible_for_new_claims" => false
+      } }
+    })
+
+    projection = @store.project(role: "orchestrator").fetch("projection")
+    assert_equal ["implement"], projection.dig("technical_validation", "pending_work_order_ids")
+    assert_equal ["implement"], HrmKernel::Store.new(@state_dir).project(role: "orchestrator")
+      .dig("projection", "technical_validation", "pending_work_order_ids")
+    assert_includes projection.dig("milestone", "readiness_blockers").map { |item| item["kind"] }, "fresh_environment_validation"
+    assert_raises(HrmKernel::Error) { ready_for_review(review_id: "stale-environment") }
+    error = assert_raises(HrmKernel::Error) do
+      HrmKernel::Evidence.verify_completed_work!(@store.read.fetch("state"), state_dir: @state_dir)
+    end
+    assert_match(/historical environment|repository view is missing/, error.message)
+
+    result = @coordinator.revalidate(
+      "revalidation_id" => "fresh-rc38", "work_order_id" => "implement", "check_plan" => active_plan
+    )
+    assert result["refreshed"]
+    assert_equal "passed", result.dig("checks", 0, "conclusion")
+    assert_equal host_entries, Dir.children(File.join(@state_dir, "host-jobs")).sort
+    after = @store.read.fetch("state").fetch("work_orders").fetch("implement")
+    assert_equal "completed", after["status"]
+    assert_equal before["revision"], after["revision"]
+    assert_equal before["artifacts"], after["artifacts"]
+    assert_equal before["evidence_digest"], after.dig("evidence_history", 0, "evidence_digest")
+    assert_empty @store.project(role: "orchestrator").dig("projection", "technical_validation", "pending_work_order_ids")
+
+    cli_input = File.join(@temporary, "revalidation.json")
+    File.write(cli_input, JSON.generate(
+      "revalidation_id" => "fresh-rc38", "work_order_id" => "implement", "check_plan" => active_plan
+    ))
+    cursor = @store.read.fetch("cursor")
+    script = File.realpath(File.join(__dir__, "..", "scripts", "hrm_kernel.rb"))
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby, script, "revalidate", "--state-dir", @state_dir, "--input", cli_input
+    )
+    assert status.success?, stderr
+    assert JSON.parse(stdout).fetch("refreshed")
+    assert_equal cursor, @store.read.fetch("cursor")
+  end
+
   private
+
+  def bundled_git_executable
+    File.realpath(File.join(Dir.home, ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/bin/git"))
+  end
 
   def command(type, role, actor, data)
     @counter += 1

@@ -208,6 +208,91 @@ module HrmKernel
       )
     end
 
+    # Revalidates a preserved completed contribution under the active execution
+    # environment. This runs trusted native checks only: it does not dispatch or
+    # resume a model job, alter the work-order contract, or claim new authority.
+    def revalidate(input, expected_cursor: nil)
+      exact_input!(input, %w[revalidation_id work_order_id check_plan])
+      id = identifier!(input.fetch("revalidation_id"))
+      work_order_id = identifier!(input.fetch("work_order_id"))
+      config = driver_config(required: true)
+      active_environment = active_environment!(config)
+      plan = input.fetch("check_plan")
+      fail!("revalidation check_plan must be an object") unless plan.is_a?(Hash)
+      fail!("revalidation environment differs from active environment") unless plan["environment_id"] == active_environment
+      state_record = @store.read
+      expected_cursor ||= state_record.fetch("cursor")
+      if state_record.fetch("cursor") != expected_cursor
+        raise HrmKernel::Error.new("stale_driver_response", "Ledger changed before completed contribution capture")
+      end
+      state = state_record.fetch("state")
+      fail!("native coordination requires implementation mode") unless state&.dig("milestone", "mode") == "implementation"
+      order = state.fetch("work_orders").fetch(work_order_id) { fail!("unknown completed work order") }
+      fail!("revalidation requires a completed work order") unless order["status"] == "completed"
+      checks = plan["checks"]
+      fail!("revalidation checks must be an array") unless checks.is_a?(Array)
+      fail!("revalidation checks must exactly match the work order") unless checks.map { |check| check.is_a?(Hash) && check["id"] }.sort == order.fetch("check_ids").sort
+      checks.each do |check|
+        fail!("revalidation check environment differs from active environment") unless check["environment_id"] == active_environment
+        unless config.fetch("preflight_checks").any? { |smoke| smoke.fetch("argv").first == check.fetch("argv").first }
+          fail!("revalidation check executable was not preflighted")
+        end
+      end
+      request_path = File.join(@directory, "revalidation-#{id}.json")
+      if File.exist?(request_path)
+        fail!("conflicting revalidation ID reuse") unless read_record(request_path) == input
+      else
+        Host.atomic_json(request_path, input)
+      end
+
+      claim_id = Array(order.fetch("claim_history")).last
+      fail!("completed work order has no preserved claim") unless claim_id.is_a?(String) && Host::IDENTIFIER.match?(claim_id)
+      fail!("completed work order has no preserved worker") unless order["last_owner_id"].is_a?(String) && Host::IDENTIFIER.match?(order["last_owner_id"])
+      runner = execution_for_config(config)
+      candidate = runner.capture_candidate(
+        work_order: order, milestone: state.fetch("milestone"), claim_id: claim_id,
+        revision: order.fetch("revision"), requirement_revisions: order.fetch("requirement_revisions"),
+        check_plan: plan, authorized_paths: authorized_paths(state)
+      )
+      artifacts = candidate.fetch("changes").select { |entry| order.fetch("paths").any? { |path| HrmKernel::Evidence.native_path_matches?(entry["path"], path) } }
+                           .map do |entry|
+        sha = entry["status"] == "D" ? Digest::SHA256.hexdigest("deleted\0#{entry.fetch('path')}") : entry.fetch("sha256")
+        { "path" => entry.fetch("path"), "sha256" => sha }
+      end
+      fail!("revalidation cannot change the completed contribution") unless artifacts.sort_by { |entry| entry["path"] } == order.fetch("artifacts").sort_by { |entry| entry["path"] }
+
+      results = checks.map do |spec|
+        outcome = runner.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+        receipt = runner.verify_receipt!(descriptor(outcome), candidate: candidate, current_exact: true)
+        { "id" => spec.fetch("id"), "conclusion" => receipt.fetch("conclusion"), "execution" => descriptor(outcome) }
+      end
+      return { "revalidation_id" => id, "work_order_id" => work_order_id, "candidate_digest" => candidate.fetch("candidate_digest"),
+               "checks" => results, "refreshed" => false } unless results.all? { |result| result["conclusion"] == "passed" }
+
+      root = state.fetch("milestone").fetch("project_root")
+      evidence_checks = results.map do |result|
+        relative = "#{REPORT_DIRECTORY}/revalidation-#{id}-#{result.fetch('id')}-#{candidate.fetch('candidate_digest')}.json"
+        ignored_report_path!(root, relative, config)
+        report = { "check_id" => result.fetch("id"), "conclusion" => "passed", "work_order_id" => order.fetch("id"),
+                   "revision" => order.fetch("revision"), "artifacts" => artifacts, "execution" => result.fetch("execution") }
+        path = File.join(root, relative)
+        FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
+        Host.atomic_json(path, report)
+        { "id" => result.fetch("id"), "conclusion" => "passed", "artifact_path" => relative,
+          "sha256" => Digest::SHA256.file(path).hexdigest }
+      end
+      command = {
+        "command_id" => "native-revalidate-#{id}-#{candidate.fetch('candidate_digest')}",
+        "type" => "work_order.refresh_evidence",
+        "actor" => { "role" => "worker", "id" => order.fetch("last_owner_id") },
+        "data" => { "work_order_id" => order.fetch("id"), "revision" => order.fetch("revision"),
+                    "claim_id" => claim_id, "artifacts" => artifacts, "checks" => evidence_checks }
+      }
+      mutation = @store.at_cursor(expected_cursor) { @store.transact(command) }
+      { "revalidation_id" => id, "work_order_id" => work_order_id, "candidate_digest" => candidate.fetch("candidate_digest"),
+        "checks" => results, "refreshed" => true, "cursor" => mutation.fetch("cursor") }
+    end
+
     private
 
     def reject_historical_environment_job!(job_id)
@@ -255,9 +340,20 @@ module HrmKernel
     def execution(job)
       sentinel = File.join(@directory, "isolation-sentinel.txt")
       Host.atomic_write(sentinel, "Harmless RC34 isolation probe.\n") unless File.exist?(sentinel)
+      config = driver_config
       Execution.new(project_root: job.fetch("project_root"), state_dir: @store.directory,
                     read_roots: job.fetch("execution_read_roots"), environment_allowlist: job.fetch("execution_environment_allowlist"),
-                    forbidden_read_path: sentinel, forbidden_write_path: sentinel)
+                    forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+                    repository_view: config["check_repository"])
+    end
+
+    def execution_for_config(config)
+      sentinel = File.join(@directory, "isolation-sentinel.txt")
+      Host.atomic_write(sentinel, "Harmless RC38 isolation probe.\n") unless File.exist?(sentinel)
+      Execution.new(project_root: config.fetch("project_root"), state_dir: @store.directory,
+                    read_roots: config.fetch("read_roots"), environment_allowlist: config.fetch("environment_allowlist"),
+                    forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+                    repository_view: config["check_repository"])
     end
 
     def authorized_paths(state)
@@ -272,14 +368,35 @@ module HrmKernel
       end
     end
 
-    def ignored_report_path!(root, relative)
+    def ignored_report_path!(root, relative, config = driver_config)
       current = root
       relative.split("/").each do |part|
         current = File.join(current, part)
         fail!("check report path may not contain a symlink") if File.symlink?(current)
       end
-      _output, status = Open3.capture2e("git", "-C", root, "check-ignore", "--quiet", "--", relative)
+      git = config.dig("check_repository", "git_executable") || "/usr/bin/git"
+      environment = { "LC_ALL" => "C", "GIT_CONFIG_NOSYSTEM" => "1", "GIT_CONFIG_GLOBAL" => "/dev/null",
+                      "GIT_CONFIG_SYSTEM" => "/dev/null", "GIT_OPTIONAL_LOCKS" => "0" }
+      _output, status = Open3.capture2e(environment, git, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+        "-C", root, "check-ignore", "--quiet", "--", relative, unsetenv_others: true)
       fail!("native reports must be ignored by the candidate repository: #{REPORT_DIRECTORY}") unless status.success?
+    end
+
+    def driver_config(required: false)
+      path = File.join(@store.directory, "driver", "config.json")
+      return {} unless File.exist?(path)
+      read_record(path)
+    rescue HrmKernel::Error
+      raise if required
+      {}
+    end
+
+    def active_environment!(config)
+      transition = config.dig("continuation", "environment_transition")
+      fail!("revalidation requires an environment transition") unless transition.is_a?(Hash) &&
+        transition["old_checks_eligible_for_new_claims"].equal?(false) &&
+        transition["active_environment_id"] == config["environment_id"]
+      config.fetch("environment_id")
     end
 
     def descriptor(outcome)

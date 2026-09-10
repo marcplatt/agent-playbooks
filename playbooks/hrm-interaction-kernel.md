@@ -1,22 +1,22 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.37 - explicit execution environment transition
-version: "0.6.1-rc37"
+title: AP-INTERACT RC.38 - isolated repository validation and preserved contributions
+version: "0.7.0-rc38"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC37
+experiment_id: AP-INTERACT-RC38
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.37** develops the [RC.36 experiment](../experiments/ap-interact-rc36/README.md).
-It uses software version `0.6.1-rc37` and protocol `ap-hrm-interaction/2`.
-It adds an explicit, supervised execution-environment transition for a stopped
-run, with fresh preflight and preserved historical evidence. The
-[RC.37 experiment record](../experiments/ap-interact-rc37/README.md) describes the
-actual environment limitation found by AE. Production Canary acceptance remains
-unproved.
+**AP-INTERACT RC.38** develops the [RC.37 experiment](../experiments/ap-interact-rc37/README.md).
+It uses software version `0.7.0-rc38` and protocol `ap-hrm-interaction/2`.
+It preserves submitted contributions across a stopped environment transition,
+requires fresh validation in the replacement environment, and runs repository-aware
+checks against an isolated exact-HEAD candidate without exposing later Git history.
+The [RC.38 experiment record](../experiments/ap-interact-rc38/README.md) defines the
+transition and check contracts. Production Canary acceptance remains unproved.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
 or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
@@ -94,23 +94,73 @@ engineering or host failure, but cannot override review, decision, preflight or
 turn-budget gates. Publication during a synchronized driver step returns an
 explicit retry error; the caller must retry the same input ID.
 
-For the supported RC.36 to RC.37 environment transition, stop the old controller between steps,
+For the supported RC.37 to RC.38 environment transition, stop the old controller between steps,
 allow its native jobs to finish and preserve the original state. Invoke
 `driver-continue --state-dir SOURCE --destination-state-dir DESTINATION --input CONTINUATION.json`
-from a clean committed RC.37 checkout. The source kernel must match its declared
-clean RC.36 pin. Supply an explicit `environment_replacement` with a new
-`environment_id`, exact `read_roots`, `environment_allowlist` and
-`preflight_checks`. The new environment requires fresh successful preflight;
-the technical-input journal itself cannot grant this replacement. The continuation preserves historical ledger and receipts, records
-both kernel identities and the supervisor's stop assertion, and retains consumed
-turns and human gates. It requires a fresh Astra projection rather than replaying
-copied requests. The source lock establishes an observed safe boundary; it cannot
-prove an old external controller will never restart. Keep that controller stopped.
-See the experiment record for input examples and limitations.
-The earlier RC.35 to RC.36 transition remains available from its frozen RC.36
-checkout. Old-environment jobs in an RC.37 continuation are historical, not current
-check or submission evidence. Keep any unresolved obligations visible until
-fresh attempts and validation satisfy them.
+from a clean committed RC.38 checkout. The source kernel must match its declared
+clean RC.37 pin. Supply an explicit `environment_replacement` with a new
+`environment_id`, exact `read_roots`, `environment_allowlist`, `preflight_checks`,
+and `check_repository`. The repository object names the exact pinned Git executable
+and schema `ap-hrm-isolated-head-candidate/1`. The new environment requires fresh
+successful preflight; neither Astra nor the technical-input journal can grant it.
+
+The continuation keeps the source ledger byte-for-byte, including submitted
+contributions, original claims and evidence, while retaining the consumed turn
+budget and every human gate. Old jobs and check receipts become historical. Active
+job registries and model-resume fields are cleared, so cloning does not resume a
+worker, Astra task or provider effect. A running claim must be released and freshly
+dispatched. A completed contribution remains completed but is listed under
+`technical_validation.pending_work_order_ids` until `revalidate` records successful
+current-environment receipts. Revalidation cannot change its artifacts, paths,
+requirements, ownership, revision, effect class or review state.
+
+Each isolated repository check materializes the source repository's exact HEAD
+tree and overlays the captured current candidate. Its worktree is read-only to the
+check. Parent objects, source branch and tag refs, reflogs, remotes, hooks,
+alternates and ambient Git configuration are unavailable. The receipt binds the source root, HEAD and tree,
+candidate manifest, copied object set, pinned Git identity and a raw no-follow
+metadata snapshot. Check output must describe this isolated view rather than claim
+canonical history validation. Use `{run_root}` for writable caches and fixtures;
+`{candidate_root}` refers to the read-only validation root. `configuration_paths`
+still names only configuration copied into `{run_root}`.
+
+The source lock establishes an observed safe boundary; it cannot prove an old
+external controller will never restart. Keep that controller stopped. The earlier
+RC.35 to RC.36 and RC.36 to RC.37 transitions remain available from their frozen
+kernel checkouts. See the RC.38 experiment record for exact JSON contracts and
+limitations.
+
+The RC.38 replacement adds this exact repository policy beside the replacement
+environment ID, roots, allowlist and preflight checks:
+
+```json
+{
+  "check_repository": {
+    "schema_version": "ap-hrm-isolated-head-candidate/1",
+    "kind": "isolated_head_candidate",
+    "git_executable": "/absolute/pinned/bundled/git"
+  }
+}
+```
+
+Fresh validation of a preserved completed contribution uses:
+
+```json
+{
+  "revalidation_id": "unique-id",
+  "work_order_id": "completed-work-order-id",
+  "check_plan": {
+    "environment_id": "active-environment-id",
+    "checks": []
+  }
+}
+```
+
+The checks array must contain exactly the order's declared check IDs and normal
+frozen execution specifications. Use
+`revalidate --state-dir DIR --input REVALIDATION.json` for a direct trusted call;
+the Astra request transport exposes the same technical operation but no operator
+role, approval, environment grant or effect permission.
 
 ### Automatic driver
 
@@ -340,7 +390,7 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [RC.37 dispatcher](../templates/hrm-interaction-agents.md)
+Adoption is explicit. Use the [RC.38 dispatcher](../templates/hrm-interaction-agents.md)
 in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
 Estimating, this is an experimental project-profile recommendation only. Preserve
 the installed global and repository policies unless their own adoption change is
@@ -360,6 +410,13 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.7.0-rc38 — 2026-09-10:** Preserves completed submissions across the
+  stopped RC.37 environment transition while making old receipts ineligible for
+  current review. Adds bounded native `revalidate`, an exact-HEAD isolated Git
+  candidate with authenticated repository-view receipts, and stale-response
+  rejection across the revalidation transaction. Historical model tasks are not
+  resumed and the original ledger authority and turn budget remain intact.
 
 - **0.6.1-rc37 — 2026-09-09:** Corrects stopped-run copying of ordinary test
   scratch inside private execution directories, preserving original permissions

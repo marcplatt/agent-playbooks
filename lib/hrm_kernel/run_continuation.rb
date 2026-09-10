@@ -23,12 +23,15 @@ module HrmKernel
   class RunContinuation
     LEGACY_SCHEMA_VERSION = "ap-hrm-run-continuation/1"
     SCHEMA_VERSION = "ap-hrm-run-continuation/2"
+    RC38_SCHEMA_VERSION = "ap-hrm-run-continuation/3"
     PROVENANCE_SCHEMA = "ap-hrm-supervisor-continuation/1"
     TRANSITIONS = {
       "AP-INTERACT RC.35" => { "target" => "AP-INTERACT RC.36", "environment_replacement" => false },
-      "AP-INTERACT RC.36" => { "target" => "AP-INTERACT RC.37", "environment_replacement" => true }
+      "AP-INTERACT RC.36" => { "target" => "AP-INTERACT RC.37", "environment_replacement" => true },
+      "AP-INTERACT RC.37" => { "target" => "AP-INTERACT RC.38", "environment_replacement" => true }
     }.freeze
     ENVIRONMENT_FIELDS = %w[environment_id read_roots environment_allowlist preflight_checks].freeze
+    RC38_ENVIRONMENT_FIELDS = (ENVIRONMENT_FIELDS + %w[check_repository]).freeze
     MAX_FILE_BYTES = 16 * 1024 * 1024
     MAX_TOTAL_BYTES = 256 * 1024 * 1024
     MAX_ENTRIES = 20_000
@@ -40,6 +43,8 @@ module HrmKernel
     MANIFEST_PATH = File.join(CONTINUATION_DIRECTORY, "manifest.json")
     RC37_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc37")
     RC37_MANIFEST_PATH = File.join(RC37_CONTINUATION_DIRECTORY, "manifest.json")
+    RC38_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc38")
+    RC38_MANIFEST_PATH = File.join(RC38_CONTINUATION_DIRECTORY, "manifest.json")
 
     class << self
       def clone(source_state_dir:, destination_state_dir:, new_run_id:, source_kernel_root:,
@@ -208,7 +213,7 @@ module HrmKernel
       end
       verify_preflight_records!(config, preflight)
       verify_driver_requests!
-      Evidence.verify_completed_work!(state, state_dir: @source)
+      Evidence.verify_completed_work!(state, state_dir: @source, current_exact: source_version != "AP-INTERACT RC.37")
 
       supervisor = SupervisorInput.new(directory: File.join(@source, "driver")).snapshot
       observed_technical_cursor = runtime.fetch("observed_technical_input_cursor", 0)
@@ -226,12 +231,12 @@ module HrmKernel
       fail!("new run id would collide with copied Host history") if statuses.key?(next_job_id)
 
       if environment_replacement
-        environment_replacement = validate_environment_replacement!(environment_replacement, config)
-        reject_old_environment_completion!(state)
+        environment_replacement = validate_environment_replacement!(environment_replacement, config, source_version)
+        reject_old_environment_completion!(state, allow_completed: source_version == "AP-INTERACT RC.37")
       end
 
       verify_source_unchanged!(tree)
-      {
+      record = {
         "store" => store_receipt,
         "config" => config, "config_bytes" => config_bytes,
         "runtime" => runtime, "runtime_bytes" => runtime_bytes,
@@ -257,23 +262,33 @@ module HrmKernel
         fail!("RC35 source is already a versioned continuation") if config.key?("continuation") || runtime.key?("continuation")
         fail!("RC35 source contains a supervisor-input journal") if File.exist?(journal)
         fail!("RC35 to RC36 continuation does not accept an environment replacement") if @environment_replacement_input
-      elsif config["continuation"]
+      elsif source_version == "AP-INTERACT RC.36" && config["continuation"]
         manifest_path = File.join(@source, MANIFEST_PATH)
         fail!("RC36 continuation provenance is missing") unless File.file?(manifest_path)
         manifest = parse_object(read_private(manifest_path), "source continuation manifest")
         fail!("source continuation target version is not RC36") unless manifest["target_kernel_version"] == source_version
         verify_prior_continuation!(manifest)
+      elsif source_version == "AP-INTERACT RC.37"
+        manifest_path = File.join(@source, RC37_MANIFEST_PATH)
+        fail!("RC37 continuation provenance is missing") unless File.file?(manifest_path)
+        manifest = parse_object(read_private(manifest_path), "source RC37 continuation manifest")
+        fail!("source continuation target version is not RC37") unless manifest["target_kernel_version"] == source_version
+        verify_prior_continuation!(manifest, archive: RC37_CONTINUATION_DIRECTORY, schema: SCHEMA_VERSION)
       end
       if source_version == "AP-INTERACT RC.36"
         archive = File.join(@source, RC37_CONTINUATION_DIRECTORY)
         fail!("RC37 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
+      end
+      if source_version == "AP-INTERACT RC.37"
+        archive = File.join(@source, RC38_CONTINUATION_DIRECTORY)
+        fail!("RC38 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
       end
     end
 
     def normalize_environment_replacement(source_version)
       required = TRANSITIONS.fetch(source_version).fetch("environment_replacement")
       if required
-        fail!("RC36 to RC37 continuation requires environment_replacement") unless @environment_replacement_input.is_a?(Hash)
+        fail!("#{source_version} continuation requires environment_replacement") unless @environment_replacement_input.is_a?(Hash)
         JSON.parse(JSON.generate(@environment_replacement_input))
       else
         nil
@@ -282,8 +297,9 @@ module HrmKernel
       fail!("environment replacement must contain JSON values")
     end
 
-    def validate_environment_replacement!(replacement, source_config)
-      fail!("environment replacement fields are invalid") unless replacement.keys.sort == ENVIRONMENT_FIELDS.sort
+    def validate_environment_replacement!(replacement, source_config, source_version)
+      fields = source_version == "AP-INTERACT RC.37" ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
+      fail!("environment replacement fields are invalid") unless replacement.keys.sort == fields.sort
       fail!("source environment configuration is incomplete") unless ENVIRONMENT_FIELDS.all? { |field| source_config.key?(field) }
       fail!("source environment_id is invalid") unless source_config["environment_id"].is_a?(String) &&
         Host::IDENTIFIER.match?(source_config["environment_id"])
@@ -320,19 +336,33 @@ module HrmKernel
       fail!("replacement preflight IDs must be unique identifiers") unless ids.uniq == ids &&
         ids.all? { |id| id.is_a?(String) && Host::IDENTIFIER.match?(id) }
 
-      old_environment = source_config.slice(*ENVIRONMENT_FIELDS)
+      if fields.include?("check_repository")
+        repository = replacement["check_repository"]
+        expected = %w[git_executable kind schema_version]
+        fail!("replacement check_repository is malformed") unless repository.is_a?(Hash) && repository.keys.sort == expected
+        fail!("replacement check_repository schema is unsupported") unless repository["schema_version"] == Execution::REPOSITORY_VIEW_SCHEMA
+        fail!("replacement check_repository kind is unsupported") unless repository["kind"] == "isolated_head_candidate"
+        git = repository["git_executable"]
+        fail!("replacement Git executable must be an absolute regular executable") unless git.is_a?(String) && Pathname.new(git).absolute? &&
+          File.file?(git) && File.executable?(git) && !File.symlink?(git) && File.realpath(git) == git
+        required_environment = %w[PATH GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_ATTR_NOSYSTEM GIT_OPTIONAL_LOCKS GIT_NO_LAZY_FETCH GIT_TERMINAL_PROMPT]
+        fail!("replacement environment allowlist omits isolated Git controls") unless (required_environment - allowlist).empty?
+      end
+
+      old_fields = source_config.key?("check_repository") ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
+      old_environment = source_config.slice(*old_fields)
       fail!("environment replacement did not change the frozen environment") if digest(old_environment) == digest(replacement)
       replacement
     rescue SystemCallError => error
       fail!("cannot resolve replacement environment: #{error.message}")
     end
 
-    def verify_prior_continuation!(manifest)
-      fail!("source continuation schema is unsupported") unless manifest["schema_version"] == LEGACY_SCHEMA_VERSION
+    def verify_prior_continuation!(manifest, archive: CONTINUATION_DIRECTORY, schema: LEGACY_SCHEMA_VERSION)
+      fail!("source continuation schema is unsupported") unless manifest["schema_version"] == schema
       checks = {
-        File.join("driver", "continuation", "source-config.json") => manifest["source_config_sha256"],
-        File.join("driver", "continuation", "source-runtime.json") => manifest["source_runtime_sha256"],
-        File.join("driver", "continuation", "source-preflight.json") => manifest["source_preflight_sha256"],
+        File.join(archive, "source-config.json") => manifest["source_config_sha256"],
+        File.join(archive, "source-runtime.json") => manifest["source_runtime_sha256"],
+        File.join(archive, "source-preflight.json") => manifest["source_preflight_sha256"],
         File.join("driver", "config.json") => manifest["target_config_sha256"],
         File.join("driver", "preflight.json") => manifest["target_preflight_sha256"]
       }
@@ -352,9 +382,9 @@ module HrmKernel
       fail!("source continuation manifest is incomplete: #{error.message}")
     end
 
-    def reject_old_environment_completion!(state)
+    def reject_old_environment_completion!(state, allow_completed: false)
       completed = state.fetch("work_orders").values.select { |order| order["status"] == "completed" }
-      fail!("RC36 environment replacement refuses completed work orders with old check eligibility") unless completed.empty?
+      fail!("environment replacement refuses completed work orders with old check eligibility") unless allow_completed || completed.empty?
       unless state.fetch("reviews").empty? && state.fetch("assessments").empty? &&
              state.dig("milestone", "current_review_id").nil? &&
              !%w[review_ready closed deferred].include?(state.dig("milestone", "phase"))
@@ -448,7 +478,13 @@ module HrmKernel
     def request_record(source)
       environment = environment_transition_record(source)
       body = {
-        "schema_version" => environment ? SCHEMA_VERSION : LEGACY_SCHEMA_VERSION,
+        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.37"
+                              RC38_SCHEMA_VERSION
+                            elsif environment
+                              SCHEMA_VERSION
+                            else
+                              LEGACY_SCHEMA_VERSION
+                            end,
         "source_state_dir" => @source,
         "destination_state_dir" => @destination,
         "source_run_id" => source.dig("config", "run_id"),
@@ -486,7 +522,7 @@ module HrmKernel
         status = statuses.fetch(job_id)
         status.slice("job_id", "role", "work_order_id", "revision", "claim_id", "status", "result_status", "thread_id")
       end
-      {
+      record = {
         "source_environment" => original,
         "active_environment" => replacement,
         "source_environment_sha256" => digest(original),
@@ -499,6 +535,25 @@ module HrmKernel
         "fresh_preflight_required" => true,
         "source_preflight_attribution" => "historical_only"
       }
+      if source["source_kernel_version"] == "AP-INTERACT RC.37"
+        record["completed_contributions"] = completed_contributions(source["state"])
+      end
+      record
+    end
+
+    def completed_contributions(state)
+      return [] unless state.is_a?(Hash)
+      state.fetch("work_orders").values.select { |order| order["status"] == "completed" }.sort_by { |order| order.fetch("id") }.map do |order|
+        {
+          "work_order_id" => order.fetch("id"), "revision" => order.fetch("revision"),
+          "claim_id" => Array(order.fetch("claim_history")).last,
+          "last_owner_id" => order.fetch("last_owner_id"),
+          "evidence_digest" => order.fetch("evidence_digest"),
+          "check_ids" => order.fetch("check_ids"),
+          "artifacts_sha256" => digest(order.fetch("artifacts")),
+          "required_action" => "fresh_native_revalidation_under_active_environment"
+        }
+      end
     end
 
     def copy_tree(source, destination)
@@ -542,12 +597,13 @@ module HrmKernel
       )
       environment = request["environment_transition"]
       if environment
-        ENVIRONMENT_FIELDS.each { |field| config[field] = environment.fetch("active_environment").fetch(field) }
+        environment.fetch("active_environment").each { |field, value| config[field] = value }
         config["continuation"]["environment_transition"] = compact_environment_transition(environment)
       end
 
       runtime = JSON.parse(source.fetch("runtime_bytes"))
-      resume_job = safe_astra_resume_job(source.fetch("statuses"), runtime)
+      rc38 = request["schema_version"] == RC38_SCHEMA_VERSION
+      resume_job = rc38 ? nil : safe_astra_resume_job(source.fetch("statuses"), runtime)
       runtime.delete("pending_dispatch")
       runtime.delete("pending_job_registration")
       runtime["orchestrator_job"] = nil
@@ -566,29 +622,37 @@ module HrmKernel
         runtime["seen_jobs"] = []
         runtime["history"] = []
       end
+      if rc38
+        runtime["resume_job"] = nil
+        runtime["last_orchestrator_job"] = nil
+        runtime["outcome"] = "active" if %w[active engineering_stalled host_failure].include?(source.dig("runtime", "outcome"))
+      end
 
       Host.atomic_json(File.join(root, "driver", "config.json"), config)
       Host.atomic_json(File.join(root, "driver", "runtime.json"), runtime)
     end
 
     def continuation_archive(request)
+      return RC38_CONTINUATION_DIRECTORY if request["schema_version"] == RC38_SCHEMA_VERSION
       request["schema_version"] == SCHEMA_VERSION ? RC37_CONTINUATION_DIRECTORY : CONTINUATION_DIRECTORY
     end
 
     def manifest_path(request)
+      return RC38_MANIFEST_PATH if request["schema_version"] == RC38_SCHEMA_VERSION
       request["schema_version"] == SCHEMA_VERSION ? RC37_MANIFEST_PATH : MANIFEST_PATH
     end
 
     def compact_environment_transition(environment)
-      environment.slice(
-        "source_environment_id", "active_environment_id", "source_environment_sha256",
-        "active_environment_sha256", "historical_job_ids", "old_checks_eligible_for_new_claims",
-        "fresh_preflight_required"
-      )
+      fields = %w[source_environment_id active_environment_id source_environment_sha256
+                  active_environment_sha256 historical_job_ids old_checks_eligible_for_new_claims
+                  fresh_preflight_required]
+      fields << "completed_contributions" if environment.key?("completed_contributions")
+      environment.slice(*fields)
     end
 
     def historical_environment(source, environment)
       jobs = environment.fetch("historical_jobs")
+      rc38 = environment.fetch("active_environment").key?("check_repository")
       {
         "source_environment_id" => environment.fetch("source_environment_id"),
         "active_environment_id" => environment.fetch("active_environment_id"),
@@ -601,21 +665,26 @@ module HrmKernel
               job["revision"] == order["revision"] && job["claim_id"] == order["claim_id"] &&
               job["thread_id"] && Host::UUID.match?(job["thread_id"])
           end
+          resumable = [] if rc38
           {
             "work_order_id" => order.fetch("id"), "status" => order.fetch("status"),
             "revision" => order.fetch("revision"), "claim_id" => order["claim_id"],
-            "last_owner_id" => order["owner_id"],
-            "required_action" => historical_work_order_action(order),
+            "last_owner_id" => order["last_owner_id"],
+            "required_action" => historical_work_order_action(order, rc38: rc38),
             "historical_resume_job_ids" => resumable.map { |job| job.fetch("job_id") }
           }
         end,
         "old_checks_eligible_for_new_claims" => false
-      }
+      }.tap do |record|
+        record["completed_contributions"] = environment.fetch("completed_contributions") if environment.key?("completed_contributions")
+      end
     end
 
-    def historical_work_order_action(order)
+    def historical_work_order_action(order, rc38: false)
       return "none_cancelled" if order["status"] == "cancelled"
       return "fresh_dispatch_under_active_environment" if order["status"] == "queued"
+      return "fresh_native_revalidation_under_active_environment" if rc38 && order["status"] == "completed"
+      return "release_then_fresh_dispatch_under_active_environment" if rc38
       "resume_same_claim_under_active_environment_or_release_then_rebind"
     end
 
@@ -628,7 +697,8 @@ module HrmKernel
         project_root: config.fetch("project_root"), state_dir: root,
         read_roots: config.fetch("read_roots", []),
         environment_allowlist: config.fetch("environment_allowlist", []),
-        forbidden_read_path: sentinel, forbidden_write_path: sentinel
+        forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+        repository_view: config["check_repository"]
       )
       receipts = config.fetch("preflight_checks").map do |spec|
         descriptor = execution.preflight(spec: spec)
@@ -652,7 +722,8 @@ module HrmKernel
         project_root: config.fetch("project_root"), state_dir: root,
         read_roots: config.fetch("read_roots", []),
         environment_allowlist: config.fetch("environment_allowlist", []),
-        forbidden_read_path: sentinel, forbidden_write_path: sentinel
+        forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+        repository_view: config["check_repository"]
       )
       receipts = parse_array(read_private(File.join(root, "driver", "preflight.json")), "continued Driver preflight")
       fail!("continued Driver preflight set changed") unless receipts.map { |entry| entry["id"] } ==
@@ -668,8 +739,8 @@ module HrmKernel
     end
 
     def finalize_destination!(root, source, request)
-      resume_job = safe_astra_resume_job(source.fetch("statuses"), source.fetch("runtime"))
-      fresh = request["schema_version"] == SCHEMA_VERSION
+      resume_job = request["schema_version"] == RC38_SCHEMA_VERSION ? nil : safe_astra_resume_job(source.fetch("statuses"), source.fetch("runtime"))
+      fresh = request["schema_version"] != LEGACY_SCHEMA_VERSION
       archive = continuation_archive(request)
       target_preflight = parse_array(read_private(File.join(root, "driver", "preflight.json")), "target preflight")
       manifest = request.merge(
@@ -717,7 +788,7 @@ module HrmKernel
       {
         "kind" => "versioned_run_continuation",
         "ok" => true,
-        "message" => "#{request.fetch('target_kernel_version')} continuation: project the copied ledger and receipts afresh. Do not replay requests from any copied Astra result. Preserve operator decisions, authority, work state, and consumed turn budget. Historical environment jobs and checks are ineligible for new claims; commission fresh work under the active environment.",
+        "message" => "#{request.fetch('target_kernel_version')} continuation: project the copied ledger and receipts afresh. Do not replay requests from any copied Astra result. Preserve operator decisions, authority, submitted contributions, work state, and consumed turn budget. Historical jobs and checks are ineligible for current validation. Revalidate completed contributions with fresh native checks; release running claims before fresh active-environment dispatch. No model task is resumed by this transition.",
         "source_run_id" => request["source_run_id"],
         "source_kernel_version" => request["source_kernel_version"],
         "source_kernel_revision" => request["source_kernel_revision"],
@@ -765,7 +836,8 @@ module HrmKernel
         project_root: config.fetch("project_root"), state_dir: root,
         read_roots: config.fetch("read_roots", []),
         environment_allowlist: config.fetch("environment_allowlist", []),
-        forbidden_read_path: sentinel, forbidden_write_path: sentinel
+        forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+        repository_view: config["check_repository"]
       )
       receipts = parse_array(read_private(File.join(root, "driver", "preflight.json")), "continued Driver preflight")
       fail!("continued Driver preflight set changed") unless receipts.map { |entry| entry["id"] } ==

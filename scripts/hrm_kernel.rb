@@ -22,7 +22,7 @@ module HrmKernel
                when "status" then status(argv)
                when "verify" then verify(argv)
                when "host-dispatch", "host-status", "host-collect" then host(command, argv, stdin)
-               when "check", "submit", "assess" then coordinate(command, argv, stdin)
+               when "check", "submit", "revalidate", "assess" then coordinate(command, argv, stdin)
                when "driver-start", "driver-step", "driver-status", "driver-run", "driver-input" then drive(command, argv, stdin)
                when "driver-continue" then continue_run(argv, stdin)
                else
@@ -101,6 +101,7 @@ module HrmKernel
       case command
       when "check" then coordinator.check(input)
       when "submit" then coordinator.submit(input)
+      when "revalidate" then coordinator.revalidate(input)
       when "assess" then coordinator.assess(input)
       end
     end
@@ -198,6 +199,7 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb host-collect --state-dir DIR --input JOB_ID.json
           ruby scripts/hrm_kernel.rb check --state-dir DIR --input CHECK_ID.json
           ruby scripts/hrm_kernel.rb submit --state-dir DIR --input JOB_ID.json
+          ruby scripts/hrm_kernel.rb revalidate --state-dir DIR --input REVALIDATION.json
           ruby scripts/hrm_kernel.rb assess --state-dir DIR --input REVIEW_JOB_ID.json
 
           ruby scripts/hrm_kernel.rb driver-start --state-dir DIR --input DRIVER.json
@@ -207,7 +209,7 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb driver-status --state-dir DIR
           ruby scripts/hrm_kernel.rb driver-run --state-dir DIR
 
-        RC37 supports explicit stopped RC36 environment replacement through driver-continue, with fresh preflight.
+        RC38 supports explicit stopped RC37 environment replacement with isolated Git candidate checks and fresh validation.
         Technical supervisor evidence uses driver-input and grants no execution or operator authority.
         Protocol ap-hrm-interaction/2 operator ledgers remain separate and are never upgraded in place.
         Native checks and Codex task identities are recorded by the local host adapter.

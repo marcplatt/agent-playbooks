@@ -65,7 +65,10 @@ class HrmKernelExecutionTest < Minitest::Test
   end
 
   def teardown
-    FileUtils.remove_entry(@temporary) if @temporary && File.exist?(@temporary)
+    if @temporary && File.exist?(@temporary)
+      FileUtils.chmod_R(0o700, @temporary)
+      FileUtils.remove_entry(@temporary)
+    end
   end
 
   def test_project_configuration_rejection_explains_the_existing_readable_route
@@ -339,7 +342,74 @@ class HrmKernelExecutionTest < Minitest::Test
     assert_equal "blocked", receipt.dig("isolation", "forbidden_write")
   end
 
+  def test_isolated_head_candidate_runs_real_git_without_history_and_rejects_metadata_injection
+    original_head = Open3.capture2("/usr/bin/git", "-C", @project_root, "rev-parse", "HEAD").first.strip
+    File.write(File.join(@project_root, "check.rb"), <<~'RUBY')
+      require "open3"
+      require "fileutils"
+      head, status = Open3.capture2e("git", "rev-parse", "HEAD")
+      abort("wrong isolated HEAD PATH=#{ENV['PATH'].inspect}: #{head.inspect}") unless status.success? && head.strip == ENV.fetch("EXPECTED_HEAD")
+      _parent, parent_status = Open3.capture2e("git", "cat-file", "-e", "HEAD^")
+      abort("parent history leaked") if parent_status.success?
+      tracked, tracked_status = Open3.capture2e("git", "ls-files", "private-evidence")
+      abort("root Git result changed") unless tracked_status.success? && tracked.empty?
+      [".git/config", ".git/objects/info/alternates", ".git/hooks/post-index-change", ".gitattributes"].each do |path|
+        begin
+          FileUtils.mkdir_p(File.dirname(path))
+          File.chmod(0o600, path) if File.exist?(path)
+          File.write(path, "malicious")
+          abort("isolated candidate was writable: #{path}")
+        rescue Errno::EPERM, Errno::EACCES
+          nil
+        end
+      end
+      FileUtils.mkdir_p(ENV.fetch("PYTHONPYCACHEPREFIX"))
+      File.write(File.join(ENV.fetch("PYTHONPYCACHEPREFIX"), "scratch"), "ok")
+      puts "isolated-git-ready"
+    RUBY
+    git("add", "check.rb")
+    repository = {
+      "schema_version" => HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA,
+      "kind" => "isolated_head_candidate",
+      "git_executable" => bundled_git_executable
+    }
+    git_env = {
+      "PATH" => "#{File.dirname(repository.fetch('git_executable'))}:/usr/bin:/bin",
+      "GIT_CONFIG_NOSYSTEM" => "1", "GIT_CONFIG_GLOBAL" => "/dev/null",
+      "GIT_CONFIG_SYSTEM" => "/dev/null", "GIT_ATTR_NOSYSTEM" => "1",
+      "GIT_OPTIONAL_LOCKS" => "0", "GIT_NO_LAZY_FETCH" => "1", "GIT_TERMINAL_PROMPT" => "0",
+      "EXPECTED_HEAD" => original_head, "PYTHONPYCACHEPREFIX" => "{run_root}/pycache"
+    }
+    isolated_spec = spec.merge("env" => git_env, "configuration_paths" => [])
+    execution = HrmKernel::Execution.new(
+      project_root: @project_root, state_dir: @state_dir,
+      environment_allowlist: git_env.keys,
+      forbidden_read_path: @forbidden_read, forbidden_write_path: @forbidden_write,
+      repository_view: repository
+    )
+    candidate = capture(execution, paths: %w[app.txt check.rb], authorized_paths: %w[app.txt other.txt check.rb], selected_spec: isolated_spec)
+    result = execution.run(spec: isolated_spec, binding: candidate.fetch("binding"), candidate: candidate)
+    descriptor = result.slice("receipt_path", "receipt_sha256")
+    receipt = execution.verify_receipt!(descriptor, candidate: candidate, current_exact: true)
+    assert_equal "passed", receipt["conclusion"], private_log(receipt.dig("stderr", "path"))
+    assert_equal "omitted", receipt.dig("repository_view", "parent_objects")
+    assert_equal original_head, receipt.dig("repository_view", "head_sha")
+    assert_equal "preserve\n", File.read(@forbidden_write)
+
+    isolated_root = File.join(@state_dir, receipt.dig("repository_view", "validation_root"))
+    config = File.join(isolated_root, ".git", "config")
+    File.chmod(0o600, config)
+    File.write(config, "[core]\n\tfsmonitor = #{File.join(@temporary, 'escape')}\n")
+    error = assert_raises(HrmKernel::Error) { execution.verify_receipt!(descriptor, candidate: candidate) }
+    assert_match(/metadata changed/, error.message)
+    refute File.exist?(File.join(@temporary, "escape"))
+  end
+
   private
+
+  def bundled_git_executable
+    File.realpath(File.join(Dir.home, ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/bin/git"))
+  end
 
   def runner(environment_allowlist: %w[RUN_ROOT], read_roots: [])
     HrmKernel::Execution.new(

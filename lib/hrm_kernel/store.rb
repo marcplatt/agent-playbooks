@@ -101,11 +101,14 @@ module HrmKernel
     def verify!
       with_exclusive_lock do
         replay = replay_ledger
-        {
+        result = {
           "cursor" => replay.fetch(:cursor),
           "event_hash" => replay.fetch(:event_hash),
           "valid" => true
         }
+        validation = Evidence.validation_projection(replay.fetch(:state), state_dir: directory) if replay.fetch(:state)
+        result["technical_validation"] = validation if validation
+        result
       end
     end
 
@@ -138,7 +141,20 @@ module HrmKernel
     def project_state(state, role, actor_id)
       return nil if state.nil?
 
-      State.project(state, role: role, actor_id: actor_id)
+      projection = State.project(state, role: role, actor_id: actor_id)
+      validation = Evidence.validation_projection(state, state_dir: directory)
+      if validation && role != "worker"
+        projection["technical_validation"] = validation
+        pending = validation.fetch("pending_work_order_ids")
+        unless pending.empty?
+          projection.dig("milestone", "readiness_blockers") << {
+            "kind" => "fresh_environment_validation",
+            "environment_id" => validation.fetch("active_environment_id"),
+            "work_order_ids" => pending
+          }
+        end
+      end
+      projection
     end
 
     def replay_ledger
