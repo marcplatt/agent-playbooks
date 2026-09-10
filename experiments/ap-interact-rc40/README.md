@@ -107,6 +107,14 @@ and incomplete scratch attribution. It clears active Host registries and all mod
 resume fields, then requires fresh replacement preflight. It resumes no worker,
 Astra task or provider effect.
 
+The copied source tree remains bounded to 20,000 entries, 16 MiB per regular file
+and 512 MiB total. RC.40 raises only the aggregate limit from RC.39's 256 MiB so a
+fully preserved authenticated Canary run can carry its accumulated isolated
+candidate and check scratch. Every byte is still inventoried and hashed, every
+execution root retains its receipt or explicit ineligible-failure attribution, and
+the source is re-inventoried before destination publication. No history or artifact
+is pruned to fit the bound.
+
 The source lock and trusted supervisor stop assertion establish an observed safe
 boundary; they cannot prove an unrecorded old controller will never restart. Keep
 the source controller stopped. The new environment identity and exact roots,

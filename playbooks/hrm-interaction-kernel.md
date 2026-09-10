@@ -116,6 +116,11 @@ authenticated historical provenance only; the current revision must be completed
 and freshly validated. Historical evidence never transfers eligibility to the
 amended revision.
 
+RC.40 bounds a continued source tree to 20,000 entries, 16 MiB per regular file and
+512 MiB total. The aggregate allowance preserves the authenticated native candidate
+and check history of a sustained run; it does not skip per-file, ownership, mode,
+symlink, receipt, hash or unchanged-source verification.
+
 Receipt-less RC.38 attempts that failed during post-process scratch cleanup never
 become native evidence. The RC.39 continuation accepts them only when private,
 owner-bound 64-hex execution roots correspond in count to exact failed Driver

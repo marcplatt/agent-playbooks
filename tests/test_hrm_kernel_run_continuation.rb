@@ -956,6 +956,18 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_equal "a-latest", record["historical_jobs"].last["job_id"]
   end
 
+  def test_rc40_continuation_bound_accepts_frozen_canary_volume_and_remains_bounded
+    continuation = HrmKernel::RunContinuation.allocate
+
+    assert continuation.send(:validate_total_bytes!, 410_441_925)
+    assert continuation.send(:validate_total_bytes!, HrmKernel::RunContinuation::MAX_TOTAL_BYTES)
+    error = assert_raises(HrmKernel::Error) do
+      continuation.send(:validate_total_bytes!, HrmKernel::RunContinuation::MAX_TOTAL_BYTES + 1)
+    end
+    assert_match(/continuation byte bound/, error.message)
+    assert_equal 512 * 1024 * 1024, HrmKernel::RunContinuation::MAX_TOTAL_BYTES
+  end
+
   private
 
   def create_source_state

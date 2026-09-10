@@ -39,7 +39,7 @@ module HrmKernel
     ENVIRONMENT_FIELDS = %w[environment_id read_roots environment_allowlist preflight_checks].freeze
     RC38_ENVIRONMENT_FIELDS = (ENVIRONMENT_FIELDS + %w[check_repository]).freeze
     MAX_FILE_BYTES = 16 * 1024 * 1024
-    MAX_TOTAL_BYTES = 256 * 1024 * 1024
+    MAX_TOTAL_BYTES = 512 * 1024 * 1024
     MAX_ENTRIES = 20_000
     GIT_REVISION = /\A[0-9a-f]{40}\z/.freeze
     EXECUTION_RUN_ID = /\A(?:preflight-)?[0-9a-f]{64}\z/.freeze
@@ -991,7 +991,7 @@ module HrmKernel
           validate_source_mode!(relative, stat, directory: false)
           fail!("state file exceeds continuation bound: #{relative}") if stat.size > MAX_FILE_BYTES
           total += stat.size
-          fail!("state tree exceeds continuation byte bound") if total > MAX_TOTAL_BYTES
+          validate_total_bytes!(total)
           entries << { "path" => relative, "type" => "file", "bytes" => stat.size,
                        "mode" => stat.mode & 0o777, "uid" => stat.uid,
                        "sha256" => Digest::SHA256.hexdigest(read_source_file(path, relative, stat)) }
@@ -1017,6 +1017,12 @@ module HrmKernel
         fail!("incomplete execution scratch count differs from recorded failed Driver cleanup requests")
       end
       body.merge("sha256" => digest(body))
+    end
+
+    def validate_total_bytes!(total)
+      fail!("state tree exceeds continuation byte bound") unless
+        total.is_a?(Integer) && total >= 0 && total <= MAX_TOTAL_BYTES
+      true
     end
 
     def walk(root, relative = "", allow_execution_scratch: false, &block)
