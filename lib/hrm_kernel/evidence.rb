@@ -73,7 +73,7 @@ module HrmKernel
         if native_execution?(milestone)
           verify_native_check_report!(
             milestone, work_order, data["claim_id"], data["revision"], artifacts,
-            check, state_dir: state_dir, current_exact: true
+            check, state_dir: state_dir, historical_continuation: false
           )
         else
           verify_check_report!(
@@ -96,13 +96,17 @@ module HrmKernel
       value
     end
 
-    def verify_completed_work!(state, state_dir: nil, current_exact: true)
+    def verify_completed_work!(state, state_dir: nil, verification: :current)
+      unless %i[current historical_continuation].include?(verification)
+        fail!("unsupported completed-work verification mode")
+      end
       milestone = milestone!(state)
       root = milestone.fetch("project_root")
 
       state.fetch("work_orders", {}).each_value do |work_order|
         next unless work_order["status"] == "completed"
-        verify_completed_order!(milestone, work_order, state_dir: state_dir, current_exact: current_exact)
+        verify_completed_order!(milestone, work_order, state_dir: state_dir,
+          historical_continuation: verification == :historical_continuation)
       end
 
       true
@@ -115,7 +119,7 @@ module HrmKernel
       completed = state.fetch("work_orders", {}).values.select { |order| order["status"] == "completed" }
       pending = completed.reject do |order|
         begin
-          verify_completed_order!(milestone, order, state_dir: state_dir, current_exact: true)
+          verify_completed_order!(milestone, order, state_dir: state_dir, historical_continuation: false)
           true
         rescue HrmKernel::Error
           false
@@ -174,7 +178,7 @@ module HrmKernel
     end
 
     def verify_native_check_report!(milestone, work_order, claim_id, revision, artifacts, check,
-                                    state_dir:, current_exact:)
+                                    state_dir:, historical_continuation:)
       fail!("native check verification requires state_dir") unless state_dir.is_a?(String)
       relative_path = check["artifact_path"]
       path = safe_evidence_path!(milestone.fetch("project_root"), relative_path)
@@ -208,7 +212,8 @@ module HrmKernel
       receipt = runner.verify_receipt!(
         descriptor,
         expected_binding: expected_binding,
-        current_exact: current_exact
+        current_exact: !historical_continuation,
+        historical_authentication_only: historical_continuation
       )
       fail!("native receipt check id mismatch") unless receipt["check_id"] == check["id"]
       fail!("native receipt conclusion mismatch") unless receipt["conclusion"] == check["conclusion"]
@@ -274,7 +279,7 @@ module HrmKernel
       milestone["mode"] == "implementation"
     end
 
-    def verify_completed_order!(milestone, work_order, state_dir:, current_exact:)
+    def verify_completed_order!(milestone, work_order, state_dir:, historical_continuation:)
       root = milestone.fetch("project_root")
       Array(work_order["artifacts"]).each do |artifact|
         if native_execution?(milestone) && !File.exist?(File.join(root, artifact["path"]))
@@ -288,7 +293,7 @@ module HrmKernel
           verify_native_check_report!(
             milestone, work_order, Array(work_order["claim_history"]).last,
             work_order.fetch("revision"), Array(work_order["artifacts"]), check,
-            state_dir: state_dir, current_exact: current_exact
+            state_dir: state_dir, historical_continuation: historical_continuation
           )
         else
           verify_check_report!(root, work_order, work_order.fetch("revision"), Array(work_order["artifacts"]), check)

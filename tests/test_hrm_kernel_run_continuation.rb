@@ -17,6 +17,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
     @project = File.join(@temporary, "project")
     Dir.mkdir(@project, 0o700)
     File.write(File.join(@project, "app.txt"), "unchanged\n")
+    File.write(File.join(@project, "sibling.txt"), "baseline sibling\n")
     @kernel = File.join(@temporary, "source-kernel")
     Dir.mkdir(@kernel, 0o700)
     FileUtils.mkdir_p(File.join(@kernel, "playbooks"))
@@ -133,6 +134,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
     scratch = File.join(run, "pytest-of-unknown", "pytest-0", "test-example")
     FileUtils.mkdir_p(scratch, mode: 0o755)
     File.chmod(0o700, run)
+    authenticate_test_execution_run(run)
     [File.join(run, "pytest-of-unknown"), File.join(run, "pytest-of-unknown", "pytest-0"), scratch].each do |path|
       File.chmod(0o755, path)
     end
@@ -195,12 +197,36 @@ class HrmKernelRunContinuationTest < Minitest::Test
 
   end
 
+  def test_nonprivate_execution_scratch_requires_an_authenticated_native_run
+    run = File.join(@source, "execution", "e" * 64)
+    scratch = File.join(run, "pytest", "test-example")
+    FileUtils.mkdir_p(scratch, mode: 0o755)
+    File.chmod(0o700, run)
+    File.chmod(0o755, File.join(run, "pytest"))
+    File.chmod(0o755, scratch)
+    authenticate_test_execution_run(run)
+    receipt = read_json(File.join(run, "receipt.json"))
+    receipt["authentication"]["hmac_sha256"] = "0" * 64
+    write_json(File.join(run, "receipt.json"), receipt)
+    scratch_file = File.join(scratch, "intake.sqlite3")
+    write_bytes(scratch_file, "untrusted scratch")
+    File.chmod(0o644, scratch_file)
+    source_bytes = byte_snapshot(@source)
+
+    error = assert_raises(HrmKernel::Error) { continue_run }
+
+    assert_match(/receipt authentication failed/, error.message)
+    assert_equal source_bytes, byte_snapshot(@source)
+    refute File.exist?(@destination)
+  end
+
   def test_escaped_broken_and_control_namespace_symlinks_fail_closed
     run = File.join(@source, "execution", "c" * 64)
     scratch = File.join(run, "pytest-of-unknown")
     target = File.join(scratch, "pytest-0")
     FileUtils.mkdir_p(target, mode: 0o755)
     File.chmod(0o700, run)
+    authenticate_test_execution_run(run)
     File.chmod(0o755, scratch)
     File.chmod(0o755, target)
 
@@ -507,13 +533,35 @@ class HrmKernelRunContinuationTest < Minitest::Test
     continue_run(destination: rc37, new_run_id: "rc37-run", environment_replacement: replacement_environment)
     @source = rc37
     @destination = File.join(@temporary, "rc38-state")
-    complete_rc37_contribution
+    historical = complete_rc37_contribution(unrelated_candidate: true)
+    File.write(File.join(@project, "sibling.txt"), "later authorized order version\n")
     runtime_path = File.join(@source, "driver", "runtime.json")
     runtime = read_json(runtime_path)
     runtime.merge!("round" => 2, "outcome" => "active", "resume_job" => nil,
       "orchestrator_job" => nil, "last_orchestrator_job" => nil)
     write_json(runtime_path, runtime)
     make_source_kernel_rc37
+    restored_source = byte_snapshot(@source)
+
+    original_artifact = File.binread(File.join(@project, "app.txt"))
+    File.write(File.join(@project, "app.txt"), "tampered owned artifact\n")
+    own_error = assert_raises(HrmKernel::Error) do
+      continue_run(destination: File.join(@temporary, "own-tamper-destination"), new_run_id: "own-tamper",
+        environment_replacement: replacement_environment_rc38)
+    end
+    assert_match(/evidence digest mismatch/, own_error.message)
+    File.binwrite(File.join(@project, "app.txt"), original_artifact)
+
+    receipt_path = File.join(@source, historical.fetch("receipt_path"))
+    original_receipt = File.binread(receipt_path)
+    File.binwrite(receipt_path, original_receipt + " ")
+    receipt_error = assert_raises(HrmKernel::Error) do
+      continue_run(destination: File.join(@temporary, "receipt-tamper-destination"), new_run_id: "receipt-tamper",
+        environment_replacement: replacement_environment_rc38)
+    end
+    assert_match(/digest mismatch/, receipt_error.message)
+    File.binwrite(receipt_path, original_receipt)
+    assert_equal restored_source, byte_snapshot(@source)
     before_ledger = File.binread(File.join(@source, "events.jsonl"))
 
     manifest = continue_run(new_run_id: "rc38-run", environment_replacement: replacement_environment_rc38)
@@ -544,6 +592,53 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_equal "fresh_native_revalidation_under_active_environment",
       continued.dig("historical_environment", "work_orders", 0, "required_action")
     assert_equal manifest, continue_run(new_run_id: "rc38-run", environment_replacement: replacement_environment_rc38)
+  end
+
+  def test_rc37_to_rc38_accepts_authenticated_explicit_pytest_basetemp_scratch_without_mutating_source
+    make_source_kernel_rc36
+    rc37 = File.join(@temporary, "scratch-source-rc37")
+    continue_run(destination: rc37, new_run_id: "scratch-source-rc37", environment_replacement: replacement_environment)
+    @source = rc37
+    @destination = File.join(@temporary, "scratch-target-rc38")
+    make_source_kernel_rc37
+
+    run = File.join(@source, "execution", "d" * 64)
+    test_root = File.join(run, "pytest", "test_binding_fails_closed_for_0")
+    documents = File.join(run, "Documents")
+    FileUtils.mkdir_p(test_root, mode: 0o700)
+    FileUtils.mkdir_p(documents, mode: 0o755)
+    File.chmod(0o700, run)
+    File.chmod(0o700, File.join(run, "pytest"))
+    File.chmod(0o700, test_root)
+    File.chmod(0o755, documents)
+    authenticate_test_execution_run(run)
+    database = File.join(test_root, "intake.sqlite3")
+    write_bytes(database, "historical sqlite scratch\0".b)
+    File.chmod(0o644, database)
+    executable = File.join(test_root, "fixture-command")
+    write_bytes(executable, "#!/bin/sh\nexit 0\n")
+    File.chmod(0o755, executable)
+    current = File.join(test_root, "active-intake.sqlite3")
+    File.symlink(database, current)
+    source_bytes = byte_snapshot(@source)
+    source_modes = mode_snapshot(@source)
+
+    manifest = continue_run(new_run_id: "scratch-target-rc38", environment_replacement: replacement_environment_rc38)
+
+    assert_equal source_bytes, byte_snapshot(@source)
+    assert_equal source_modes, mode_snapshot(@source)
+    assert_equal ["d" * 64], manifest.fetch("authenticated_execution_scratch_run_ids")
+    assert_equal "source_modes_recorded_destination_files_0600_directories_0700",
+      manifest.fetch("execution_scratch_mode_transformation")
+    target_database = File.join(@destination, database.delete_prefix(@source + "/"))
+    target_executable = File.join(@destination, executable.delete_prefix(@source + "/"))
+    assert_equal "historical sqlite scratch\0".b, File.binread(target_database)
+    assert_equal 0o600, File.stat(target_database).mode & 0o777
+    assert_equal 0o600, File.stat(target_executable).mode & 0o777
+    assert_equal 0o700, File.stat(File.join(@destination, documents.delete_prefix(@source + "/"))).mode & 0o777
+    refute File.exist?(File.join(@destination, current.delete_prefix(@source + "/")))
+    assert_includes manifest.fetch("inert_execution_scratch_links").map { |entry| entry["path"] },
+      current.delete_prefix(@source + "/")
   end
 
   def test_cli_accepts_rc38_isolated_repository_environment
@@ -602,7 +697,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
         "milestone_id" => "continuation-test", "outcome" => "Preserve behavior",
         "project_root" => @project, "mode" => "implementation",
         "requirements" => [{ "id" => "behavior", "text" => "Behavior remains correct" }],
-        "allowed_paths" => ["app.txt"],
+        "allowed_paths" => ["app.txt", "sibling.txt"],
         "acceptance_scenarios" => [{ "id" => "scenario", "text" => "Behavior works",
           "requirement_ids" => ["behavior"], "check_ids" => ["check"] }]
       }
@@ -799,7 +894,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
     @source_revision = git(@kernel, "rev-parse", "HEAD").strip
   end
 
-  def complete_rc37_contribution
+  def complete_rc37_contribution(unrelated_candidate: false)
     File.write(File.join(@project, ".gitignore"), "/.codex/hrm-runs/\n")
     File.write(File.join(@project, "check.rb"), 'abort unless File.read("app.txt") == "submitted\\n"')
     git(@project, "init", "--quiet")
@@ -821,6 +916,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
       "data" => { "work_order_id" => "submitted", "revision" => 1, "claim_id" => "claim-submitted" }
     )
     File.write(File.join(@project, "app.txt"), "submitted\n")
+    File.write(File.join(@project, "sibling.txt"), "concurrent other order version\n") if unrelated_candidate
     state = store.read.fetch("state")
     order = state.fetch("work_orders").fetch("submitted")
     spec = { "id" => "check", "environment_id" => "test-rc37",
@@ -831,7 +927,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
       forbidden_write_path: File.join(@source, "driver", "isolation-sentinel.txt"))
     candidate = runner.capture_candidate(work_order: order, milestone: state.fetch("milestone"),
       claim_id: "claim-submitted", revision: 1, requirement_revisions: order.fetch("requirement_revisions"),
-      check_plan: { "environment_id" => "test-rc37", "checks" => [spec] }, authorized_paths: ["app.txt"])
+      check_plan: { "environment_id" => "test-rc37", "checks" => [spec] }, authorized_paths: ["app.txt", "sibling.txt"])
     outcome = runner.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
     artifacts = [{ "path" => "app.txt", "sha256" => Digest::SHA256.file(File.join(@project, "app.txt")).hexdigest }]
     relative = ".codex/hrm-runs/native-checks/submitted.json"
@@ -847,6 +943,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
         "artifacts" => artifacts, "checks" => [{ "id" => "check", "conclusion" => "passed",
           "artifact_path" => relative, "sha256" => Digest::SHA256.file(report_path).hexdigest }] }
     )
+    outcome.slice("receipt_path", "receipt_sha256")
   end
 
   def replacement_environment
@@ -907,6 +1004,18 @@ class HrmKernelRunContinuationTest < Minitest::Test
 
   def bundled_git_executable
     File.realpath(File.join(Dir.home, ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/bin/git"))
+  end
+
+  def authenticate_test_execution_run(run)
+    run_id = File.basename(run)
+    body = { "schema_version" => HrmKernel::Execution::RECEIPT_SCHEMA, "receipt_id" => run_id }
+    key = File.binread(File.join(@source, HrmKernel::Execution::KEY_NAME))
+    canonical = JSON.generate(HrmKernel::Execution.canonical(body))
+    body["authentication"] = {
+      "algorithm" => "hmac-sha256",
+      "hmac_sha256" => OpenSSL::HMAC.hexdigest("SHA256", key, canonical)
+    }
+    write_json(File.join(run, "receipt.json"), body)
   end
 
   def mode_snapshot(root)

@@ -283,7 +283,11 @@ module HrmKernel
       prepare_run_root!(execution_id(spec, binding, candidate))
     end
 
-    def verify_receipt!(descriptor, binding: nil, expected_binding: nil, candidate: nil, current_exact: false)
+    def verify_receipt!(descriptor, binding: nil, expected_binding: nil, candidate: nil, current_exact: false,
+                        historical_authentication_only: false)
+      if historical_authentication_only && (current_exact || binding || candidate || !expected_binding.is_a?(Hash))
+        fail!("historical receipt authentication requires only an expected ledger binding")
+      end
       descriptor = stringify_hash!(descriptor, "receipt descriptor")
       expected_keys!(descriptor, %w[receipt_path receipt_sha256])
       path = safe_state_file!(descriptor.fetch("receipt_path"))
@@ -325,7 +329,11 @@ module HrmKernel
       fail!("native receipt conclusion was not derived from process exit") unless receipt["conclusion"] == expected_conclusion
       verify_private_log!(receipt.fetch("stdout"))
       verify_private_log!(receipt.fetch("stderr"))
-      verify_candidate_manifest!(candidate, exact: current_exact)
+      if historical_authentication_only
+        verify_historical_candidate_manifest!(candidate)
+      else
+        verify_candidate_manifest!(candidate, exact: current_exact)
+      end
       receipt
     rescue JSON::ParserError => e
       fail!("native receipt contains invalid JSON: #{e.message}")
@@ -549,6 +557,32 @@ module HrmKernel
         expected.each do |entry|
           fail!("candidate artifact drifted: #{entry['path']}") unless current_by_path[entry["path"]] == entry
         end
+      end
+      true
+    end
+
+    # A stopped versioned continuation may authenticate a prior candidate
+    # without comparing unrelated paths to the later shared worktree. The caller
+    # separately verifies the completed order's current owned artifacts and the
+    # receipt binding. Live checks never use this mode.
+    def verify_historical_candidate_manifest!(manifest)
+      fail!("candidate schema is unsupported") unless manifest["schema_version"] == CANDIDATE_SCHEMA
+      fail!("candidate project root changed") unless manifest["project_root"] == @project_root
+      candidate_digest = manifest["candidate_digest"]
+      fail!("candidate manifest digest mismatch") unless secure_equal?(candidate_digest, digest(manifest.reject { |key, _| key == "candidate_digest" }))
+      fail!("historical candidate HEAD is invalid") unless manifest["head_sha"].is_a?(String) && /\A[0-9a-f]{40}\z/.match?(manifest["head_sha"])
+      fail!("historical candidate tree is invalid") unless manifest["head_tree"].is_a?(String) && /\A[0-9a-f]{40}\z/.match?(manifest["head_tree"])
+      changes = manifest["changes"]
+      fail!("historical candidate changes are malformed") unless changes.is_a?(Array) && changes == changes.sort_by { |entry| entry["path"].to_s }
+      changes.each do |entry|
+        fail!("historical candidate change is malformed") unless entry.is_a?(Hash) &&
+          entry.keys.sort == %w[bytes path sha256 status] && entry["status"].to_s.match?(/\A[AMDT?]\z/)
+        safe_relative_path!(entry["path"])
+        deleted = entry["status"] == "D"
+        fail!("historical candidate change digest is malformed") unless
+          deleted ? entry["sha256"].nil? && entry["bytes"].nil? :
+            entry["sha256"].is_a?(String) && /\A[0-9a-f]{64}\z/.match?(entry["sha256"]) &&
+              entry["bytes"].is_a?(Integer) && entry["bytes"] >= 0
       end
       true
     end

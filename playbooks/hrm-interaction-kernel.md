@@ -415,8 +415,10 @@ Do not create documentation or receipt changes solely to report that checks ran.
   stopped RC.37 environment transition while making old receipts ineligible for
   current review. Adds bounded native `revalidate`, an exact-HEAD isolated Git
   candidate with authenticated repository-view receipts, and stale-response
-  rejection across the revalidation transaction. Historical model tasks are not
-  resumed and the original ledger authority and turn budget remain intact.
+  rejection across the revalidation transaction. Authenticated historical
+  execution scratch is copied without mutating source modes and normalized only
+  in the private destination. Historical model tasks are not resumed and the
+  original ledger authority and turn budget remain intact.
 
 - **0.6.1-rc37 — 2026-09-09:** Corrects stopped-run copying of ordinary test
   scratch inside private execution directories, preserving original permissions

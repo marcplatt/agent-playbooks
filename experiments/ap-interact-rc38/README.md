@@ -108,6 +108,15 @@ fresh replacement preflight. Failure removes the incomplete destination and leav
 the source unchanged. The manifest and source snapshots live below
 `driver/continuation/rc38/`.
 
+Historical checks may retain pytest `--basetemp`, disposable `HOME`, fixture and
+cache content beneath an execution run. Modes such as `0644` files and `0755`
+directories or executable fixtures are accepted only below an owner-private
+`execution/<receipt-id>/` whose native receipt authenticates with the copied
+execution key. Run-root receipts and logs remain strictly private. The source
+manifest records every original mode and link target; copying never chmods the
+source. Destination scratch is normalized to owner-only modes, and same-run file
+or directory symlinks are archived as inert metadata rather than recreated.
+
 Completed work orders retain their status, revision, claim history, worker,
 artifacts, checks and evidence digest. Their old receipts remain historical, so
 the derived projection lists them in
@@ -115,6 +124,14 @@ the derived projection lists them in
 work orders retain their ledger history, but all old jobs are historical and no
 model task is resumed. Astra must release such a claim before a fresh active-
 environment dispatch.
+
+Source verification authenticates each historical receipt and its exact completed
+order, claim, revision, requirements, check report and owned artifacts. It does not
+compare unrelated paths recorded in that receipt's older shared-candidate snapshot
+with later changes made by other authorized orders. Any current owned-artifact or
+receipt change still rejects the transition. This historical check never supplies
+current review eligibility; the destination always requires fresh exact
+revalidation under the active environment.
 
 ## Fresh completed-contribution validation
 

@@ -3,6 +3,7 @@
 require "digest"
 require "fileutils"
 require "json"
+require "openssl"
 require "open3"
 require "pathname"
 require "securerandom"
@@ -37,7 +38,6 @@ module HrmKernel
     MAX_ENTRIES = 20_000
     GIT_REVISION = /\A[0-9a-f]{40}\z/.freeze
     EXECUTION_RUN_ID = /\A(?:preflight-)?[0-9a-f]{64}\z/.freeze
-    EXECUTION_SCRATCH_DIRECTORY = /\Apytest-of-[A-Za-z0-9._-]+\z/.freeze
     MAX_LINK_TARGET_BYTES = 4096
     CONTINUATION_DIRECTORY = File.join("driver", "continuation")
     MANIFEST_PATH = File.join(CONTINUATION_DIRECTORY, "manifest.json")
@@ -213,7 +213,8 @@ module HrmKernel
       end
       verify_preflight_records!(config, preflight)
       verify_driver_requests!
-      Evidence.verify_completed_work!(state, state_dir: @source, current_exact: source_version != "AP-INTERACT RC.37")
+      verification = source_version == "AP-INTERACT RC.37" ? :historical_continuation : :current
+      Evidence.verify_completed_work!(state, state_dir: @source, verification: verification)
 
       supervisor = SupervisorInput.new(directory: File.join(@source, "driver")).snapshot
       observed_technical_cursor = runtime.fetch("observed_technical_input_cursor", 0)
@@ -757,6 +758,8 @@ module HrmKernel
         "resumed_astra_thread_id" => resume_job && source.dig("statuses", resume_job, "thread_id"),
         "ledger_copied_unchanged" => true,
         "historical_receipts_copied_unchanged" => true,
+        "authenticated_execution_scratch_run_ids" => source.fetch("tree").fetch("authenticated_execution_scratch_run_ids"),
+        "execution_scratch_mode_transformation" => "source_modes_recorded_destination_files_0600_directories_0700",
         "inert_execution_scratch_links" => source.fetch("tree").fetch("entries").select { |entry| entry["type"] == "symlink" },
         "execution_scratch_link_transformation" => "archived_as_inert_metadata_not_recreated_or_followed",
         "source_preflight_is_historical" => true,
@@ -873,6 +876,13 @@ module HrmKernel
       manifest_digest = source_manifest.fetch("sha256")
       fail!("source tree manifest attribution changed") unless manifest_digest == manifest["source_tree_sha256"] &&
         digest(source_manifest.reject { |key, _value| key == "sha256" }) == manifest_digest
+      authenticated_runs = source_manifest.fetch("authenticated_execution_scratch_run_ids", [])
+      fail!("authenticated execution scratch attribution changed") unless
+        manifest.fetch("authenticated_execution_scratch_run_ids", []) == authenticated_runs
+      if authenticated_runs.any? && manifest["execution_scratch_mode_transformation"] !=
+          "source_modes_recorded_destination_files_0600_directories_0700"
+        fail!("execution scratch mode transformation is missing")
+      end
       source_manifest.fetch("entries").each do |entry|
         next unless entry["type"] == "file"
         relative = entry.fetch("path")
@@ -909,6 +919,7 @@ module HrmKernel
     end
 
     def snapshot_tree(root)
+      @authenticated_execution_runs = {}
       entries = []
       total = 0
       walk(root, allow_execution_scratch: true) do |path, relative, stat|
@@ -932,6 +943,7 @@ module HrmKernel
       end
       body = {
         "entries" => entries,
+        "authenticated_execution_scratch_run_ids" => @authenticated_execution_runs.keys.sort,
         "file_count" => entries.count { |item| item["type"] == "file" },
         "symlink_count" => entries.count { |item| item["type"] == "symlink" },
         "total_bytes" => total
@@ -964,7 +976,8 @@ module HrmKernel
     def validate_source_mode!(relative, stat, directory:)
       mode = stat.mode & 0o777
       return if (mode & 0o077).zero?
-      allowed = execution_scratch_path?(relative, directory: directory) && mode == (directory ? 0o755 : 0o644)
+      allowed_modes = directory ? [0o755] : [0o644, 0o755]
+      allowed = execution_scratch_path?(relative, directory: directory) && allowed_modes.include?(mode)
       label = directory ? "directory" : "file"
       fail!("state #{label} is not private: #{relative}") unless allowed
     end
@@ -972,8 +985,41 @@ module HrmKernel
     def execution_scratch_path?(relative, directory:)
       parts = Pathname.new(relative).each_filename.to_a
       minimum = directory ? 3 : 4
-      parts.length >= minimum && parts[0] == "execution" && EXECUTION_RUN_ID.match?(parts[1]) &&
-        EXECUTION_SCRATCH_DIRECTORY.match?(parts[2])
+      return false unless parts.length >= minimum && parts[0] == "execution" && EXECUTION_RUN_ID.match?(parts[1])
+      authenticate_execution_scratch_run!(parts[1])
+      true
+    end
+
+    def authenticate_execution_scratch_run!(run_id)
+      return true if @authenticated_execution_runs[run_id]
+      receipt_path = File.join(@source, "execution", run_id, "receipt.json")
+      key_path = File.join(@source, Execution::KEY_NAME)
+      receipt = parse_object(read_private_source_file(receipt_path, "execution/#{run_id}/receipt.json"), "execution scratch receipt")
+      authentication = receipt["authentication"]
+      fail!("execution scratch receipt is not authenticated") unless receipt["schema_version"] == Execution::RECEIPT_SCHEMA &&
+        receipt["receipt_id"] == run_id && authentication.is_a?(Hash) &&
+        authentication.keys.sort == %w[algorithm hmac_sha256] && authentication["algorithm"] == "hmac-sha256"
+      unsigned = receipt.reject { |key, _value| key == "authentication" }
+      key = read_private_source_file(key_path, Execution::KEY_NAME, max_bytes: 4096)
+      expected = OpenSSL::HMAC.hexdigest("SHA256", key, JSON.generate(canonical(unsigned)))
+      fail!("execution scratch receipt authentication failed") unless secure_equal?(authentication["hmac_sha256"], expected)
+      @authenticated_execution_runs[run_id] = true
+    end
+
+    def read_private_source_file(path, relative, max_bytes: MAX_FILE_BYTES)
+      stat = File.lstat(path)
+      fail!("execution authentication file is unsafe: #{relative}") unless stat.file? && !stat.symlink? &&
+        stat.uid == Process.uid && stat.nlink == 1 && (stat.mode & 0o777) == 0o600 && stat.size <= max_bytes
+      read_source_file(path, relative, stat)
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP => error
+      fail!("execution authentication file cannot be read: #{relative}: #{error.message}")
+    end
+
+    def secure_equal?(actual, expected)
+      return false unless actual.is_a?(String) && expected.is_a?(String) && actual.bytesize == expected.bytesize
+      difference = 0
+      actual.bytes.zip(expected.bytes) { |left, right| difference |= left ^ right }
+      difference.zero?
     end
 
     def snapshot_execution_scratch_link(root, path, relative, stat)
@@ -991,8 +1037,8 @@ module HrmKernel
       resolved_target = File.realpath(candidate)
       target_stat = File.stat(resolved_target)
       unless beneath?(resolved_target, resolved_run) && resolved_target != resolved_run &&
-             target_stat.directory? && target_stat.uid == Process.uid
-        fail!("execution scratch link must resolve to an owned directory in the same run: #{relative}")
+             (target_stat.directory? || target_stat.file?) && target_stat.uid == Process.uid
+        fail!("execution scratch link must resolve to an owned regular entry in the same run: #{relative}")
       end
       { "path" => relative, "type" => "symlink", "target" => target,
         "mode" => stat.mode & 0o777, "uid" => stat.uid }
