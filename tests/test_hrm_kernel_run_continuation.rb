@@ -1020,6 +1020,47 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_match(/too many entries/, error.message)
     assert_equal 2 * 1024 * 1024 * 1024, HrmKernel::RunContinuation::MAX_TOTAL_BYTES
     assert_equal 100_000, HrmKernel::RunContinuation::MAX_ENTRIES
+    assert continuation.send(:validate_generated_manifest_bytes!, 17_301_812)
+    error = assert_raises(HrmKernel::Error) do
+      continuation.send(:validate_generated_manifest_bytes!,
+        HrmKernel::RunContinuation::MAX_GENERATED_MANIFEST_BYTES + 1)
+    end
+    assert_match(/generated source tree manifest/, error.message)
+    assert_equal 64 * 1024 * 1024, HrmKernel::RunContinuation::MAX_GENERATED_MANIFEST_BYTES
+    assert_equal HrmKernel::RunContinuation::MAX_FILE_BYTES,
+      continuation.send(:source_entry_max_bytes, "untrusted/source-manifest.json")
+  end
+
+  def test_full_clone_authenticates_generated_manifest_above_ordinary_file_bound
+    padding = File.join(@source, "driver", "bounded-manifest-fixture")
+    FileUtils.mkdir_p(padding, mode: 0o700)
+    800.times do |index|
+      write_bytes(File.join(padding, "entry-#{index.to_s.rjust(4, '0')}-#{'x' * 64}.txt"), "x\n")
+    end
+    source_before = byte_snapshot(@source)
+    ordinary_bound = 64 * 1024
+    largest_source_file = source_before.keys.map { |relative| File.size(File.join(@source, relative)) }.max
+    assert_operator largest_source_file, :<, ordinary_bound
+
+    klass = HrmKernel::RunContinuation
+    original = klass::MAX_FILE_BYTES
+    klass.send(:remove_const, :MAX_FILE_BYTES)
+    klass.const_set(:MAX_FILE_BYTES, ordinary_bound)
+    begin
+      manifest = continue_run
+      source_manifest_path = File.join(@destination, manifest.fetch("source_manifest_path"))
+      bytes = File.binread(source_manifest_path)
+      assert_operator bytes.bytesize, :>, ordinary_bound
+      assert_operator bytes.bytesize, :<=, klass::MAX_GENERATED_MANIFEST_BYTES
+      assert_equal JSON.generate(JSON.parse(bytes)) + "\n", bytes
+      assert_equal source_before, byte_snapshot(@source)
+      assert_equal "x\n", File.binread(File.join(@destination,
+        "driver", "bounded-manifest-fixture", "entry-0799-#{'x' * 64}.txt"))
+      assert_equal manifest, continue_run
+    ensure
+      klass.send(:remove_const, :MAX_FILE_BYTES)
+      klass.const_set(:MAX_FILE_BYTES, original)
+    end
   end
 
   private

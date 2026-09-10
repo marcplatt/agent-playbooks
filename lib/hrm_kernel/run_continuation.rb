@@ -41,6 +41,7 @@ module HrmKernel
     ENVIRONMENT_FIELDS = %w[environment_id read_roots environment_allowlist preflight_checks].freeze
     RC38_ENVIRONMENT_FIELDS = (ENVIRONMENT_FIELDS + %w[check_repository]).freeze
     MAX_FILE_BYTES = 16 * 1024 * 1024
+    MAX_GENERATED_MANIFEST_BYTES = 64 * 1024 * 1024
     MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
     MAX_ENTRIES = 100_000
     GIT_REVISION = /\A[0-9a-f]{40}\z/.freeze
@@ -202,6 +203,7 @@ module HrmKernel
       # Constructors used below are intended to be read-only for a valid RC35
       # run. Capture first so an unexpected mkdir/key/chmod is detected.
       tree = snapshot_tree(@source)
+      source_manifest_bytes = serialize_source_manifest!(tree)
       store = Store.new(@source)
       store_receipt = store.verify!
       state = store.read.fetch("state")
@@ -260,6 +262,7 @@ module HrmKernel
         "runtime" => runtime, "runtime_bytes" => runtime_bytes,
         "preflight_bytes" => preflight_bytes,
         "statuses" => statuses, "tree" => tree,
+        "source_manifest_bytes" => source_manifest_bytes,
         "state" => state,
         "commands" => commands,
         "source_kernel_version" => source_version,
@@ -421,7 +424,8 @@ module HrmKernel
         fail!("source continuation manifest is incomplete") unless expected.is_a?(String) && /\A[0-9a-f]{64}\z/.match?(expected)
         fail!("source continuation evidence changed: #{relative}") unless Digest::SHA256.hexdigest(read_private(File.join(@source, relative))) == expected
       end
-      source_manifest = parse_object(read_private(File.join(@source, manifest.fetch("source_manifest_path"))),
+      source_manifest = parse_object(read_private(File.join(@source, manifest.fetch("source_manifest_path")),
+        max_bytes: MAX_GENERATED_MANIFEST_BYTES),
         "source continuation tree manifest")
       attributed = source_manifest.fetch("sha256")
       unless attributed == manifest["source_tree_sha256"] &&
@@ -647,7 +651,7 @@ module HrmKernel
       Host.atomic_write(File.join(continuation, "source-config.json"), source.fetch("config_bytes"))
       Host.atomic_write(File.join(continuation, "source-runtime.json"), source.fetch("runtime_bytes"))
       Host.atomic_write(File.join(continuation, "source-preflight.json"), source.fetch("preflight_bytes"))
-      Host.atomic_json(File.join(continuation, "source-manifest.json"), source.fetch("tree"))
+      Host.atomic_write(File.join(continuation, "source-manifest.json"), source.fetch("source_manifest_bytes"))
 
       config = JSON.parse(source.fetch("config_bytes"))
       config["run_id"] = @new_run_id
@@ -941,7 +945,8 @@ module HrmKernel
         fail!("continued state differs from its manifest: #{relative}") unless Digest::SHA256.hexdigest(bytes) == expected
       end
       source_manifest = parse_object(
-        read_private(File.join(root, manifest.fetch("source_manifest_path"))),
+        read_private(File.join(root, manifest.fetch("source_manifest_path")),
+          max_bytes: MAX_GENERATED_MANIFEST_BYTES),
         "source tree manifest"
       )
       manifest_digest = source_manifest.fetch("sha256")
@@ -975,7 +980,7 @@ module HrmKernel
                    File.join(root, archive, "source-preflight.json")
                  else File.join(root, relative)
                  end
-        bytes = read_private(target)
+        bytes = read_private(target, max_bytes: source_entry_max_bytes(relative))
         fail!("historical continued evidence changed: #{relative}") unless bytes.bytesize == entry["bytes"] &&
           Digest::SHA256.hexdigest(bytes) == entry["sha256"]
       end
@@ -1010,12 +1015,13 @@ module HrmKernel
                        "uid" => stat.uid } unless relative.empty?
         elsif stat.file?
           validate_source_mode!(relative, stat, directory: false)
-          fail!("state file exceeds continuation bound: #{relative}") if stat.size > MAX_FILE_BYTES
+          fail!("state file exceeds continuation bound: #{relative}") if stat.size > source_entry_max_bytes(relative)
           total += stat.size
           validate_total_bytes!(total)
           entries << { "path" => relative, "type" => "file", "bytes" => stat.size,
                        "mode" => stat.mode & 0o777, "uid" => stat.uid,
-                       "sha256" => Digest::SHA256.hexdigest(read_source_file(path, relative, stat)) }
+                       "sha256" => Digest::SHA256.hexdigest(read_source_file(path, relative, stat,
+                         max_bytes: source_entry_max_bytes(relative))) }
         elsif stat.symlink?
           entries << snapshot_execution_scratch_link(root, path, relative, stat)
         else
@@ -1230,10 +1236,11 @@ module HrmKernel
       fail!("source file changed while copying: #{entry.fetch('path')}") unless stat.file? &&
         stat.uid == entry.fetch("uid") && (stat.mode & 0o777) == entry.fetch("mode") &&
         stat.size == entry.fetch("bytes")
-      read_source_file(path, entry.fetch("path"), stat)
+      read_source_file(path, entry.fetch("path"), stat,
+        max_bytes: source_entry_max_bytes(entry.fetch("path")))
     end
 
-    def read_source_file(path, relative, expected_stat)
+    def read_source_file(path, relative, expected_stat, max_bytes: MAX_FILE_BYTES)
       flags = File::RDONLY
       flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
       File.open(path, flags) do |file|
@@ -1242,12 +1249,37 @@ module HrmKernel
                actual.size == expected_stat.size && actual.ino == expected_stat.ino && actual.dev == expected_stat.dev
           fail!("source file changed while reading: #{relative}")
         end
-        bytes = file.read(MAX_FILE_BYTES + 1) || "".b
-        fail!("state file exceeds continuation bound: #{relative}") if bytes.bytesize > MAX_FILE_BYTES
+        bytes = file.read(max_bytes + 1) || "".b
+        fail!("state file exceeds continuation bound: #{relative}") if bytes.bytesize > max_bytes
         bytes
       end
     rescue Errno::ELOOP
       fail!("state tree contains a symlink: #{relative}")
+    end
+
+    def serialize_source_manifest!(tree)
+      bytes = JSON.generate(tree) + "\n"
+      validate_generated_manifest_bytes!(bytes.bytesize)
+      bytes
+    rescue JSON::GeneratorError => error
+      fail!("source tree manifest cannot be serialized: #{error.message}")
+    end
+
+    def validate_generated_manifest_bytes!(bytes)
+      fail!("generated source tree manifest exceeds continuation bound") unless
+        bytes.is_a?(Integer) && bytes >= 0 && bytes <= MAX_GENERATED_MANIFEST_BYTES
+      true
+    end
+
+    def source_entry_max_bytes(relative)
+      return MAX_GENERATED_MANIFEST_BYTES if generated_source_manifest_path?(relative)
+      MAX_FILE_BYTES
+    end
+
+    def generated_source_manifest_path?(relative)
+      paths = [CONTINUATION_DIRECTORY, RC37_CONTINUATION_DIRECTORY, RC38_CONTINUATION_DIRECTORY,
+               RC39_CONTINUATION_DIRECTORY, RC40_CONTINUATION_DIRECTORY, RC41_CONTINUATION_DIRECTORY]
+      paths.any? { |directory| relative == File.join(directory, "source-manifest.json") }
     end
 
     def private_tree!(root)

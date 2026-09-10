@@ -57,8 +57,13 @@ The source remains subject to the 100,000-entry, 16 MiB-per-file and 2 GiB-total
 continuation bounds and all ownership, mode, no-follow, receipt, hash and
 unchanged-source checks. These explicit aggregate bounds preserve a sustained
 full-suite run whose authenticated execution history exceeded RC.40's smaller
-limits; no history or artifact is pruned. The source lock observes a stopped boundary but cannot
-prove an unrecorded old controller will never restart.
+limits; no history or artifact is pruned. The kernel's lossless compact source-tree
+manifest has a separate 64 MiB bound because it authenticates up to 100,000 bounded
+entries and can therefore exceed the ordinary per-file bound. That exception applies
+only to exact versioned `source-manifest.json` paths whose contents are checked
+against the continuation digest; ordinary state files remain limited to 16 MiB.
+Serialization is bounded before copying or preflight. The source lock observes a
+stopped boundary but cannot prove an unrecorded old controller will never restart.
 
 ## Adoption boundary
 

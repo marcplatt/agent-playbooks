@@ -118,7 +118,12 @@ amended revision.
 RC.41 bounds a continued source tree to 100,000 entries, 16 MiB per regular file and
 2 GiB total. The aggregate allowance preserves the authenticated native candidate
 and check history of a sustained run; it does not skip per-file, ownership, mode,
-symlink, receipt, hash or unchanged-source verification.
+symlink, receipt, hash or unchanged-source verification. The kernel-generated,
+losslessly compact source-tree manifest has a separate 64 MiB bound so it can
+authenticate the bounded entry set. That bound applies only to exact versioned
+`source-manifest.json` paths verified through the continuation digest. Serialization
+is checked before copying or preflight; ordinary source files remain limited to
+16 MiB.
 
 Receipt-less RC.38 attempts that failed during post-process scratch cleanup never
 become native evidence. The RC.39 continuation accepts them only when private,
