@@ -23,6 +23,7 @@ module HrmKernel
 
     def check(input)
       exact_input!(input, %w[job_id check_id])
+      reject_historical_environment_job!(input.fetch("job_id"))
       state = implementation_state!
       existing_path = check_path(input.fetch("job_id"), input.fetch("check_id"))
       existing = File.exist?(existing_path) && read_record(existing_path)
@@ -60,6 +61,7 @@ module HrmKernel
     def submit(input)
       exact_input!(input, %w[job_id])
       id = identifier!(input.fetch("job_id"))
+      reject_historical_environment_job!(id)
       persisted = File.join(@directory, "submit-#{id}.json")
       state = implementation_state!
       if File.exist?(persisted)
@@ -155,6 +157,7 @@ module HrmKernel
     def assess(input)
       exact_input!(input, %w[job_id])
       id = identifier!(input.fetch("job_id"))
+      reject_historical_environment_job!(id)
       job = @host.job_record(job_id: id)
       collected = @host.collect(job_id: id)
       fail!("assessment requires an independent completed reviewer") unless job["role"] == "reviewer" && collected.dig("result", "status") == "reviewed"
@@ -206,6 +209,21 @@ module HrmKernel
     end
 
     private
+
+    def reject_historical_environment_job!(job_id)
+      runtime_path = File.join(@store.directory, "driver", "runtime.json")
+      return unless File.exist?(runtime_path)
+      runtime = read_record(runtime_path)
+      historical = runtime["historical_environment"]
+      return unless historical
+      fail!("historical environment registry is malformed") unless historical.is_a?(Hash)
+      jobs = historical["jobs"]
+      fail!("historical environment registry is malformed") unless jobs.is_a?(Array) &&
+        jobs.all? { |job| job.is_a?(Hash) && Host::IDENTIFIER.match?(job["job_id"].to_s) }
+      if jobs.any? { |job| job["job_id"] == job_id }
+        fail!("old-environment job is historical diagnostic evidence only")
+      end
+    end
 
     def implementation_state!
       state = @store.read.fetch("state")

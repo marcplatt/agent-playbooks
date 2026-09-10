@@ -11,6 +11,7 @@ module HrmKernel
   # operations; this service authenticates roles and returns actual receipts.
   class Driver
     MAX_FEEDBACK_BYTES = 32 * 1024
+    MAX_HISTORICAL_ENVIRONMENT_BYTES = 64 * 1024
     TERMINAL = %w[review_ready closed operator_input engineering_stalled host_failure preflight_failed turn_limit].freeze
 
     def initialize(state_dir:, codex_path: Host::DEFAULT_CODEX)
@@ -60,6 +61,7 @@ module HrmKernel
       synchronized do
         config = read("config.json")
         runtime = read("runtime.json")
+        environment_transition(config, runtime)
         runtime["observed_technical_input_cursor"] ||= 0
         ledger = @store.read
         technical_state = @supervisor_input.snapshot
@@ -344,6 +346,14 @@ module HrmKernel
 
     def validate_dispatch!(input, config, runtime)
       fail!("driver may dispatch only Sol workers or fresh reviewers") unless %w[worker reviewer].include?(input["role"]) && input["model"] == Host::MODEL
+      transition = environment_transition(config, runtime)
+      historical_resume = input["historical_resume_job_id"]
+      fail!("resume_job_id and historical_resume_job_id are mutually exclusive") if historical_resume && input["resume_job_id"]
+      if historical_resume
+        validate_historical_resume!(input, historical_resume, transition)
+        input.delete("historical_resume_job_id")
+        input["resume_job_id"] = historical_resume
+      end
       statuses = runtime["jobs"].map { |id| @host.poll(job_id: id) }
       active = statuses.select { |job| job["status"] == "running" }
       fail!("parallel worker limit reached") if active.length >= config.fetch("max_parallel_workers")
@@ -355,7 +365,7 @@ module HrmKernel
         fail!("check environment differs from preflight") unless check["environment_id"] == config["environment_id"]
         fail!("check executable was not preflighted") unless config["preflight_checks"].any? { |smoke| smoke.fetch("argv").first == check.fetch("argv").first }
       end
-      if input["resume_job_id"]
+      if input["resume_job_id"] && !historical_resume
         fail!("resume parent is outside this driver") unless runtime["jobs"].include?(input["resume_job_id"])
         latest = statuses.reverse.find { |job| job["work_order_id"] == input["work_order_id"] && job["role"] == input["role"] }
         fail!("resume must continue the latest worker attempt") unless latest && latest["job_id"] == input["resume_job_id"]
@@ -369,6 +379,40 @@ module HrmKernel
       input["execution_read_roots"] = config["read_roots"]
       input["execution_environment_allowlist"] = config["environment_allowlist"]
       input["reasoning_effort"] = config["worker_reasoning_effort"] if config["worker_reasoning_effort"]
+    end
+
+    def validate_historical_resume!(input, job_id, transition)
+      fail!("historical resume requires an environment transition") unless transition
+      fail!("only a worker may resume a historical worker thread") unless input["role"] == "worker"
+      fail!("historical resume job id is invalid") unless job_id.is_a?(String) && Host::IDENTIFIER.match?(job_id)
+      configured = transition.fetch("configured")
+      historical = transition.fetch("historical")
+      fail!("historical resume parent is outside this transition") unless configured.fetch("historical_job_ids").include?(job_id)
+      summary = historical.fetch("jobs").find { |job| job["job_id"] == job_id }
+      work_order = historical.fetch("work_orders").find { |order| order["work_order_id"] == input["work_order_id"] }
+      fail!("historical resume has no matching work-order record") unless summary && work_order &&
+        work_order.fetch("historical_resume_job_ids").include?(job_id)
+      fail!("historical resume must continue the latest eligible attempt") unless
+        work_order.fetch("historical_resume_job_ids").last == job_id
+
+      state = @store.read.fetch("state")
+      current = state.fetch("work_orders")[input["work_order_id"]]
+      job = @host.job_record(job_id: job_id)
+      status = @host.poll(job_id: job_id)
+      same_claim = current && current["status"] == "running" &&
+        current["revision"] == job["revision"] && current["claim_id"] == job["claim_id"] &&
+        current["owner_id"] == job["actor_id"] && current["last_owner_id"] == job["actor_id"]
+      fail!("historical resume requires the same current work-order revision and claim") unless same_claim
+      fail!("historical resume record differs from the verified Host job") unless
+        summary.slice("job_id", "role", "work_order_id", "revision", "claim_id", "status", "result_status", "thread_id") ==
+        status.slice("job_id", "role", "work_order_id", "revision", "claim_id", "status", "result_status", "thread_id")
+      fail!("historical work-order record differs from the current claim") unless
+        work_order["status"] == current["status"] && work_order["revision"] == current["revision"] &&
+        work_order["claim_id"] == current["claim_id"] && work_order["last_owner_id"] == current["last_owner_id"]
+      fail!("historical resume parent is not a completed worker with a verified thread") unless
+        job["role"] == "worker" && job["work_order_id"] == input["work_order_id"] &&
+        %w[succeeded failed].include?(status["status"]) && status["thread_id"] &&
+        job.dig("check_plan", "environment_id") == configured["source_environment_id"]
     end
 
     def check_feedback(result)
@@ -405,13 +449,14 @@ module HrmKernel
         end
       end
       fail!("too many feedback summaries for bounded dispatch") if used > MAX_FEEDBACK_BYTES
+      transition_packet = environment_transition_prompt(config, runtime)
       packet = {
         "task" => config.fetch("prompt"),
         "transport" => "Return requests as {request_id, operation, input_json}; input_json is a serialized object. Operations: apply, host-dispatch, host-status, host-collect, check, submit, assess, status, verify. Only orchestrator-role apply commands are authorized, actor {id: astra-orchestrator, role: orchestrator}. Operator input/review can only arrive through the trusted local operator CLI, never a model request.",
         "request_guide" => {
           "apply" => "input_json encodes {command_id, type, actor:{id:astra-orchestrator,role:orchestrator}, data}. Use unique request/command IDs; failed request receipts are immutable, so use a new request ID after correcting input.",
           "work_order.create" => "data:{work_order_id,intent_id,objective,requirement_ids,paths,check_ids,effect_class:local_repository}. The initial operator intent already exists as milestone_initial. Use existing intent IDs from the projection; never invent operator input or call intent.record.",
-          "host-dispatch" => "input_json encodes {job_id,role:worker|reviewer,model:gpt-5.6-sol,prompt,context_paths:[],max_context_bytes:65536,check_plan:{environment_id,checks:[]}}. Workers also need work_order_id; same-worker continuation adds resume_job_id. A context byte limit is a ceiling, not a target. Checks use {id,environment_id,argv,env,cwd,timeout_seconds,max_output_bytes,configuration_paths}. configuration_paths refers only to existing configuration copied inside the disposable execution run_root. For ordinary project files such as pyproject.toml, use configuration_paths:[] and select the project-readable source through argv flags. Do not weaken read, write or environment bounds. Reviewer checks may be empty.",
+          "host-dispatch" => "input_json encodes {job_id,role:worker|reviewer,model:gpt-5.6-sol,prompt,context_paths:[],max_context_bytes:65536,check_plan:{environment_id,checks:[]}}. Workers also need work_order_id; same-worker continuation within the active environment adds resume_job_id. After a versioned environment transition, historical_resume_job_id may continue only the same running work-order revision and claim on its verified prior thread; it still creates a fresh job with the active environment and fresh check plan. If that binding is unavailable, release the old claim and commission a fresh worker. A context byte limit is a ceiling, not a target. Checks use {id,environment_id,argv,env,cwd,timeout_seconds,max_output_bytes,configuration_paths}. configuration_paths refers only to existing configuration copied inside the disposable execution run_root. For ordinary project files such as pyproject.toml, use configuration_paths:[] and select the project-readable source through argv flags. An env value of {run_root} selects the disposable execution directory, including for HOME; it grants no access to the caller's actual home. Do not weaken read, write or environment bounds. Reviewer checks may be empty.",
           "check" => "input_json:{job_id,check_id}; normally automatic after collection. A corrected candidate needs a resumed worker result and fresh checks before submission.",
           "submit" => "input_json:{job_id} for an implemented worker with passed current checks; then dispatch a fresh reviewer.",
           "pending_verification" => "Workers cannot run trusted tests. If a worker reported implemented and only left test verification pending, use the native check receipts and fresh reviewer; do not resume just to have the worker restate a passed check. Preserve actual unfinished behavior as engineering work.",
@@ -431,6 +476,7 @@ module HrmKernel
         "budget" => { "turn" => runtime["round"], "max_turns" => config["max_turns"] },
         "external_state_cursor" => @store.read.fetch("cursor")
       }
+      packet["environment_transition"] = transition_packet if transition_packet
       JSON.generate(packet)
     end
 
@@ -458,6 +504,75 @@ module HrmKernel
         fail!("invalid reasoning effort") if config[key] && !%w[low medium high xhigh max ultra].include?(config[key])
       end
       config
+    end
+
+    def environment_transition(config, runtime)
+      configured = config.dig("continuation", "environment_transition")
+      historical = runtime["historical_environment"]
+      return nil unless configured || historical
+      fail!("environment transition metadata is incomplete") unless configured.is_a?(Hash) && historical.is_a?(Hash)
+      config_keys = %w[active_environment_id active_environment_sha256 fresh_preflight_required historical_job_ids old_checks_eligible_for_new_claims source_environment_id source_environment_sha256]
+      runtime_keys = %w[active_environment_id active_environment_sha256 jobs old_checks_eligible_for_new_claims source_environment_id source_environment_sha256 work_orders]
+      fail!("configured environment transition is malformed") unless configured.keys.sort == config_keys.sort
+      fail!("historical environment registry is malformed") unless historical.keys.sort == runtime_keys.sort
+      fail!("historical environment registry exceeds its bound") if JSON.generate(historical).bytesize > MAX_HISTORICAL_ENVIRONMENT_BYTES
+      %w[source_environment_id active_environment_id source_environment_sha256 active_environment_sha256].each do |key|
+        fail!("environment transition attribution changed") unless configured[key] == historical[key]
+      end
+      %w[source_environment_id active_environment_id].each do |key|
+        fail!("environment transition ID is invalid") unless configured[key].is_a?(String) && Host::IDENTIFIER.match?(configured[key])
+      end
+      fail!("active environment transition differs from Driver configuration") unless configured["active_environment_id"] == config["environment_id"]
+      fail!("environment transition did not replace the environment") if configured["source_environment_id"] == configured["active_environment_id"]
+      %w[source_environment_sha256 active_environment_sha256].each do |key|
+        fail!("environment transition digest is invalid") unless configured[key].is_a?(String) && /\A[0-9a-f]{64}\z/.match?(configured[key])
+      end
+      active_environment = config.slice("environment_id", "read_roots", "environment_allowlist", "preflight_checks")
+      fail!("active environment configuration changed after replacement") unless
+        Host.digest(active_environment) == configured["active_environment_sha256"]
+      unless configured["fresh_preflight_required"].equal?(true) &&
+             configured["old_checks_eligible_for_new_claims"].equal?(false) &&
+             historical["old_checks_eligible_for_new_claims"].equal?(false)
+        fail!("historical environment evidence cannot satisfy active claims")
+      end
+      ids = configured["historical_job_ids"]
+      jobs = historical["jobs"]
+      orders = historical["work_orders"]
+      job_keys = %w[claim_id job_id result_status revision role status thread_id work_order_id]
+      fail!("historical job registry is malformed") unless Host.strings?(ids) && ids.uniq == ids &&
+        ids.all? { |id| Host::IDENTIFIER.match?(id) } && jobs.is_a?(Array) && jobs.all? do |job|
+          job.is_a?(Hash) && job.keys.sort == job_keys.sort && Host::IDENTIFIER.match?(job["job_id"].to_s) &&
+            %w[worker reviewer orchestrator].include?(job["role"]) && %w[succeeded failed].include?(job["status"])
+        end &&
+        jobs.map { |job| job["job_id"] } == ids
+      order_keys = %w[claim_id historical_resume_job_ids last_owner_id required_action revision status work_order_id]
+      worker_jobs = jobs.select { |job| job["role"] == "worker" }
+      fail!("historical work-order registry is malformed") unless orders.is_a?(Array) &&
+        orders.map { |order| order.is_a?(Hash) && order["work_order_id"] }.uniq.length == orders.length && orders.all? do |order|
+        order.is_a?(Hash) && order.keys.sort == order_keys.sort && Host::IDENTIFIER.match?(order["work_order_id"].to_s) &&
+          Host.strings?(order["historical_resume_job_ids"]) &&
+          order["historical_resume_job_ids"].all? do |id|
+            worker_jobs.any? { |job| job["job_id"] == id && job["work_order_id"] == order["work_order_id"] }
+          end
+      end
+      active_jobs = runtime["jobs"]
+      seen_jobs = runtime["seen_jobs"]
+      fail!("active Driver job registries are malformed") unless Host.strings?(active_jobs) && Host.strings?(seen_jobs)
+      if ((active_jobs + seen_jobs) & ids).any?
+        fail!("historical jobs entered the active Driver registry")
+      end
+      { "configured" => configured, "historical" => historical }
+    rescue JSON::GeneratorError
+      fail!("historical environment registry is not JSON")
+    end
+
+    def environment_transition_prompt(config, runtime)
+      transition = environment_transition(config, runtime)
+      return nil unless transition
+      transition.fetch("historical").merge(
+        "authority" => "This is trusted-adapter technical provenance for an environment replacement, not operator intent, approval, changed business requirements, or effect authority.",
+        "required_handling" => "Old jobs, check plans, receipts, submissions and assessments are historical diagnostics only. Commission fresh attempts and fresh checks in the active environment. Use historical_resume_job_id only for the same live work-order revision and claim; otherwise release that claim and dispatch a fresh worker. Human gates and the existing ledger authority remain unchanged."
+      )
     end
 
     def execution_for(config)

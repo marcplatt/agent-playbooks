@@ -252,6 +252,169 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_equal "cli-run", read_json(File.join(destination, "driver", "config.json"))["run_id"]
   end
 
+  def test_rc36_to_rc37_replaces_environment_with_fresh_preflight_and_historical_jobs
+    make_source_kernel_rc36
+    prior = File.join(@source, "driver", "continuation")
+    HrmKernel::Host.private_directory!(prior)
+    write_bytes(File.join(prior, "manifest.json"), "prior RC35 attribution bytes\n")
+    write_astra_job("old-run-astra-2", completion: true, live: false)
+    write_completed_worker_job("completed-worker")
+    supervisor = HrmKernel::SupervisorInput.new(directory: File.join(@source, "driver"))
+    2.times do |index|
+      supervisor.append({
+        "input_id" => "observation-#{index + 1}", "kind" => "technical_observation",
+        "source" => { "adapter_id" => "test-adapter", "reference" => "fixture-#{index + 1}" },
+        "summary" => "Technical observation #{index + 1}"
+      }, observed_cursor: index)
+    end
+    runtime_path = File.join(@source, "driver", "runtime.json")
+    runtime = read_json(runtime_path)
+    runtime.merge!(
+      "round" => 2, "orchestrator_job" => "old-run-astra-2", "resume_job" => nil,
+      "jobs" => ["completed-worker"], "seen_jobs" => [], "history" => [{ "old" => true }],
+      "observed_technical_input_cursor" => 1, "orchestrator_technical_input_cursor" => nil,
+      "outcome" => "engineering_stalled", "idle_turns" => 2
+    )
+    write_json(runtime_path, runtime)
+    before = byte_snapshot(@source)
+    journal = File.binread(File.join(@source, "driver", HrmKernel::SupervisorInput::LEDGER_NAME))
+
+    replacement = replacement_environment
+    manifest = continue_run(environment_replacement: replacement)
+
+    assert_equal before, byte_snapshot(@source)
+    assert_equal "ap-hrm-run-continuation/2", manifest["schema_version"]
+    assert manifest["target_preflight_is_fresh"]
+    refute manifest["target_preflight_reverified_for_destination"]
+    assert_equal "driver/continuation/rc37", manifest["archive_root"]
+    assert_equal journal, File.binread(File.join(@destination, "driver", HrmKernel::SupervisorInput::LEDGER_NAME))
+    assert_equal "prior RC35 attribution bytes\n", File.binread(File.join(@destination, "driver", "continuation", "manifest.json"))
+    assert_equal replacement, read_json(File.join(@destination, "driver", "config.json")).slice(*HrmKernel::RunContinuation::ENVIRONMENT_FIELDS)
+    config = read_json(File.join(@destination, "driver", "config.json"))
+    continued = read_json(File.join(@destination, "driver", "runtime.json"))
+    assert_equal [], continued["jobs"]
+    assert_equal [], continued["seen_jobs"]
+    assert_equal [], continued["history"]
+    assert_nil continued["orchestrator_job"]
+    assert_equal "old-run-astra-2", continued["resume_job"]
+    assert_equal "old-run-astra-2", continued["last_orchestrator_job"]
+    assert_equal 1, continued["observed_technical_input_cursor"]
+    assert_nil continued["orchestrator_technical_input_cursor"]
+    assert_equal "active", continued["outcome"]
+    historical = continued.fetch("historical_environment")
+    assert_equal ["old-run-astra-2", "completed-worker"], historical["jobs"].map { |job| job["job_id"] }
+    refute historical["old_checks_eligible_for_new_claims"]
+    assert_equal ["completed-worker"], historical.dig("work_orders", 0, "historical_resume_job_ids")
+    assert_equal "resume_same_claim_under_active_environment_or_release_then_rebind",
+      historical.dig("work_orders", 0, "required_action")
+    assert_equal historical.slice("source_environment_id", "active_environment_id", "source_environment_sha256",
+      "active_environment_sha256", "old_checks_eligible_for_new_claims").merge(
+        "historical_job_ids" => ["old-run-astra-2", "completed-worker"], "fresh_preflight_required" => true
+      ), config.dig("continuation", "environment_transition")
+    target_preflight = read_json(File.join(@destination, "driver", "preflight.json"))
+    assert_equal false, target_preflight.dig(0, "execution", "reused")
+    assert_equal "passed", target_preflight.dig(0, "execution", "conclusion")
+    refute_equal read_json(File.join(@source, "driver", "preflight.json")).dig(0, "execution", "receipt_sha256"),
+      target_preflight.dig(0, "execution", "receipt_sha256")
+    assert_equal ["observation-2"], HrmKernel::SupervisorInput.new(
+      directory: File.join(@destination, "driver")
+    ).read_after(continued["observed_technical_input_cursor"]).fetch("records").map { |record| record.dig("input", "input_id") }
+    HrmKernel::Driver.new(state_dir: @destination).send(:verify_environment!, config)
+    assert_equal manifest, continue_run(environment_replacement: replacement)
+
+    receipt_path = File.join(@destination, target_preflight.dig(0, "execution", "receipt_path"))
+    write_bytes(receipt_path, File.binread(receipt_path).sub("passed", "failed"))
+    error = assert_raises(HrmKernel::Error) { continue_run(environment_replacement: replacement) }
+    assert_match(/authentication|receipt|preflight|digest/, error.message)
+  end
+
+  def test_rc36_to_rc37_environment_replacement_fails_closed
+    make_source_kernel_rc36
+    error = assert_raises(HrmKernel::Error) { continue_run }
+    assert_match(/requires environment_replacement/, error.message)
+
+    same = replacement_environment.merge("environment_id" => "test")
+    same["preflight_checks"][0]["environment_id"] = "test"
+    error = assert_raises(HrmKernel::Error) { continue_run(environment_replacement: same) }
+    assert_match(/must differ/, error.message)
+
+    unsafe = replacement_environment.merge("read_roots" => [@source])
+    error = assert_raises(HrmKernel::Error) { continue_run(environment_replacement: unsafe) }
+    assert_match(/protected continuation state/, error.message)
+
+    widened = replacement_environment.merge("runner" => "untrusted")
+    error = assert_raises(HrmKernel::Error) { continue_run(environment_replacement: widened) }
+    assert_match(/fields are invalid/, error.message)
+
+    state = @store.read.fetch("state")
+    completed_state = JSON.parse(JSON.generate(state))
+    completed_state["work_orders"]["old"] = { "id" => "old", "status" => "completed" }
+    continuation = HrmKernel::RunContinuation.allocate
+    error = assert_raises(HrmKernel::Error) { continuation.send(:reject_old_environment_completion!, completed_state) }
+    assert_match(/completed work orders/, error.message)
+
+    reviewed_state = JSON.parse(JSON.generate(state))
+    reviewed_state["reviews"]["old"] = { "id" => "old" }
+    error = assert_raises(HrmKernel::Error) { continuation.send(:reject_old_environment_completion!, reviewed_state) }
+    assert_match(/review or assessment/, error.message)
+  end
+
+  def test_cli_accepts_explicit_rc37_environment_replacement
+    make_source_kernel_rc36
+    destination = File.join(@temporary, "cli-rc37-continuation")
+    input = File.join(@temporary, "rc37-continuation-input.json")
+    write_json(input, {
+      "new_run_id" => "cli-rc37-run", "source_kernel_root" => @kernel,
+      "source_kernel_revision" => @source_revision, "controller_stopped" => true,
+      "supervisor_provenance" => {
+        "schema_version" => "ap-hrm-supervisor-continuation/1",
+        "supervisor_id" => "rc37-supervisor", "commission_id" => "cli-rc37-commission",
+        "asserted_at" => "2026-09-09T12:00:00Z", "source" => "CLI RC37 acceptance"
+      },
+      "environment_replacement" => replacement_environment,
+      "production" => false
+    })
+    script = File.realpath(File.join(__dir__, "..", "scripts", "hrm_kernel.rb"))
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby, script, "driver-continue", "--state-dir", @source,
+      "--destination-state-dir", destination, "--input", input
+    )
+    assert status.success?, stderr
+    result = JSON.parse(stdout)
+    assert_equal "ap-hrm-run-continuation/2", result["schema_version"]
+    assert result["target_preflight_is_fresh"]
+    assert_equal "test-rc37", read_json(File.join(destination, "driver", "config.json"))["environment_id"]
+    assert File.file?(File.join(destination, "driver", "continuation", "rc37", "manifest.json"))
+  end
+
+  def test_failed_fresh_preflight_leaves_source_unchanged_and_no_destination
+    make_source_kernel_rc36
+    before = byte_snapshot(@source)
+    replacement = replacement_environment
+    replacement["preflight_checks"][0]["argv"] = [File.realpath(RbConfig.ruby), "-e", "exit 1"]
+
+    error = assert_raises(HrmKernel::Error) { continue_run(environment_replacement: replacement) }
+
+    assert_match(/preflight did not pass/, error.message)
+    assert_equal before, byte_snapshot(@source)
+    refute File.exist?(@destination)
+  end
+
+  def test_historical_attempt_order_uses_dispatch_order_not_job_names
+    source = {
+      "environment_replacement" => { "environment_id" => "new" },
+      "config" => { "environment_id" => "old" },
+      "runtime" => { "jobs" => %w[z-first a-latest] },
+      "statuses" => {
+        "a-latest" => { "job_id" => "a-latest" },
+        "z-first" => { "job_id" => "z-first" }
+      }
+    }
+    record = HrmKernel::RunContinuation.allocate.send(:environment_transition_record, source)
+    assert_equal %w[z-first a-latest], record["historical_job_ids"]
+    assert_equal "a-latest", record["historical_jobs"].last["job_id"]
+  end
+
   private
 
   def create_source_state
@@ -421,7 +584,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
   end
 
   def continue_run(destination: @destination, new_run_id: "new-run", source_revision: @source_revision,
-                   controller_stopped: true, production: false)
+                   controller_stopped: true, environment_replacement: nil, production: false)
     HrmKernel::RunContinuation.clone(
       source_state_dir: @source, destination_state_dir: destination,
       new_run_id: new_run_id, source_kernel_root: @kernel,
@@ -431,8 +594,33 @@ class HrmKernelRunContinuationTest < Minitest::Test
         "supervisor_id" => "rc36-supervisor", "commission_id" => "commission-1",
         "asserted_at" => "2026-09-09T12:00:00Z", "source" => "supervisor-owned task"
       },
+      environment_replacement: environment_replacement,
       production: production
     )
+  end
+
+  def make_source_kernel_rc36
+    File.write(File.join(@kernel, "kernel.txt"), "RC36\n")
+    File.write(File.join(@kernel, "playbooks", "hrm-interaction-kernel.md"), <<~MARKDOWN)
+      ---
+      title: AP-INTERACT RC.36 - test source kernel
+      ---
+    MARKDOWN
+    git(@kernel, "add", "kernel.txt", "playbooks/hrm-interaction-kernel.md")
+    git(@kernel, "commit", "--quiet", "-m", "frozen RC36 source kernel")
+    @source_revision = git(@kernel, "rev-parse", "HEAD").strip
+  end
+
+  def replacement_environment
+    {
+      "environment_id" => "test-rc37", "read_roots" => [], "environment_allowlist" => ["HOME"],
+      "preflight_checks" => [{
+        "id" => "ruby-rc37", "environment_id" => "test-rc37",
+        "argv" => [File.realpath(RbConfig.ruby), "-e", 'abort if ENV.fetch("HOME").empty?'],
+        "env" => { "HOME" => "{run_root}" }, "cwd" => @project, "timeout_seconds" => 10,
+        "max_output_bytes" => 16_384, "configuration_paths" => []
+      }]
+    }
   end
 
   def byte_snapshot(root)
