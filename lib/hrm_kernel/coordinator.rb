@@ -349,7 +349,7 @@ module HrmKernel
 
     def execution_for_config(config)
       sentinel = File.join(@directory, "isolation-sentinel.txt")
-      Host.atomic_write(sentinel, "Harmless RC40 isolation probe.\n") unless File.exist?(sentinel)
+      Host.atomic_write(sentinel, "Harmless RC41 isolation probe.\n") unless File.exist?(sentinel)
       Execution.new(project_root: config.fetch("project_root"), state_dir: @store.directory,
                     read_roots: config.fetch("read_roots"), environment_allowlist: config.fetch("environment_allowlist"),
                     forbidden_read_path: sentinel, forbidden_write_path: sentinel,

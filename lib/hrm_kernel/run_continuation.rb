@@ -28,19 +28,21 @@ module HrmKernel
     RC38_SCHEMA_VERSION = "ap-hrm-run-continuation/3"
     RC39_SCHEMA_VERSION = "ap-hrm-run-continuation/4"
     RC40_SCHEMA_VERSION = "ap-hrm-run-continuation/5"
+    RC41_SCHEMA_VERSION = "ap-hrm-run-continuation/6"
     PROVENANCE_SCHEMA = "ap-hrm-supervisor-continuation/1"
     TRANSITIONS = {
       "AP-INTERACT RC.35" => { "target" => "AP-INTERACT RC.36", "environment_replacement" => false },
       "AP-INTERACT RC.36" => { "target" => "AP-INTERACT RC.37", "environment_replacement" => true },
       "AP-INTERACT RC.37" => { "target" => "AP-INTERACT RC.38", "environment_replacement" => true },
       "AP-INTERACT RC.38" => { "target" => "AP-INTERACT RC.39", "environment_replacement" => true },
-      "AP-INTERACT RC.39" => { "target" => "AP-INTERACT RC.40", "environment_replacement" => true }
+      "AP-INTERACT RC.39" => { "target" => "AP-INTERACT RC.40", "environment_replacement" => true },
+      "AP-INTERACT RC.40" => { "target" => "AP-INTERACT RC.41", "environment_replacement" => true }
     }.freeze
     ENVIRONMENT_FIELDS = %w[environment_id read_roots environment_allowlist preflight_checks].freeze
     RC38_ENVIRONMENT_FIELDS = (ENVIRONMENT_FIELDS + %w[check_repository]).freeze
     MAX_FILE_BYTES = 16 * 1024 * 1024
-    MAX_TOTAL_BYTES = 512 * 1024 * 1024
-    MAX_ENTRIES = 20_000
+    MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+    MAX_ENTRIES = 100_000
     GIT_REVISION = /\A[0-9a-f]{40}\z/.freeze
     EXECUTION_RUN_ID = /\A(?:preflight-)?[0-9a-f]{64}\z/.freeze
     MAX_LINK_TARGET_BYTES = 4096
@@ -54,6 +56,8 @@ module HrmKernel
     RC39_MANIFEST_PATH = File.join(RC39_CONTINUATION_DIRECTORY, "manifest.json")
     RC40_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc40")
     RC40_MANIFEST_PATH = File.join(RC40_CONTINUATION_DIRECTORY, "manifest.json")
+    RC41_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc41")
+    RC41_MANIFEST_PATH = File.join(RC41_CONTINUATION_DIRECTORY, "manifest.json")
 
     class << self
       def clone(source_state_dir:, destination_state_dir:, new_run_id:, source_kernel_root:,
@@ -226,7 +230,7 @@ module HrmKernel
       end
       verify_preflight_records!(config, preflight)
       verify_driver_requests!
-      verification = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39].include?(source_version) ? :historical_continuation : :current
+      verification = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39 AP-INTERACT\ RC.40].include?(source_version) ? :historical_continuation : :current
       Evidence.verify_completed_work!(state, state_dir: @source, verification: verification)
 
       supervisor = SupervisorInput.new(directory: File.join(@source, "driver")).snapshot
@@ -246,7 +250,7 @@ module HrmKernel
 
       if environment_replacement
         environment_replacement = validate_environment_replacement!(environment_replacement, config, source_version)
-        reject_old_environment_completion!(state, allow_completed: %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39].include?(source_version))
+        reject_old_environment_completion!(state, allow_completed: %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39 AP-INTERACT\ RC.40].include?(source_version))
       end
 
       verify_source_unchanged!(tree)
@@ -301,6 +305,12 @@ module HrmKernel
         manifest = parse_object(read_private(manifest_path), "source RC39 continuation manifest")
         fail!("source continuation target version is not RC39") unless manifest["target_kernel_version"] == source_version
         verify_prior_continuation!(manifest, archive: RC39_CONTINUATION_DIRECTORY, schema: RC39_SCHEMA_VERSION)
+      elsif source_version == "AP-INTERACT RC.40"
+        manifest_path = File.join(@source, RC40_MANIFEST_PATH)
+        fail!("RC40 continuation provenance is missing") unless File.file?(manifest_path)
+        manifest = parse_object(read_private(manifest_path), "source RC40 continuation manifest")
+        fail!("source continuation target version is not RC40") unless manifest["target_kernel_version"] == source_version
+        verify_prior_continuation!(manifest, archive: RC40_CONTINUATION_DIRECTORY, schema: RC40_SCHEMA_VERSION)
       end
       if source_version == "AP-INTERACT RC.36"
         archive = File.join(@source, RC37_CONTINUATION_DIRECTORY)
@@ -318,6 +328,10 @@ module HrmKernel
         archive = File.join(@source, RC40_CONTINUATION_DIRECTORY)
         fail!("RC40 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
       end
+      if source_version == "AP-INTERACT RC.40"
+        archive = File.join(@source, RC41_CONTINUATION_DIRECTORY)
+        fail!("RC41 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
+      end
     end
 
     def normalize_environment_replacement(source_version)
@@ -333,7 +347,7 @@ module HrmKernel
     end
 
     def validate_environment_replacement!(replacement, source_config, source_version)
-      fields = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39].include?(source_version) ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
+      fields = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38 AP-INTERACT\ RC.39 AP-INTERACT\ RC.40].include?(source_version) ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
       fail!("environment replacement fields are invalid") unless replacement.keys.sort == fields.sort
       fail!("source environment configuration is incomplete") unless ENVIRONMENT_FIELDS.all? { |field| source_config.key?(field) }
       fail!("source environment_id is invalid") unless source_config["environment_id"].is_a?(String) &&
@@ -375,7 +389,9 @@ module HrmKernel
         repository = replacement["check_repository"]
         expected = %w[git_executable kind schema_version]
         fail!("replacement check_repository is malformed") unless repository.is_a?(Hash) && repository.keys.sort == expected
-        fail!("replacement check_repository schema is unsupported") unless repository["schema_version"] == Execution::REPOSITORY_VIEW_SCHEMA
+        expected_repository_schema = source_version == "AP-INTERACT RC.40" ?
+          Execution::REPOSITORY_VIEW_SCHEMA : Execution::LEGACY_REPOSITORY_VIEW_SCHEMA
+        fail!("replacement check_repository schema is unsupported") unless repository["schema_version"] == expected_repository_schema
         fail!("replacement check_repository kind is unsupported") unless repository["kind"] == "isolated_head_candidate"
         git = repository["git_executable"]
         fail!("replacement Git executable must be an absolute regular executable") unless git.is_a?(String) && Pathname.new(git).absolute? &&
@@ -514,7 +530,9 @@ module HrmKernel
     def request_record(source)
       environment = environment_transition_record(source)
       body = {
-        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.39"
+        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.40"
+                              RC41_SCHEMA_VERSION
+                            elsif source.fetch("source_kernel_version") == "AP-INTERACT RC.39"
                               RC40_SCHEMA_VERSION
                             elsif source.fetch("source_kernel_version") == "AP-INTERACT RC.38"
                               RC39_SCHEMA_VERSION
@@ -575,7 +593,7 @@ module HrmKernel
         "fresh_preflight_required" => true,
         "source_preflight_attribution" => "historical_only"
       }
-      if source["source_kernel_version"] == "AP-INTERACT RC.39"
+      if %w[AP-INTERACT\ RC.39 AP-INTERACT\ RC.40].include?(source["source_kernel_version"])
         previous = source.dig("config", "continuation", "environment_transition", "completed_contributions")
         record["completed_contributions"] = ContributionHistory.build(
           previous: previous, state: source.fetch("state"), commands: source.fetch("commands"))
@@ -646,7 +664,7 @@ module HrmKernel
       end
 
       runtime = JSON.parse(source.fetch("runtime_bytes"))
-      fresh_context = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION, RC40_SCHEMA_VERSION].include?(request["schema_version"])
+      fresh_context = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION, RC40_SCHEMA_VERSION, RC41_SCHEMA_VERSION].include?(request["schema_version"])
       resume_job = fresh_context ? nil : safe_astra_resume_job(source.fetch("statuses"), runtime)
       runtime.delete("pending_dispatch")
       runtime.delete("pending_job_registration")
@@ -677,6 +695,7 @@ module HrmKernel
     end
 
     def continuation_archive(request)
+      return RC41_CONTINUATION_DIRECTORY if request["schema_version"] == RC41_SCHEMA_VERSION
       return RC40_CONTINUATION_DIRECTORY if request["schema_version"] == RC40_SCHEMA_VERSION
       return RC39_CONTINUATION_DIRECTORY if request["schema_version"] == RC39_SCHEMA_VERSION
       return RC38_CONTINUATION_DIRECTORY if request["schema_version"] == RC38_SCHEMA_VERSION
@@ -684,6 +703,7 @@ module HrmKernel
     end
 
     def manifest_path(request)
+      return RC41_MANIFEST_PATH if request["schema_version"] == RC41_SCHEMA_VERSION
       return RC40_MANIFEST_PATH if request["schema_version"] == RC40_SCHEMA_VERSION
       return RC39_MANIFEST_PATH if request["schema_version"] == RC39_SCHEMA_VERSION
       return RC38_MANIFEST_PATH if request["schema_version"] == RC38_SCHEMA_VERSION
@@ -787,7 +807,7 @@ module HrmKernel
     end
 
     def finalize_destination!(root, source, request)
-      resume_job = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION, RC40_SCHEMA_VERSION].include?(request["schema_version"]) ? nil :
+      resume_job = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION, RC40_SCHEMA_VERSION, RC41_SCHEMA_VERSION].include?(request["schema_version"]) ? nil :
         safe_astra_resume_job(source.fetch("statuses"), source.fetch("runtime"))
       fresh = request["schema_version"] != LEGACY_SCHEMA_VERSION
       archive = continuation_archive(request)
@@ -984,7 +1004,7 @@ module HrmKernel
       entries = []
       total = 0
       walk(root, allow_execution_scratch: true) do |path, relative, stat|
-        fail!("state tree has too many entries") if entries.length >= MAX_ENTRIES
+        validate_entry_count!(entries.length + 1)
         if stat.directory?
           entries << { "path" => relative, "type" => "directory", "mode" => stat.mode & 0o777,
                        "uid" => stat.uid } unless relative.empty?
@@ -1031,9 +1051,13 @@ module HrmKernel
     def load_inherited_execution_attribution!
       @inherited_incomplete_execution_attempts = []
       @inherited_failed_scratch_request_ids = []
-      return unless @source_kernel_version == "AP-INTERACT RC.39"
-      path = File.join(@source, RC39_MANIFEST_PATH)
-      manifest = parse_object(read_private(path), "source RC39 continuation manifest")
+      manifest_path, label = case @source_kernel_version
+                             when "AP-INTERACT RC.39" then [RC39_MANIFEST_PATH, "RC39"]
+                             when "AP-INTERACT RC.40" then [RC40_MANIFEST_PATH, "RC40"]
+                             else return
+                             end
+      path = File.join(@source, manifest_path)
+      manifest = parse_object(read_private(path), "source #{label} continuation manifest")
       attempts = manifest["incomplete_failed_execution_attempts"]
       requests = manifest["failed_scratch_driver_request_ids"]
       attempt_keys = %w[evidence_eligible process_exit_known receipt_present run_id]
@@ -1042,9 +1066,9 @@ module HrmKernel
           entry.is_a?(Hash) && entry.keys.sort == attempt_keys && EXECUTION_RUN_ID.match?(entry["run_id"].to_s) &&
             entry["receipt_present"] == false && entry["process_exit_known"] == false && entry["evidence_eligible"] == false
         end
-      fail!("source RC39 incomplete execution attribution is malformed") unless valid_attempts &&
+      fail!("source #{label} incomplete execution attribution is malformed") unless valid_attempts &&
         attempts.map { |entry| entry["run_id"] }.uniq.length == attempts.length
-      fail!("source RC39 failed Driver request attribution is malformed") unless
+      fail!("source #{label} failed Driver request attribution is malformed") unless
         Host.strings?(requests) && requests.uniq == requests && requests.all? { |id| Host::IDENTIFIER.match?(id) }
       @inherited_incomplete_execution_attempts = JSON.parse(JSON.generate(attempts))
       @inherited_failed_scratch_request_ids = requests.dup
@@ -1053,6 +1077,12 @@ module HrmKernel
     def validate_total_bytes!(total)
       fail!("state tree exceeds continuation byte bound") unless
         total.is_a?(Integer) && total >= 0 && total <= MAX_TOTAL_BYTES
+      true
+    end
+
+    def validate_entry_count!(count)
+      fail!("state tree has too many entries") unless
+        count.is_a?(Integer) && count >= 0 && count <= MAX_ENTRIES
       true
     end
 

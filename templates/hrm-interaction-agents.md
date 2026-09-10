@@ -1,6 +1,6 @@
-# HRM interaction RC.40 dispatcher
+# HRM interaction RC.41 dispatcher
 
-Candidate profile for AP-INTERACT RC.40. The archived
+Candidate profile for AP-INTERACT RC.41. The archived
 [RC.33 experiment](../experiments/ap-interact-rc33/README.md) retains the original
 additive-intent and unchanged-review findings; RC.34 addressed them in protocol 2.
 RC.35 added automatic native dispatch and diagnostics. RC.36 adds separate
@@ -14,11 +14,13 @@ their descriptors into authenticated receipts.
 RC.40 preserves that evidence across later authorized amendments by authenticating
 the historical submission in the ledger and requiring the current revision to be
 completed and freshly validated.
+RC.41 permits isolated checks to read only the authenticated tracked root
+`.env.example` public template; runtime secrets and lookalikes remain denied.
 
 Use this profile only for a project explicitly adopting `ap-hrm-interaction/2`.
 Record the exact AP source revision and project-owned milestone when adopting it.
 Start a fresh private state directory. Never replay or migrate an RC.33 ledger as an
-RC.40 ledger. A stopped RC.39 run can be continued with an explicit environment
+RC.41 ledger. A stopped RC.40 run can be continued with an explicit environment
 replacement through `driver-continue`; the original remains archival. This template
 does not activate itself or replace another repository's policy.
 
@@ -53,6 +55,6 @@ does not activate itself or replace another repository's policy.
 - Return compact role projections and relevant evidence references. Keep full source messages and the ledger private. Do not count a model-labelled approval as proof that human input was necessary.
 - Report unavailable host-token measurements as unavailable. Native local readiness is not deployment, provider health, customer delivery, integration, or live canonical acceptance.
 
-For Alpine Estimating, qualify RC.40 only as an explicit project pilot layered
+For Alpine Estimating, qualify RC.41 only as an explicit project pilot layered
 under the current global and repository profiles. Do not install it globally or
 claim adoption from this template alone.

@@ -61,7 +61,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
-## AP-INTERACT RC.40 — implementation and review runtime candidate
+## AP-INTERACT RC.41 — implementation and review runtime candidate
 
 [Experiment record](experiments/ap-interact-rc33/README.md) preserves PR #10 as an
 archived RC.33 experiment, including its audit findings and historical AE canary
@@ -72,7 +72,7 @@ runtime policy or proof of project adoption.
 `ap-hrm-interaction/2` local service for additive operator intent, bounded host work,
 native check receipts, independent scenario assessment, first-class findings, and
 review/remediation cycles. Run `ruby scripts/hrm_kernel.rb --help` for its interface.
-RC.40 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
+RC.41 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
 profile requests GPT-6 Astra for orchestration and GPT-5.6 Sol for workers and
 independent review; the host receipt records the requested model and available task
 identity evidence without claiming stronger model authentication.
@@ -112,6 +112,13 @@ historical provenance while the active revision remains unfinished and requires
 fresh native validation. Its stopped RC.39 continuation preserves the ledger,
 artifacts, failed requests, technical-input cursor and remaining turn budget, and
 resumes no model task or provider effect.
+
+The [RC.41 public-template successor](experiments/ap-interact-rc41/README.md) lets
+isolated repository checks read the tracked root `.env.example` template while
+keeping real environment files and untracked or linked lookalikes data-read denied.
+The receipt binds both the tracked HEAD blob and exact candidate file. Its stopped
+RC.40 continuation preserves the ledger, work history, journal and remaining budget
+and requires fresh environment validation.
 
 The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
 records the actual native worker run, engineering failures, corrections, and

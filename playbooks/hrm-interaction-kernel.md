@@ -1,22 +1,21 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.40 - history-aware completed contributions and stopped RC.39 continuation
-version: "0.9.0-rc40"
+title: AP-INTERACT RC.41 - authenticated public templates and stopped RC.40 continuation
+version: "0.10.0-rc41"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC40
+experiment_id: AP-INTERACT-RC41
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.40** develops the [RC.39 experiment](../experiments/ap-interact-rc39/README.md).
-It uses software version `0.9.0-rc40` and protocol `ap-hrm-interaction/2`.
-It preserves authenticated completed-contribution history when an authorized later
-work-order amendment supersedes the completed revision. The current amended revision
-still requires completion and fresh active-environment validation. The
-[RC.40 experiment record](../experiments/ap-interact-rc40/README.md) defines the
-stopped transition and evidence-lineage contract. Production Canary acceptance
+**AP-INTERACT RC.41** develops the [RC.40 experiment](../experiments/ap-interact-rc40/README.md).
+It uses software version `0.10.0-rc41` and protocol `ap-hrm-interaction/2`.
+It permits isolated repository checks to read an authenticated tracked root
+`.env.example` public template while preserving data-read denial for runtime secrets
+and untracked or linked lookalikes. The [RC.41 experiment record](../experiments/ap-interact-rc41/README.md)
+defines the stopped transition and receipt contract. Production Canary acceptance
 remains unproved.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
@@ -95,14 +94,14 @@ engineering or host failure, but cannot override review, decision, preflight or
 turn-budget gates. Publication during a synchronized driver step returns an
 explicit retry error; the caller must retry the same input ID.
 
-For the supported RC.39 to RC.40 environment transition, stop the old controller between steps,
+For the supported RC.40 to RC.41 environment transition, stop the old controller between steps,
 allow its native jobs to finish and preserve the original state. Invoke
 `driver-continue --state-dir SOURCE --destination-state-dir DESTINATION --input CONTINUATION.json`
-from a clean committed RC.40 checkout. The source kernel must match its declared
-clean RC.39 pin. Supply an explicit `environment_replacement` with a new
+from a clean committed RC.41 checkout. The source kernel must match its declared
+clean RC.40 pin. Supply an explicit `environment_replacement` with a new
 `environment_id`, exact `read_roots`, `environment_allowlist`, `preflight_checks`,
 and `check_repository`. The repository object names the exact pinned Git executable
-and schema `ap-hrm-isolated-head-candidate/1`. The new environment requires fresh
+and schema `ap-hrm-isolated-head-candidate/2`. The new environment requires fresh
 successful preflight; neither Astra nor the technical-input journal can grant it.
 
 The continuation keeps the source ledger byte-for-byte, including submitted
@@ -116,8 +115,8 @@ authenticated historical provenance only; the current revision must be completed
 and freshly validated. Historical evidence never transfers eligibility to the
 amended revision.
 
-RC.40 bounds a continued source tree to 20,000 entries, 16 MiB per regular file and
-512 MiB total. The aggregate allowance preserves the authenticated native candidate
+RC.41 bounds a continued source tree to 100,000 entries, 16 MiB per regular file and
+2 GiB total. The aggregate allowance preserves the authenticated native candidate
 and check history of a sustained run; it does not skip per-file, ownership, mode,
 symlink, receipt, hash or unchanged-source verification.
 
@@ -145,19 +144,27 @@ canonical history validation. Use `{run_root}` for writable caches and fixtures;
 `{candidate_root}` refers to the read-only validation root. `configuration_paths`
 still names only configuration copied into `{run_root}`.
 
+Within that isolated view, RC.41 permits data reads only for the root
+`.env.example` file when pinned Git proves it is a regular tracked file in `HEAD`.
+The repository receipt records the HEAD blob OID, source SHA-256 and byte count,
+plus the exact candidate SHA-256, byte count and mode. A real `.env`, another
+`.env.*` name, an untracked nested `.env.example`, a symlink, or an external target
+remains subject to the sensitive-file data-read denial. Preflight and native model
+source access do not receive this exception.
+
 The source lock establishes an observed safe boundary; it cannot prove an old
 external controller will never restart. Keep that controller stopped. The earlier
 RC.35 to RC.36 and RC.36 to RC.37 transitions remain available from their frozen
-kernel checkouts. See the RC.40 experiment record for exact JSON contracts and
+kernel checkouts. See the RC.41 experiment record for exact JSON contracts and
 limitations.
 
-The RC.40 replacement retains this exact repository policy beside the replacement
+The RC.41 replacement retains this exact repository policy beside the replacement
 environment ID, roots, allowlist and preflight checks:
 
 ```json
 {
   "check_repository": {
-    "schema_version": "ap-hrm-isolated-head-candidate/1",
+    "schema_version": "ap-hrm-isolated-head-candidate/2",
     "kind": "isolated_head_candidate",
     "git_executable": "/absolute/pinned/bundled/git"
   }
@@ -411,7 +418,7 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [RC.40 dispatcher](../templates/hrm-interaction-agents.md)
+Adoption is explicit. Use the [RC.41 dispatcher](../templates/hrm-interaction-agents.md)
 in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
 Estimating, this is an experimental project-profile recommendation only. Preserve
 the installed global and repository policies unless their own adoption change is
@@ -431,6 +438,14 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.10.0-rc41 — 2026-09-10:** Allows the tracked root `.env.example` public
+  template to be read only in the isolated repository candidate. The authenticated
+  receipt binds its tracked HEAD blob and exact candidate bytes; real environment
+  files, untracked examples, symlinks and external paths remain denied. Adds an
+  explicit stopped RC.40-to-RC.41 continuation that preserves ledger, work history,
+  failed-attempt attribution, technical input and remaining budget while requiring
+  fresh preflight and resuming no model task or provider effect.
 
 - **0.9.0-rc40 — 2026-09-10:** Authenticates preserved completed contributions
   against their original hash-linked submit or refresh command and derives their

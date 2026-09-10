@@ -23,12 +23,14 @@ module HrmKernel
     READ_CHUNK_BYTES = 16 * 1024
     RUN_ROOT_TOKEN = "{run_root}"
     CANDIDATE_ROOT_TOKEN = "{candidate_root}"
-    REPOSITORY_VIEW_SCHEMA = "ap-hrm-isolated-head-candidate/1"
+    LEGACY_REPOSITORY_VIEW_SCHEMA = "ap-hrm-isolated-head-candidate/1"
+    REPOSITORY_VIEW_SCHEMA = "ap-hrm-isolated-head-candidate/2"
     MAX_REPOSITORY_OBJECTS = 20_000
     MAX_REPOSITORY_OBJECT_BYTES = 256 * 1024 * 1024
     MAX_INERT_SCRATCH_LINKS = 4096
     MAX_LINK_TARGET_BYTES = 4096
     SENSITIVE_BASENAME = /\A(?:\.env(?:\..*)?|credentials[^\/]*\.json|[^\/]*\.(?:db|sqlite|sqlite3|pem|key))\z/i
+    PUBLIC_TRACKED_TEMPLATE_PATHS = [".env.example"].freeze
     SYSTEM_READ_ROOTS = [
       "/usr/bin",
       "/usr/lib",
@@ -136,7 +138,8 @@ module HrmKernel
       execution_root = repository ? repository.fetch("root") : @project_root
       materialized_spec = materialize_spec(spec, run_root, execution_root)
       validate_configuration_paths!(materialized_spec, run_root)
-      profile = sandbox_profile(run_root, project_root: execution_root)
+      public_templates = repository ? repository.fetch("receipt").fetch("public_tracked_templates", []) : []
+      profile = sandbox_profile(run_root, project_root: execution_root, public_tracked_templates: public_templates)
       isolation = preflight_isolation!(profile, run_root, project_root: execution_root)
       result = execute_process(materialized_spec, profile, run_root)
       inert_scratch_links = privatize_run_scratch!(run_root, except: repository && repository.fetch("root"))
@@ -599,7 +602,7 @@ module HrmKernel
       true
     end
 
-    def sandbox_profile(run_root, project_root: @project_root)
+    def sandbox_profile(run_root, project_root: @project_root, public_tracked_templates: [])
       repository_executable = @repository_view && @repository_view["git_executable"]
       read_roots = [project_root, run_root, *@read_roots, repository_executable,
                     *SYSTEM_READ_ROOTS.select { |path| File.exist?(path) }].compact.uniq
@@ -615,7 +618,9 @@ module HrmKernel
         rules << "(allow file-read* (literal #{profile_string(path)}))"
       end
       read_roots.each { |path| rules << "(allow file-read* (subpath #{profile_string(path)}))" }
+      allowed_templates = verified_public_template_paths(project_root, public_tracked_templates)
       discover_sensitive_existing_files(project_root).each do |path|
+        next if allowed_templates.include?(path)
         rules << "(deny file-read-data (literal #{profile_string(path)}))"
       end
       rules << "(allow file-write* (subpath #{profile_string(run_root)}) (literal \"/dev/null\"))"
@@ -747,7 +752,8 @@ module HrmKernel
       return nil if value.nil?
       view = stringify_hash!(canonical_value(value), "repository view")
       expected_keys!(view, %w[schema_version kind git_executable])
-      fail!("repository view schema is unsupported") unless view["schema_version"] == REPOSITORY_VIEW_SCHEMA
+      fail!("repository view schema is unsupported") unless
+        [LEGACY_REPOSITORY_VIEW_SCHEMA, REPOSITORY_VIEW_SCHEMA].include?(view["schema_version"])
       fail!("repository view kind is unsupported") unless view["kind"] == "isolated_head_candidate"
       view["git_executable"] = canonical_executable!(view.fetch("git_executable"), "repository view Git executable")
       view.freeze
@@ -815,6 +821,7 @@ module HrmKernel
       overlay_candidate!(root, git, candidate.fetch("changes"))
       isolated_changes = git_changes(root, git)
       fail!("isolated repository candidate differs from the captured candidate") unless isolated_changes == candidate.fetch("changes")
+      public_templates = @repository_view["schema_version"] == REPOSITORY_VIEW_SCHEMA ? public_tracked_templates(root, git) : []
       parent_available = git_status_at(root, git, "cat-file", "-e", "#{head}^")
       fail!("repository view unexpectedly contains parent history") if parent_available.success?
       protect_repository_metadata!(root)
@@ -822,7 +829,7 @@ module HrmKernel
 
       relative = Pathname.new(root).relative_path_from(Pathname.new(@state_dir)).to_s
       receipt = {
-        "schema_version" => REPOSITORY_VIEW_SCHEMA,
+        "schema_version" => @repository_view.fetch("schema_version"),
         "kind" => "isolated_head_candidate",
         "source_project_root" => @project_root,
         "validation_root" => relative,
@@ -838,6 +845,7 @@ module HrmKernel
         "parent_objects" => "omitted",
         "git_executable" => executable_identity(git)
       }
+      receipt["public_tracked_templates"] = public_templates if @repository_view["schema_version"] == REPOSITORY_VIEW_SCHEMA
       { "root" => root, "receipt" => receipt }
     rescue ArgumentError
       fail!("repository view contains an invalid object size")
@@ -894,8 +902,10 @@ module HrmKernel
     def verify_repository_view!(view, candidate)
       fail!("native receipt repository view is missing") unless view.is_a?(Hash)
       expected = %w[candidate_changes_sha256 candidate_digest git_executable head_sha head_tree kind metadata_entries metadata_sha256 object_bytes object_count object_ids_sha256 parent_objects schema_version source_project_root validation_root]
+      expected << "public_tracked_templates" if view["schema_version"] == REPOSITORY_VIEW_SCHEMA
       fail!("native receipt repository view is malformed") unless view.keys.sort == expected.sort
-      fail!("native receipt repository view schema changed") unless view["schema_version"] == REPOSITORY_VIEW_SCHEMA && view["kind"] == "isolated_head_candidate"
+      fail!("native receipt repository view schema changed") unless
+        view["schema_version"] == @repository_view["schema_version"] && view["kind"] == "isolated_head_candidate"
       fail!("native receipt repository source changed") unless view["source_project_root"] == @project_root
       fail!("native receipt repository candidate changed") unless view["candidate_digest"] == candidate["candidate_digest"] &&
         view["candidate_changes_sha256"] == digest(candidate.fetch("changes")) && view["head_sha"] == candidate["head_sha"] &&
@@ -909,11 +919,62 @@ module HrmKernel
         fail!("native receipt repository metadata changed")
       end
       git = @repository_view.fetch("git_executable")
+      if view["schema_version"] == REPOSITORY_VIEW_SCHEMA
+        fail!("native receipt public template attribution changed") unless
+          public_tracked_templates(root, git) == view["public_tracked_templates"]
+      end
       fail!("native receipt repository HEAD changed") unless git_output_at(root, git, "rev-parse", "HEAD").strip == candidate["head_sha"]
       fail!("native receipt repository tree changed") unless git_output_at(root, git, "rev-parse", "HEAD^{tree}").strip == candidate["head_tree"]
       fail!("native receipt repository candidate drifted") unless git_changes(root, git) == candidate.fetch("changes")
       fail!("native receipt repository unexpectedly gained parent history") if git_status_at(root, git, "cat-file", "-e", "#{candidate.fetch('head_sha')}^").success?
       true
+    end
+
+    def public_tracked_templates(root, git)
+      PUBLIC_TRACKED_TEMPLATE_PATHS.map do |relative|
+        tracked = git_output_at(root, git, "ls-files", "-z", "--", relative)
+        next if tracked.empty?
+        fail!("repository public template tracking is ambiguous") unless tracked == "#{relative}\0"
+        head_entry = git_output_at(root, git, "ls-tree", "-z", "HEAD", "--", relative)
+        metadata, head_path = head_entry.delete_suffix("\0").split("\t", 2)
+        mode, type, oid = metadata.to_s.split(" ", 3)
+        fail!("repository public template must be a regular tracked HEAD file") unless
+          head_path == relative && type == "blob" && %w[100644 100755].include?(mode) && oid.to_s.match?(/\A[0-9a-f]{40}\z/)
+        source_bytes = git_output_at(root, git, "cat-file", "blob", oid, binary: true)
+        path = File.join(root, relative)
+        stat = File.lstat(path)
+        fail!("repository public template must be a regular unlinked file") unless
+          stat.file? && !stat.symlink? && stat.nlink == 1 && stat.uid == Process.uid
+        { "path" => relative, "bytes" => stat.size, "mode" => stat.mode & 0o777,
+          "sha256" => Digest::SHA256.file(path).hexdigest, "source_blob_oid" => oid,
+          "source_bytes" => source_bytes.bytesize, "source_sha256" => Digest::SHA256.hexdigest(source_bytes) }
+      end.compact
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP => error
+      fail!("repository public template cannot be verified: #{error.message}")
+    end
+
+    def verified_public_template_paths(root, descriptors)
+      fail!("repository public template attribution is malformed") unless descriptors.is_a?(Array) &&
+        descriptors.length <= PUBLIC_TRACKED_TEMPLATE_PATHS.length
+      descriptors.map do |entry|
+        fail!("repository public template attribution is malformed") unless entry.is_a?(Hash) &&
+          entry.keys.sort == %w[bytes mode path sha256 source_blob_oid source_bytes source_sha256] &&
+          PUBLIC_TRACKED_TEMPLATE_PATHS.include?(entry["path"]) &&
+          entry["bytes"].is_a?(Integer) && entry["bytes"] >= 0 && entry["mode"].is_a?(Integer) &&
+          entry["sha256"].is_a?(String) && entry["sha256"].match?(/\A[0-9a-f]{64}\z/) &&
+          entry["source_blob_oid"].is_a?(String) && entry["source_blob_oid"].match?(/\A[0-9a-f]{40}\z/) &&
+          entry["source_bytes"].is_a?(Integer) && entry["source_bytes"] >= 0 &&
+          entry["source_sha256"].is_a?(String) && entry["source_sha256"].match?(/\A[0-9a-f]{64}\z/)
+        path = File.join(root, safe_relative_path!(entry.fetch("path")))
+        stat = File.lstat(path)
+        fail!("repository public template must be a regular unlinked file") unless
+          stat.file? && !stat.symlink? && stat.nlink == 1 && stat.uid == Process.uid &&
+            stat.size == entry["bytes"] && (stat.mode & 0o777) == entry["mode"] &&
+            Digest::SHA256.file(path).hexdigest == entry["sha256"]
+        path
+      end.uniq
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP => error
+      fail!("repository public template cannot be verified: #{error.message}")
     end
 
     def protect_repository_metadata!(root)

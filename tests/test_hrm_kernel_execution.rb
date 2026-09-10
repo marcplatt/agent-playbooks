@@ -485,7 +485,12 @@ class HrmKernelExecutionTest < Minitest::Test
   end
 
   def test_isolated_head_candidate_runs_real_git_without_history_and_rejects_metadata_injection
+    File.write(File.join(@project_root, ".env"), "REAL_SECRET=must-stay-denied\n")
+    git("add", ".env")
+    git("commit", "--quiet", "-m", "tracked runtime secret fixture")
     original_head = Open3.capture2("/usr/bin/git", "-C", @project_root, "rev-parse", "HEAD").first.strip
+    FileUtils.mkdir_p(File.join(@project_root, "nested"))
+    File.write(File.join(@project_root, "nested", ".env.example"), "UNTRACKED_TEMPLATE=must-stay-denied\n")
     File.write(File.join(@project_root, "check.rb"), <<~'RUBY')
       require "open3"
       require "fileutils"
@@ -495,6 +500,15 @@ class HrmKernelExecutionTest < Minitest::Test
       abort("parent history leaked") if parent_status.success?
       tracked, tracked_status = Open3.capture2e("git", "ls-files", "private-evidence")
       abort("root Git result changed") unless tracked_status.success? && tracked.empty?
+      abort("public tracked template unavailable") unless File.binread(".env.example").include?("EXAMPLE_ONLY")
+      [".env", "nested/.env.example"].each do |path|
+        begin
+          File.binread(path)
+          abort("non-public environment file was readable: #{path}")
+        rescue Errno::EPERM, Errno::EACCES
+          nil
+        end
+      end
       [".git/config", ".git/objects/info/alternates", ".git/hooks/post-index-change", ".gitattributes"].each do |path|
         begin
           FileUtils.mkdir_p(File.dirname(path))
@@ -529,16 +543,31 @@ class HrmKernelExecutionTest < Minitest::Test
       forbidden_read_path: @forbidden_read, forbidden_write_path: @forbidden_write,
       repository_view: repository
     )
-    candidate = capture(execution, paths: %w[app.txt check.rb], authorized_paths: %w[app.txt other.txt check.rb], selected_spec: isolated_spec)
+    candidate = capture(execution, paths: %w[app.txt check.rb nested/.env.example],
+      authorized_paths: %w[app.txt other.txt check.rb nested/.env.example], selected_spec: isolated_spec)
     result = execution.run(spec: isolated_spec, binding: candidate.fetch("binding"), candidate: candidate)
     descriptor = result.slice("receipt_path", "receipt_sha256")
     receipt = execution.verify_receipt!(descriptor, candidate: candidate, current_exact: true)
     assert_equal "passed", receipt["conclusion"], private_log(receipt.dig("stderr", "path"))
     assert_equal "omitted", receipt.dig("repository_view", "parent_objects")
     assert_equal original_head, receipt.dig("repository_view", "head_sha")
+    public_template = receipt.dig("repository_view", "public_tracked_templates", 0)
+    assert_equal ".env.example", public_template.fetch("path")
+    assert_equal Digest::SHA256.hexdigest("EXAMPLE_ONLY=not-secret\n"), public_template.fetch("sha256")
+    assert_equal public_template.fetch("sha256"), public_template.fetch("source_sha256")
     assert_equal "preserve\n", File.read(@forbidden_write)
 
     isolated_root = File.join(@state_dir, receipt.dig("repository_view", "validation_root"))
+    template = File.join(isolated_root, ".env.example")
+    template_bytes = File.binread(template)
+    File.unlink(template)
+    File.symlink(@forbidden_read, template)
+    error = assert_raises(HrmKernel::Error) { execution.verify_receipt!(descriptor, candidate: candidate) }
+    assert_match(/regular unlinked file/, error.message)
+    File.unlink(template)
+    File.write(template, template_bytes)
+    File.chmod(0o600, template)
+
     config = File.join(isolated_root, ".git", "config")
     File.chmod(0o600, config)
     File.write(config, "[core]\n\tfsmonitor = #{File.join(@temporary, 'escape')}\n")

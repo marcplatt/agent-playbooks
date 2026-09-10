@@ -573,7 +573,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
     config = read_json(File.join(@destination, "driver", "config.json"))
     continued = read_json(File.join(@destination, "driver", "runtime.json"))
     assert_equal "test-rc38", config["environment_id"]
-    assert_equal HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA, config.dig("check_repository", "schema_version")
+    assert_equal HrmKernel::Execution::LEGACY_REPOSITORY_VIEW_SCHEMA, config.dig("check_repository", "schema_version")
     assert_equal 2, continued["round"]
     assert_equal 3, config["max_turns"]
     assert_nil continued["resume_job"]
@@ -775,6 +775,17 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_equal manifest.fetch("failed_scratch_driver_request_ids"),
       rc40.fetch("failed_scratch_driver_request_ids")
     assert_equal false, rc40.fetch("incomplete_execution_evidence_eligible")
+
+    @source = @destination
+    @destination = File.join(@temporary, "incomplete-target-rc41")
+    make_source_kernel_rc40
+    rc41 = continue_run(new_run_id: "incomplete-target-rc41",
+      environment_replacement: replacement_environment_rc41)
+    assert_equal "ap-hrm-run-continuation/6", rc41.fetch("schema_version")
+    assert_equal rc40.fetch("incomplete_failed_execution_attempts"),
+      rc41.fetch("incomplete_failed_execution_attempts")
+    assert_equal rc40.fetch("failed_scratch_driver_request_ids"),
+      rc41.fetch("failed_scratch_driver_request_ids")
   end
 
   def test_rc38_receiptless_nonprivate_scratch_requires_recorded_cleanup_failure
@@ -951,6 +962,30 @@ class HrmKernelRunContinuationTest < Minitest::Test
         state: target_store.read.fetch("state"), commands: target_store.verified_commands)
     end
     assert_match(/absent from the verified ledger/, error.message)
+
+    @source = @destination
+    @destination = File.join(@temporary, "history-target-rc41")
+    make_source_kernel_rc40
+    ledger_before_rc41 = File.binread(File.join(@source, HrmKernel::Store::LEDGER_NAME))
+    state_before_rc41 = target_store.read.fetch("state")
+    legacy_environment = replacement_environment_rc41
+    legacy_environment.fetch("check_repository")["schema_version"] =
+      HrmKernel::Execution::LEGACY_REPOSITORY_VIEW_SCHEMA
+    error = assert_raises(HrmKernel::Error) do
+      continue_run(destination: File.join(@temporary, "legacy-repository-rc41"),
+        new_run_id: "legacy-repository-rc41", environment_replacement: legacy_environment)
+    end
+    assert_match(/repository schema is unsupported/, error.message)
+    rc41 = continue_run(new_run_id: "history-target-rc41",
+      environment_replacement: replacement_environment_rc41)
+    assert_equal "ap-hrm-run-continuation/6", rc41.fetch("schema_version")
+    assert_equal "driver/continuation/rc41", rc41.fetch("archive_root")
+    assert_equal ledger_before_rc41, File.binread(File.join(@destination, HrmKernel::Store::LEDGER_NAME))
+    assert_equal state_before_rc41, HrmKernel::Store.new(@destination).read.fetch("state")
+    rc41_runtime = read_json(File.join(@destination, "driver", "runtime.json"))
+    assert_equal 22, rc41_runtime.fetch("round")
+    assert_equal [], rc41_runtime.fetch("jobs")
+    assert_nil rc41_runtime["resume_job"]
   end
 
   def test_historical_attempt_order_uses_dispatch_order_not_job_names
@@ -968,16 +1003,23 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_equal "a-latest", record["historical_jobs"].last["job_id"]
   end
 
-  def test_rc40_continuation_bound_accepts_frozen_canary_volume_and_remains_bounded
+  def test_rc41_continuation_bound_accepts_measured_sustained_run_volume_and_remains_bounded
     continuation = HrmKernel::RunContinuation.allocate
 
-    assert continuation.send(:validate_total_bytes!, 410_441_925)
+    assert continuation.send(:validate_total_bytes!, 1_103_006_753)
     assert continuation.send(:validate_total_bytes!, HrmKernel::RunContinuation::MAX_TOTAL_BYTES)
     error = assert_raises(HrmKernel::Error) do
       continuation.send(:validate_total_bytes!, HrmKernel::RunContinuation::MAX_TOTAL_BYTES + 1)
     end
     assert_match(/continuation byte bound/, error.message)
-    assert_equal 512 * 1024 * 1024, HrmKernel::RunContinuation::MAX_TOTAL_BYTES
+    assert continuation.send(:validate_entry_count!, 54_018)
+    assert continuation.send(:validate_entry_count!, HrmKernel::RunContinuation::MAX_ENTRIES)
+    error = assert_raises(HrmKernel::Error) do
+      continuation.send(:validate_entry_count!, HrmKernel::RunContinuation::MAX_ENTRIES + 1)
+    end
+    assert_match(/too many entries/, error.message)
+    assert_equal 2 * 1024 * 1024 * 1024, HrmKernel::RunContinuation::MAX_TOTAL_BYTES
+    assert_equal 100_000, HrmKernel::RunContinuation::MAX_ENTRIES
   end
 
   private
@@ -1212,6 +1254,18 @@ class HrmKernelRunContinuationTest < Minitest::Test
     @source_revision = git(@kernel, "rev-parse", "HEAD").strip
   end
 
+  def make_source_kernel_rc40
+    File.write(File.join(@kernel, "kernel.txt"), "RC40\n")
+    File.write(File.join(@kernel, "playbooks", "hrm-interaction-kernel.md"), <<~MARKDOWN)
+      ---
+      title: AP-INTERACT RC.40 - test source kernel
+      ---
+    MARKDOWN
+    git(@kernel, "add", "kernel.txt", "playbooks/hrm-interaction-kernel.md")
+    git(@kernel, "commit", "--quiet", "-m", "frozen RC40 source kernel")
+    @source_revision = git(@kernel, "rev-parse", "HEAD").strip
+  end
+
   def complete_rc37_contribution(unrelated_candidate: false)
     File.write(File.join(@project, ".gitignore"), "/.codex/hrm-runs/\n")
     File.write(File.join(@project, "check.rb"), 'abort unless File.read("app.txt") == "submitted\\n"')
@@ -1306,7 +1360,7 @@ class HrmKernelRunContinuationTest < Minitest::Test
         "argv" => [File.realpath(RbConfig.ruby), "-e", smoke], "env" => git_environment,
         "cwd" => @project, "timeout_seconds" => 10, "max_output_bytes" => 65_536,
         "configuration_paths" => [], "startup_success_marker" => "rc38-ready" }],
-      "check_repository" => { "schema_version" => HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA,
+      "check_repository" => { "schema_version" => HrmKernel::Execution::LEGACY_REPOSITORY_VIEW_SCHEMA,
         "kind" => "isolated_head_candidate", "git_executable" => git_executable }
     }
   end
@@ -1322,6 +1376,14 @@ class HrmKernelRunContinuationTest < Minitest::Test
     replacement = JSON.parse(JSON.generate(replacement_environment_rc39))
     replacement["environment_id"] = "test-rc40"
     replacement.fetch("preflight_checks").each { |check| check["environment_id"] = "test-rc40" }
+    replacement
+  end
+
+  def replacement_environment_rc41
+    replacement = JSON.parse(JSON.generate(replacement_environment_rc40))
+    replacement["environment_id"] = "test-rc41"
+    replacement.fetch("preflight_checks").each { |check| check["environment_id"] = "test-rc41" }
+    replacement.fetch("check_repository")["schema_version"] = HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA
     replacement
   end
 
