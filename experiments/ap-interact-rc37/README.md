@@ -2,7 +2,7 @@
 
 RC.37 develops RC.36 commit `226782efedc6e393c670a551b2b598dd21658e6d`
 on `codex/ap-interact-rc37`, separate from AP main. Software version is
-`0.6.0-rc37`; protocol remains `ap-hrm-interaction/2`. The first Astra-driven
+`0.6.1-rc37`; protocol remains `ap-hrm-interaction/2`. The first Astra-driven
 development remains RC.33/PR #10.
 
 ## Failure observed in the actual AE continuation
@@ -124,3 +124,20 @@ SMS/GHL obligations, and actual operator reviews remain pending. Neither RC.36
 mechanics nor this environment repair demonstrates final Canary success. Keep
 each version's failures and interventions visible when evaluating whether the
 operator can work primarily at the HRM review level.
+
+## First actual transition refusal
+
+The first RC.37 pin, `2cc7d22d4e44046ebc9dbd7a45b81f5b2e719d72`, refused the
+actual AE source before fresh preflight because a retained pytest scratch file
+was mode `0644`. Its ancestors through the execution run and state root were all
+`0700`, so the file was already inaccessible to other users. It belonged to a
+passed `ci-routing` check. The refusal left all 349 recorded source hashes
+unchanged and created no destination state.
+
+The patch preserves source bytes and modes, accepts ordinary scratch only beneath
+a private execution-run boundary, and normalizes copied scratch permissions.
+Internal pytest scratch symlinks are retained as inert target metadata rather
+than recreated; links outside the same execution run remain refused. Control
+records, receipts and keys retain strict private-file validation. This
+correction is not evidence of a resumed Canary or a new successful production
+check; the explicit patched handoff must still pass fresh environment preflight.

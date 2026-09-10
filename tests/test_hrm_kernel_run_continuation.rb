@@ -127,6 +127,100 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_match(/symlink/, error.message)
   end
 
+  def test_normalizes_effectively_private_execution_scratch_without_mutating_source
+    run = File.join(@source, "execution", "a" * 64)
+    scratch = File.join(run, "pytest-of-unknown", "pytest-0", "test-example")
+    FileUtils.mkdir_p(scratch, mode: 0o755)
+    File.chmod(0o700, run)
+    [File.join(run, "pytest-of-unknown"), File.join(run, "pytest-of-unknown", "pytest-0"), scratch].each do |path|
+      File.chmod(0o755, path)
+    end
+    scratch_file = File.join(scratch, "packet.md")
+    write_bytes(scratch_file, "retained native scratch\n")
+    File.chmod(0o644, scratch_file)
+    relative_link = File.join(run, "pytest-of-unknown", "pytest-current")
+    File.symlink("pytest-0", relative_link)
+    absolute_target = File.join(scratch, "actual-target")
+    FileUtils.mkdir_p(absolute_target, mode: 0o755)
+    File.chmod(0o755, absolute_target)
+    absolute_link = File.join(scratch, "test-examplecurrent")
+    File.symlink(absolute_target, absolute_link)
+    source_modes = mode_snapshot(@source)
+    source_bytes = byte_snapshot(@source)
+
+    continue_run
+
+    assert_equal source_bytes, byte_snapshot(@source)
+    assert_equal source_modes, mode_snapshot(@source)
+    assert_equal "retained native scratch\n", File.binread(File.join(@destination,
+      scratch_file.delete_prefix(@source + "/")))
+    [relative_link, absolute_link].each do |source_link|
+      refute File.exist?(File.join(@destination, source_link.delete_prefix(@source + "/")))
+      refute File.symlink?(File.join(@destination, source_link.delete_prefix(@source + "/")))
+    end
+    manifest = read_json(File.join(@destination, "driver", "continuation", "manifest.json"))
+    links = manifest.fetch("inert_execution_scratch_links")
+    assert_equal [absolute_link, relative_link].map { |path| path.delete_prefix(@source + "/") }.sort,
+      links.map { |entry| entry["path"] }.sort
+    assert_equal "pytest-0", links.find { |entry| entry["path"].end_with?("pytest-current") }.fetch("target")
+    assert_equal absolute_target, links.find { |entry| entry["path"].end_with?("test-examplecurrent") }.fetch("target")
+    assert_equal "archived_as_inert_metadata_not_recreated_or_followed",
+      manifest["execution_scratch_link_transformation"]
+    assert_private_tree(@destination)
+    assert_equal manifest, continue_run
+
+    injected = File.join(@destination, "driver", "injected-link")
+    File.symlink(File.join(@destination, "driver"), injected)
+    error = assert_raises(HrmKernel::Error) { continue_run }
+    assert_match(/symlink/, error.message)
+    File.unlink(injected)
+
+    manifest_path = File.join(@destination, "driver", "continuation", "manifest.json")
+    changed = read_json(manifest_path)
+    changed["inert_execution_scratch_links"][0]["target"] = "different-inert-target"
+    write_json(manifest_path, changed)
+    error = assert_raises(HrmKernel::Error) { continue_run }
+    assert_match(/link attribution changed/, error.message)
+  end
+
+  def test_nonprivate_execution_control_file_still_fails_closed
+    run = File.join(@source, "execution", "b" * 64)
+    FileUtils.mkdir_p(run, mode: 0o700)
+    control = File.join(run, "receipt.json")
+    write_bytes(control, "{}\n")
+    File.chmod(0o644, control)
+    error = assert_raises(HrmKernel::Error) { continue_run }
+    assert_match(/file is not private.*receipt/, error.message)
+
+  end
+
+  def test_escaped_broken_and_control_namespace_symlinks_fail_closed
+    run = File.join(@source, "execution", "c" * 64)
+    scratch = File.join(run, "pytest-of-unknown")
+    target = File.join(scratch, "pytest-0")
+    FileUtils.mkdir_p(target, mode: 0o755)
+    File.chmod(0o700, run)
+    File.chmod(0o755, scratch)
+    File.chmod(0o755, target)
+
+    cases = {
+      "escaped" => @project,
+      "broken" => File.join(scratch, "missing"),
+      "control" => target
+    }
+    cases.each do |kind, link_target|
+      link = kind == "control" ? File.join(run, "control-current") : File.join(scratch, "#{kind}-current")
+      File.symlink(link_target, link)
+      error = assert_raises(HrmKernel::Error) { continue_run }
+      if kind == "control"
+        assert_match(/contains a symlink/, error.message)
+      else
+        assert_match(/same run|broken or unverifiable/, error.message)
+      end
+      File.unlink(link)
+    end
+  end
+
   def test_preserves_authority_ledger_and_exhausted_budget
     @store.transact(
       "command_id" => "decision", "type" => "decision.request",
@@ -357,6 +451,12 @@ class HrmKernelRunContinuationTest < Minitest::Test
     reviewed_state["reviews"]["old"] = { "id" => "old" }
     error = assert_raises(HrmKernel::Error) { continuation.send(:reject_old_environment_completion!, reviewed_state) }
     assert_match(/review or assessment/, error.message)
+
+    HrmKernel::Host.private_directory!(File.join(@source, "driver", "continuation", "rc37"))
+    error = assert_raises(HrmKernel::Error) do
+      continue_run(environment_replacement: replacement_environment)
+    end
+    assert_match(/archive already exists/, error.message)
   end
 
   def test_cli_accepts_explicit_rc37_environment_replacement
@@ -625,8 +725,17 @@ class HrmKernelRunContinuationTest < Minitest::Test
 
   def byte_snapshot(root)
     Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
-      [".", ".."].include?(File.basename(path)) || File.directory?(path)
-    end.to_h { |path| [path.delete_prefix(root + "/"), Digest::SHA256.file(path).hexdigest] }
+      [".", ".."].include?(File.basename(path)) || (File.directory?(path) && !File.symlink?(path))
+    end.to_h do |path|
+      value = File.symlink?(path) ? "symlink:#{File.readlink(path)}" : Digest::SHA256.file(path).hexdigest
+      [path.delete_prefix(root + "/"), value]
+    end
+  end
+
+  def mode_snapshot(root)
+    ([root] + Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH)).reject do |path|
+      [".", ".."].include?(File.basename(path))
+    end.to_h { |path| [path.delete_prefix(root), File.lstat(path).mode & 0o777] }
   end
 
   def assert_private_tree(root)

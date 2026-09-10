@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-INTERACT-001
 title: AP-INTERACT RC.37 - explicit execution environment transition
-version: "0.6.0-rc37"
+version: "0.6.1-rc37"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
@@ -11,7 +11,7 @@ experiment_id: AP-INTERACT-RC37
 # HRM interaction kernel
 
 **AP-INTERACT RC.37** develops the [RC.36 experiment](../experiments/ap-interact-rc36/README.md).
-It uses software version `0.6.0-rc37` and protocol `ap-hrm-interaction/2`.
+It uses software version `0.6.1-rc37` and protocol `ap-hrm-interaction/2`.
 It adds an explicit, supervised execution-environment transition for a stopped
 run, with fresh preflight and preserved historical evidence. The
 [RC.37 experiment record](../experiments/ap-interact-rc37/README.md) describes the
@@ -360,6 +360,10 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.6.1-rc37 — 2026-09-09:** Corrects stopped-run copying of ordinary test
+  scratch inside private execution directories, preserving original permissions
+  and bytes while keeping control records strictly private.
 
 - **0.6.0-rc37 — 2026-09-09:** Supports an explicit execution-environment
   transition with a new environment identity, fresh preflight and retained

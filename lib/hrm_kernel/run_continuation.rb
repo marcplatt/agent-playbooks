@@ -33,6 +33,9 @@ module HrmKernel
     MAX_TOTAL_BYTES = 256 * 1024 * 1024
     MAX_ENTRIES = 20_000
     GIT_REVISION = /\A[0-9a-f]{40}\z/.freeze
+    EXECUTION_RUN_ID = /\A(?:preflight-)?[0-9a-f]{64}\z/.freeze
+    EXECUTION_SCRATCH_DIRECTORY = /\Apytest-of-[A-Za-z0-9._-]+\z/.freeze
+    MAX_LINK_TARGET_BYTES = 4096
     CONTINUATION_DIRECTORY = File.join("driver", "continuation")
     MANIFEST_PATH = File.join(CONTINUATION_DIRECTORY, "manifest.json")
     RC37_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc37")
@@ -260,6 +263,10 @@ module HrmKernel
         manifest = parse_object(read_private(manifest_path), "source continuation manifest")
         fail!("source continuation target version is not RC36") unless manifest["target_kernel_version"] == source_version
         verify_prior_continuation!(manifest)
+      end
+      if source_version == "AP-INTERACT RC.36"
+        archive = File.join(@source, RC37_CONTINUATION_DIRECTORY)
+        fail!("RC37 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
       end
     end
 
@@ -504,12 +511,14 @@ module HrmKernel
         if entry["type"] == "directory"
           FileUtils.mkdir_p(to, mode: 0o700)
           File.chmod(0o700, to)
-        else
+        elsif entry["type"] == "file"
           FileUtils.mkdir_p(File.dirname(to), mode: 0o700)
-          bytes = read_private(from)
+          bytes = read_source_entry(from, entry)
           fail!("source file changed while copying: #{relative}") unless bytes.bytesize == entry["bytes"] &&
             Digest::SHA256.hexdigest(bytes) == entry["sha256"]
           Host.atomic_write(to, bytes)
+        elsif entry["type"] != "symlink"
+          fail!("source manifest contains an unsupported entry type")
         end
       end
     end
@@ -677,6 +686,8 @@ module HrmKernel
         "resumed_astra_thread_id" => resume_job && source.dig("statuses", resume_job, "thread_id"),
         "ledger_copied_unchanged" => true,
         "historical_receipts_copied_unchanged" => true,
+        "inert_execution_scratch_links" => source.fetch("tree").fetch("entries").select { |entry| entry["type"] == "symlink" },
+        "execution_scratch_link_transformation" => "archived_as_inert_metadata_not_recreated_or_followed",
         "source_preflight_is_historical" => true,
         "target_preflight_is_fresh" => fresh,
         "target_preflight_reverified_for_destination" => !fresh,
@@ -716,6 +727,7 @@ module HrmKernel
     end
 
     def verify_idempotent_destination!(request)
+      verify_private_destination_tree!
       path = File.join(@destination, manifest_path(request))
       fail!("destination already exists and is not this continuation") unless File.file?(path) && !File.symlink?(path)
       manifest = parse_object(read_private(path), "continuation manifest")
@@ -727,6 +739,17 @@ module HrmKernel
       Store.new(@destination).verify!
       verify_destination_preflight!(@destination)
       manifest
+    end
+
+    def verify_private_destination_tree!
+      walk(@destination) do |_path, relative, stat|
+        if stat.file?
+          fail!("continued state file is not private: #{relative}") unless (stat.mode & 0o077).zero?
+        elsif !stat.directory?
+          fail!("continued state contains a symlink or special file: #{relative}")
+        end
+      end
+      true
     end
 
     def verify_created_destination!(request)
@@ -794,6 +817,16 @@ module HrmKernel
         fail!("historical continued evidence changed: #{relative}") unless bytes.bytesize == entry["bytes"] &&
           Digest::SHA256.hexdigest(bytes) == entry["sha256"]
       end
+      links = source_manifest.fetch("entries").select { |entry| entry["type"] == "symlink" }
+      recorded_links = manifest.fetch("inert_execution_scratch_links", [])
+      fail!("inert execution scratch link attribution changed") unless recorded_links == links
+      if links.any? && manifest["execution_scratch_link_transformation"] != "archived_as_inert_metadata_not_recreated_or_followed"
+        fail!("inert execution scratch link transformation is missing")
+      end
+      links.each do |entry|
+        path = File.join(root, entry.fetch("path"))
+        fail!("inert execution scratch link was recreated") if File.exist?(path) || File.symlink?(path)
+      end
     rescue KeyError => error
       fail!("continuation manifest is incomplete: #{error.message}")
     end
@@ -806,33 +839,118 @@ module HrmKernel
     def snapshot_tree(root)
       entries = []
       total = 0
-      walk(root) do |path, relative, stat|
+      walk(root, allow_execution_scratch: true) do |path, relative, stat|
         fail!("state tree has too many entries") if entries.length >= MAX_ENTRIES
         if stat.directory?
-          entries << { "path" => relative, "type" => "directory" } unless relative.empty?
+          entries << { "path" => relative, "type" => "directory", "mode" => stat.mode & 0o777,
+                       "uid" => stat.uid } unless relative.empty?
         elsif stat.file?
-          fail!("state file is not private: #{relative}") unless (stat.mode & 0o077).zero?
+          validate_source_mode!(relative, stat, directory: false)
           fail!("state file exceeds continuation bound: #{relative}") if stat.size > MAX_FILE_BYTES
           total += stat.size
           fail!("state tree exceeds continuation byte bound") if total > MAX_TOTAL_BYTES
           entries << { "path" => relative, "type" => "file", "bytes" => stat.size,
-                       "sha256" => Digest::SHA256.file(path).hexdigest }
+                       "mode" => stat.mode & 0o777, "uid" => stat.uid,
+                       "sha256" => Digest::SHA256.hexdigest(read_source_file(path, relative, stat)) }
+        elsif stat.symlink?
+          entries << snapshot_execution_scratch_link(root, path, relative, stat)
         else
           fail!("state tree contains a symlink or special file: #{relative}")
         end
       end
-      body = { "entries" => entries, "file_count" => entries.count { |item| item["type"] == "file" }, "total_bytes" => total }
+      body = {
+        "entries" => entries,
+        "file_count" => entries.count { |item| item["type"] == "file" },
+        "symlink_count" => entries.count { |item| item["type"] == "symlink" },
+        "total_bytes" => total
+      }
       body.merge("sha256" => digest(body))
     end
 
-    def walk(root, relative = "", &block)
+    def walk(root, relative = "", allow_execution_scratch: false, &block)
       path = relative.empty? ? root : File.join(root, relative)
       stat = File.lstat(path)
-      fail!("state tree contains a symlink: #{relative}") if stat.symlink?
+      fail!("state tree entry has an unsafe owner: #{relative}") unless stat.uid == Process.uid
+      if stat.symlink?
+        fail!("state tree contains a symlink: #{relative}") unless allow_execution_scratch
+        yield(path, relative, stat)
+        return
+      end
       yield(path, relative, stat)
       return unless stat.directory?
-      fail!("state directory is not private: #{relative}") unless (stat.mode & 0o077).zero?
-      Dir.children(path).sort.each { |name| walk(root, relative.empty? ? name : File.join(relative, name), &block) }
+      if allow_execution_scratch
+        validate_source_mode!(relative, stat, directory: true)
+      else
+        fail!("state directory is not private: #{relative}") unless (stat.mode & 0o077).zero?
+      end
+      Dir.children(path).sort.each do |name|
+        child = relative.empty? ? name : File.join(relative, name)
+        walk(root, child, allow_execution_scratch: allow_execution_scratch, &block)
+      end
+    end
+
+    def validate_source_mode!(relative, stat, directory:)
+      mode = stat.mode & 0o777
+      return if (mode & 0o077).zero?
+      allowed = execution_scratch_path?(relative, directory: directory) && mode == (directory ? 0o755 : 0o644)
+      label = directory ? "directory" : "file"
+      fail!("state #{label} is not private: #{relative}") unless allowed
+    end
+
+    def execution_scratch_path?(relative, directory:)
+      parts = Pathname.new(relative).each_filename.to_a
+      minimum = directory ? 3 : 4
+      parts.length >= minimum && parts[0] == "execution" && EXECUTION_RUN_ID.match?(parts[1]) &&
+        EXECUTION_SCRATCH_DIRECTORY.match?(parts[2])
+    end
+
+    def snapshot_execution_scratch_link(root, path, relative, stat)
+      fail!("state tree contains a symlink: #{relative}") unless execution_scratch_path?(relative, directory: false)
+      target = File.readlink(path)
+      fail!("execution scratch link target is oversized: #{relative}") if target.bytesize > MAX_LINK_TARGET_BYTES
+      parts = Pathname.new(relative).each_filename.to_a
+      run_root = File.join(root, parts[0], parts[1])
+      run_stat = File.lstat(run_root)
+      unless run_stat.directory? && !run_stat.symlink? && run_stat.uid == Process.uid && (run_stat.mode & 0o077).zero?
+        fail!("execution scratch link lacks a private run boundary: #{relative}")
+      end
+      candidate = Pathname.new(target).absolute? ? target : File.expand_path(target, File.dirname(path))
+      resolved_run = File.realpath(run_root)
+      resolved_target = File.realpath(candidate)
+      target_stat = File.stat(resolved_target)
+      unless beneath?(resolved_target, resolved_run) && resolved_target != resolved_run &&
+             target_stat.directory? && target_stat.uid == Process.uid
+        fail!("execution scratch link must resolve to an owned directory in the same run: #{relative}")
+      end
+      { "path" => relative, "type" => "symlink", "target" => target,
+        "mode" => stat.mode & 0o777, "uid" => stat.uid }
+    rescue SystemCallError => error
+      fail!("execution scratch link is broken or unverifiable: #{relative}: #{error.message}")
+    end
+
+    def read_source_entry(path, entry)
+      stat = File.lstat(path)
+      fail!("source file changed while copying: #{entry.fetch('path')}") unless stat.file? &&
+        stat.uid == entry.fetch("uid") && (stat.mode & 0o777) == entry.fetch("mode") &&
+        stat.size == entry.fetch("bytes")
+      read_source_file(path, entry.fetch("path"), stat)
+    end
+
+    def read_source_file(path, relative, expected_stat)
+      flags = File::RDONLY
+      flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
+      File.open(path, flags) do |file|
+        actual = file.stat
+        unless actual.file? && actual.uid == expected_stat.uid && actual.mode == expected_stat.mode &&
+               actual.size == expected_stat.size && actual.ino == expected_stat.ino && actual.dev == expected_stat.dev
+          fail!("source file changed while reading: #{relative}")
+        end
+        bytes = file.read(MAX_FILE_BYTES + 1) || "".b
+        fail!("state file exceeds continuation bound: #{relative}") if bytes.bytesize > MAX_FILE_BYTES
+        bytes
+      end
+    rescue Errno::ELOOP
+      fail!("state tree contains a symlink: #{relative}")
     end
 
     def private_tree!(root)
