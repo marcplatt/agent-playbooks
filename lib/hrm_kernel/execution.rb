@@ -26,6 +26,8 @@ module HrmKernel
     REPOSITORY_VIEW_SCHEMA = "ap-hrm-isolated-head-candidate/1"
     MAX_REPOSITORY_OBJECTS = 20_000
     MAX_REPOSITORY_OBJECT_BYTES = 256 * 1024 * 1024
+    MAX_INERT_SCRATCH_LINKS = 4096
+    MAX_LINK_TARGET_BYTES = 4096
     SENSITIVE_BASENAME = /\A(?:\.env(?:\..*)?|credentials[^\/]*\.json|[^\/]*\.(?:db|sqlite|sqlite3|pem|key))\z/i
     SYSTEM_READ_ROOTS = [
       "/usr/bin",
@@ -137,7 +139,7 @@ module HrmKernel
       profile = sandbox_profile(run_root, project_root: execution_root)
       isolation = preflight_isolation!(profile, run_root, project_root: execution_root)
       result = execute_process(materialized_spec, profile, run_root)
-      privatize_run_scratch!(run_root, except: repository && repository.fetch("root"))
+      inert_scratch_links = privatize_run_scratch!(run_root, except: repository && repository.fetch("root"))
       verify_candidate_manifest!(candidate, exact: true)
       verify_repository_view!(repository.fetch("receipt"), candidate) if repository
 
@@ -172,6 +174,8 @@ module HrmKernel
         "stdout" => private_log_descriptor(stdout_path),
         "stderr" => private_log_descriptor(stderr_path)
       }
+      unsigned["inert_scratch_links"] = inert_scratch_links
+      unsigned["scratch_link_transformation"] = "removed_after_process_group_termination_before_receipt"
       receipt = unsigned.merge("authentication" => receipt_authentication(unsigned))
       write_private_exclusive!(run_root, "receipt.json", canonical_json(receipt) << "\n")
       descriptor = receipt_descriptor(receipt_path)
@@ -204,7 +208,7 @@ module HrmKernel
       profile = sandbox_profile(run_root)
       isolation = preflight_isolation!(profile, run_root)
       result = execute_process(materialized_spec, profile, run_root)
-      privatize_run_scratch!(run_root)
+      inert_scratch_links = privatize_run_scratch!(run_root)
       startup_marker = spec["startup_success_marker"]
       startup_completed = startup_marker.nil? ? nil : result.fetch("stdout").include?(startup_marker)
       stdout_path = write_private_exclusive!(run_root, "preflight-stdout.bin", result.delete("stdout"))
@@ -231,6 +235,8 @@ module HrmKernel
         "stdout" => private_log_descriptor(stdout_path),
         "stderr" => private_log_descriptor(stderr_path)
       }
+      unsigned["inert_scratch_links"] = inert_scratch_links
+      unsigned["scratch_link_transformation"] = "removed_after_process_group_termination_before_receipt"
       receipt = unsigned.merge("authentication" => receipt_authentication(unsigned))
       write_private_exclusive!(run_root, "preflight-receipt.json", canonical_json(receipt) << "\n")
       receipt_descriptor(receipt_path).merge("conclusion" => conclusion, "reused" => false)
@@ -255,6 +261,7 @@ module HrmKernel
         fail!("preflight declared environment digest mismatch")
       end
       fail!("preflight executable identity drifted") unless receipt["executable_identity"] == executable_identity(receipt.dig("declared_environment", "argv", 0))
+      verify_inert_scratch_links!(receipt, run_root: File.dirname(path), required: false)
       if spec
         spec = stringify_hash!(spec, "preflight spec")
         validate_execution_spec!(spec)
@@ -300,7 +307,11 @@ module HrmKernel
       expected_authentication = receipt_authentication(unsigned)
       fail!("native receipt authentication failed") unless secure_equal?(authentication["hmac_sha256"], expected_authentication["hmac_sha256"])
       fail!("native receipt schema is unsupported") unless receipt["schema_version"] == RECEIPT_SCHEMA
-      verify_repository_view_receipt!(receipt["repository_view"], candidate || receipt["candidate"])
+      # A versioned continuation authenticates the frozen historical receipt,
+      # whose repository policy may predate the active environment. Its HMAC,
+      # ledger binding, logs, candidate and owned artifacts remain mandatory;
+      # only current/live verification applies the active repository view.
+      verify_repository_view_receipt!(receipt["repository_view"], candidate || receipt["candidate"]) unless historical_authentication_only
       fail!("native receipt binding mismatch") if binding && receipt["binding"] != binding
       if expected_binding
         expected_binding.each do |key, value|
@@ -327,6 +338,7 @@ module HrmKernel
                               "failed"
                             end
       fail!("native receipt conclusion was not derived from process exit") unless receipt["conclusion"] == expected_conclusion
+      verify_inert_scratch_links!(receipt, run_root: File.dirname(path), required: !historical_authentication_only)
       verify_private_log!(receipt.fetch("stdout"))
       verify_private_log!(receipt.fetch("stderr"))
       if historical_authentication_only
@@ -933,15 +945,105 @@ module HrmKernel
     end
 
     def privatize_run_scratch!(run_root, except: nil)
-      paths = Dir.glob(File.join(run_root, "**", "*"), File::FNM_DOTMATCH).reject do |path|
-        %w[. ..].include?(File.basename(path)) || (except && within?(path, except))
-      end.sort_by { |path| -path.count(File::SEPARATOR) }
-      paths.each do |path|
-        stat = File.lstat(path)
+      paths = scratch_paths_no_follow(run_root, except: except)
+      paths.each do |_path, stat|
+        fail!("execution scratch contains a symlink or special file") unless stat.file? || stat.directory? || stat.symlink?
+        fail!("execution scratch has an unsafe owner") unless stat.uid == Process.uid
+      end
+      links = paths.select { |_path, stat| stat.symlink? }
+      fail!("execution scratch contains too many symlinks") if links.length > MAX_INERT_SCRATCH_LINKS
+      link_records = links.map do |path, stat|
+        [path, stat, scratch_link_descriptor(run_root, path, stat, except: except)]
+      end.sort_by { |_path, _stat, descriptor| descriptor.fetch("path") }
+
+      link_records.each do |path, expected, descriptor|
+        current = File.lstat(path)
+        unless current.symlink? && current.dev == expected.dev && current.ino == expected.ino &&
+               current.uid == expected.uid && current.mode == expected.mode && File.readlink(path) == descriptor.fetch("target")
+          fail!("execution scratch link changed before removal")
+        end
+        File.unlink(path)
+      end
+
+      scratch_paths_no_follow(run_root, except: except).sort_by { |path, _stat| -path.count(File::SEPARATOR) }.each do |path, stat|
         fail!("execution scratch contains a symlink or special file") unless stat.file? || stat.directory?
         fail!("execution scratch has an unsafe owner") unless stat.uid == Process.uid
         File.chmod(stat.directory? ? 0o700 : (stat.mode & 0o111 == 0 ? 0o600 : 0o700), path)
       end
+      link_records.map(&:last)
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP => error
+      fail!("execution scratch link changed during cleanup: #{error.message}")
+    end
+
+    def scratch_paths_no_follow(root, except: nil, relative: "", entries: [])
+      directory = relative.empty? ? root : File.join(root, relative)
+      Dir.children(directory).sort.each do |name|
+        child_relative = relative.empty? ? name : File.join(relative, name)
+        path = File.join(root, child_relative)
+        next if except && within?(path, except)
+        stat = File.lstat(path)
+        entries << [path, stat]
+        scratch_paths_no_follow(root, except: except, relative: child_relative, entries: entries) if stat.directory?
+      end
+      entries
+    end
+
+    def scratch_link_descriptor(run_root, path, stat, except: nil)
+      fail!("execution scratch link has an unsafe owner") unless stat.symlink? && stat.uid == Process.uid
+      relative = Pathname.new(path).relative_path_from(Pathname.new(run_root)).to_s
+      parts = Pathname.new(relative).each_filename.to_a
+      fail!("execution scratch link lacks a nested scratch boundary") unless parts.length >= 2
+      target = File.readlink(path)
+      fail!("execution scratch link target is oversized") if target.bytesize > MAX_LINK_TARGET_BYTES
+      candidate = Pathname.new(target).absolute? ? target : File.expand_path(target, File.dirname(path))
+      resolved_run = File.realpath(run_root)
+      resolved_target = File.realpath(candidate)
+      target_stat = File.stat(resolved_target)
+      unless within?(resolved_target, resolved_run) && resolved_target != resolved_run &&
+             (target_stat.file? || target_stat.directory?) && target_stat.uid == Process.uid
+        fail!("execution scratch link must resolve to an owned regular entry in the same run")
+      end
+      fail!("execution scratch link may not target a hard-linked file") if target_stat.file? && target_stat.nlink != 1
+      if except && within?(resolved_target, except)
+        fail!("execution scratch link may not target the isolated candidate")
+      end
+      {
+        "path" => relative, "target" => target,
+        "resolved_path" => Pathname.new(resolved_target).relative_path_from(Pathname.new(resolved_run)).to_s,
+        "target_type" => target_stat.directory? ? "directory" : "file",
+        "mode" => stat.mode & 0o777, "uid" => stat.uid
+      }
+    rescue ArgumentError
+      fail!("execution scratch link path is invalid")
+    end
+
+    def verify_inert_scratch_links!(receipt, run_root:, required:)
+      descriptors = receipt["inert_scratch_links"]
+      transformation = receipt["scratch_link_transformation"]
+      if descriptors.nil? && transformation.nil? && !required
+        return true
+      end
+      unless descriptors.is_a?(Array) && descriptors.length <= MAX_INERT_SCRATCH_LINKS &&
+             transformation == "removed_after_process_group_termination_before_receipt"
+        fail!("native receipt scratch-link attribution is malformed")
+      end
+      expected_keys = %w[mode path resolved_path target target_type uid]
+      paths = descriptors.map do |entry|
+        fail!("native receipt scratch-link descriptor is malformed") unless entry.is_a?(Hash) && entry.keys.sort == expected_keys
+        relative = safe_relative_path!(entry["path"])
+        fail!("native receipt scratch-link path lacks a nested boundary") unless Pathname.new(relative).each_filename.to_a.length >= 2
+        fail!("native receipt scratch-link target is oversized") unless entry["target"].is_a?(String) && entry["target"].bytesize <= MAX_LINK_TARGET_BYTES
+        fail!("native receipt scratch-link target type is invalid") unless %w[file directory].include?(entry["target_type"])
+        fail!("native receipt scratch-link mode is invalid") unless entry["mode"].is_a?(Integer)
+        fail!("native receipt scratch-link owner is invalid") unless entry["uid"] == Process.uid
+        resolved = safe_relative_path!(entry["resolved_path"])
+        fail!("native receipt scratch-link target escaped its run") unless within?(File.join(run_root, resolved), run_root)
+        path = File.join(run_root, relative)
+        fail!("removed execution scratch link was recreated") if File.exist?(path) || File.symlink?(path)
+        relative
+      end
+      fail!("native receipt scratch-link paths are not unique and sorted") unless paths == paths.sort && paths.uniq == paths
+      true
     end
 
     def repository_metadata_snapshot(root)

@@ -113,6 +113,148 @@ class HrmKernelExecutionTest < Minitest::Test
     assert_equal first.fetch("receipt_sha256"), second.fetch("receipt_sha256")
   end
 
+  def test_pytest_current_links_are_removed_and_bound_to_the_native_receipt
+    File.write(File.join(@project_root, "check.rb"), <<~'RUBY')
+      require "fileutils"
+      root = ENV.fetch("RUN_ROOT")
+      base = File.join(root, "pytest-of-unknown", "pytest-0")
+      test = File.join(base, "test_binding_fails_closed_for_0")
+      FileUtils.mkdir_p(test)
+      File.write(File.join(test, "intake.sqlite3"), "scratch")
+      File.symlink(base, File.join(root, "pytest-of-unknown", "pytest-current"))
+      File.symlink(test, File.join(base, "test_binding_fails_closed_for_current"))
+      puts "pytest-layout-ready"
+    RUBY
+    git("add", "check.rb")
+    execution = runner
+    candidate = capture(execution, paths: %w[app.txt check.rb],
+      authorized_paths: %w[app.txt other.txt check.rb])
+
+    result = execution.run(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+    descriptor = result.slice("receipt_path", "receipt_sha256")
+    receipt = execution.verify_receipt!(descriptor, binding: candidate.fetch("binding"),
+      candidate: candidate, current_exact: true)
+
+    assert_equal "passed", receipt.fetch("conclusion")
+    assert_equal "removed_after_process_group_termination_before_receipt",
+      receipt.fetch("scratch_link_transformation")
+    links = receipt.fetch("inert_scratch_links")
+    assert_equal [
+      "pytest-of-unknown/pytest-0/test_binding_fails_closed_for_current",
+      "pytest-of-unknown/pytest-current"
+    ], links.map { |entry| entry.fetch("path") }
+    run_root = File.dirname(File.join(@state_dir, descriptor.fetch("receipt_path")))
+    links.each do |entry|
+      path = File.join(run_root, entry.fetch("path"))
+      refute File.exist?(path)
+      refute File.symlink?(path)
+    end
+    scratch = File.join(run_root, "pytest-of-unknown", "pytest-0", "test_binding_fails_closed_for_0")
+    assert_equal 0o700, File.stat(scratch).mode & 0o777
+    assert_equal 0o600, File.stat(File.join(scratch, "intake.sqlite3")).mode & 0o777
+
+    File.symlink(File.join(run_root, "pytest-of-unknown", "pytest-0"),
+      File.join(run_root, links.last.fetch("path")))
+    error = assert_raises(HrmKernel::Error) do
+      execution.verify_receipt!(descriptor, binding: candidate.fetch("binding"), candidate: candidate)
+    end
+    assert_match(/was recreated/, error.message)
+  end
+
+  def test_environment_preflight_authenticates_and_removes_pytest_current_links
+    script = <<~'RUBY'
+      require "fileutils"
+      root = ENV.fetch("RUN_ROOT")
+      base = File.join(root, "pytest", "pytest-0")
+      test = File.join(base, "test_tmp_path_probe0")
+      FileUtils.mkdir_p(test)
+      File.symlink(base, File.join(root, "pytest", "pytest-current"))
+      File.symlink(test, File.join(base, "test_tmp_path_probecurrent"))
+      puts "preflight-pytest-ready"
+    RUBY
+    smoke = spec.merge(
+      "id" => "preflight-pytest-links",
+      "argv" => [File.realpath(RbConfig.ruby), "-e", script],
+      "startup_success_marker" => "preflight-pytest-ready"
+    )
+    execution = runner
+
+    result = execution.preflight(spec: smoke)
+    receipt = execution.verify_preflight!(result.slice("receipt_path", "receipt_sha256"), spec: smoke)
+
+    assert_equal "passed", result.fetch("conclusion")
+    assert_equal true, receipt.fetch("startup_completed")
+    assert_equal [
+      "pytest/pytest-0/test_tmp_path_probecurrent",
+      "pytest/pytest-current"
+    ], receipt.fetch("inert_scratch_links").map { |entry| entry.fetch("path") }
+    assert_equal "removed_after_process_group_termination_before_receipt",
+      receipt.fetch("scratch_link_transformation")
+  end
+
+  def test_scratch_links_outside_the_run_and_in_its_control_root_fail_closed
+    cases = {
+      "escaped" => 'File.symlink(ENV.fetch("ESCAPE_TARGET"), File.join(root, "pytest", "escaped-current"))',
+      "broken" => 'File.symlink(File.join(root, "pytest", "missing"), File.join(root, "pytest", "broken-current"))',
+      "control" => 'File.symlink(File.join(root, "pytest"), File.join(root, "pytest-current"))'
+    }
+    cases.each do |kind, link_source|
+      File.write(File.join(@project_root, "check.rb"), <<~RUBY)
+        require "fileutils"
+        root = ENV.fetch("RUN_ROOT")
+        FileUtils.mkdir_p(File.join(root, "pytest"))
+        #{link_source}
+      RUBY
+      git("add", "check.rb")
+      selected = spec.merge("env" => {
+        "RUN_ROOT" => "{run_root}", "ESCAPE_TARGET" => @project_root
+      })
+      execution = runner(environment_allowlist: %w[RUN_ROOT ESCAPE_TARGET])
+      candidate = capture(execution, paths: %w[app.txt check.rb],
+        authorized_paths: %w[app.txt other.txt check.rb], selected_spec: selected)
+      error = assert_raises(HrmKernel::Error) do
+        execution.run(spec: selected, binding: candidate.fetch("binding"), candidate: candidate)
+      end
+      expected = kind == "control" ? /nested scratch boundary/ : /same run|changed during cleanup/
+      assert_match(expected, error.message)
+    end
+  end
+
+  def test_special_scratch_entry_fails_before_a_safe_link_is_removed
+    execution = runner
+    candidate = capture(execution, authorized_paths: %w[app.txt other.txt])
+    run_root = execution.prepare_run_root(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+    scratch = File.join(run_root, "pytest")
+    target = File.join(scratch, "pytest-0")
+    FileUtils.mkdir_p(target)
+    link = File.join(scratch, "pytest-current")
+    File.symlink(target, link)
+    fifo = File.join(scratch, "control.fifo")
+    system("/usr/bin/mkfifo", fifo, exception: true)
+
+    error = assert_raises(HrmKernel::Error) do
+      execution.send(:privatize_run_scratch!, run_root)
+    end
+    assert_match(/symlink or special file/, error.message)
+    assert File.symlink?(link)
+  end
+
+  def test_scratch_link_may_not_target_the_isolated_candidate
+    execution = runner
+    candidate = capture(execution, authorized_paths: %w[app.txt other.txt])
+    run_root = execution.prepare_run_root(spec: spec, binding: candidate.fetch("binding"), candidate: candidate)
+    isolated = File.join(run_root, "candidate")
+    scratch = File.join(run_root, "pytest")
+    FileUtils.mkdir_p(isolated)
+    FileUtils.mkdir_p(scratch)
+    File.symlink(isolated, File.join(scratch, "candidate-current"))
+
+    error = assert_raises(HrmKernel::Error) do
+      execution.send(:privatize_run_scratch!, run_root, except: isolated)
+    end
+    assert_match(/may not target the isolated candidate/, error.message)
+  end
+
   def test_declared_write_scope_does_not_force_changes_to_every_allowed_file
     candidate = capture(runner, paths: %w[app.txt check.rb], authorized_paths: %w[app.txt other.txt check.rb])
     assert_equal %w[app.txt other.txt], candidate.fetch("changes").map { |entry| entry["path"] }

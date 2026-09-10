@@ -61,7 +61,7 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
-## AP-INTERACT RC.38 — implementation and review runtime candidate
+## AP-INTERACT RC.39 — implementation and review runtime candidate
 
 [Experiment record](experiments/ap-interact-rc33/README.md) preserves PR #10 as an
 archived RC.33 experiment, including its audit findings and historical AE canary
@@ -72,7 +72,7 @@ runtime policy or proof of project adoption.
 `ap-hrm-interaction/2` local service for additive operator intent, bounded host work,
 native check receipts, independent scenario assessment, first-class findings, and
 review/remediation cycles. Run `ruby scripts/hrm_kernel.rb --help` for its interface.
-RC.38 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
+RC.39 retains protocol 2 and never migrates an RC.33 ledger in place. Its role
 profile requests GPT-6 Astra for orchestration and GPT-5.6 Sol for workers and
 independent review; the host receipt records the requested model and available task
 identity evidence without claiming stronger model authentication.
@@ -98,6 +98,12 @@ preserves already submitted contributions through a stopped transition while
 requiring new-environment receipts before review. Repository-aware checks run in
 a read-only exact-HEAD candidate with no parent history or canonical Git metadata.
 The transition itself resumes no model job and grants no provider effect.
+
+The [RC.39 scratch-link successor](experiments/ap-interact-rc39/README.md) accepts
+only owned same-run scratch links after the native process group ends, removes them
+before receipt creation, and authenticates their descriptors. Its stopped RC.38
+continuation preserves work, authority and budget while keeping receipt-less
+cleanup failures explicitly ineligible as evidence.
 
 The [RC.34 implementation and AE review trial](experiments/ap-interact-rc34/README.md)
 records the actual native worker run, engineering failures, corrections, and

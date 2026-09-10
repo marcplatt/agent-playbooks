@@ -25,11 +25,13 @@ module HrmKernel
     LEGACY_SCHEMA_VERSION = "ap-hrm-run-continuation/1"
     SCHEMA_VERSION = "ap-hrm-run-continuation/2"
     RC38_SCHEMA_VERSION = "ap-hrm-run-continuation/3"
+    RC39_SCHEMA_VERSION = "ap-hrm-run-continuation/4"
     PROVENANCE_SCHEMA = "ap-hrm-supervisor-continuation/1"
     TRANSITIONS = {
       "AP-INTERACT RC.35" => { "target" => "AP-INTERACT RC.36", "environment_replacement" => false },
       "AP-INTERACT RC.36" => { "target" => "AP-INTERACT RC.37", "environment_replacement" => true },
-      "AP-INTERACT RC.37" => { "target" => "AP-INTERACT RC.38", "environment_replacement" => true }
+      "AP-INTERACT RC.37" => { "target" => "AP-INTERACT RC.38", "environment_replacement" => true },
+      "AP-INTERACT RC.38" => { "target" => "AP-INTERACT RC.39", "environment_replacement" => true }
     }.freeze
     ENVIRONMENT_FIELDS = %w[environment_id read_roots environment_allowlist preflight_checks].freeze
     RC38_ENVIRONMENT_FIELDS = (ENVIRONMENT_FIELDS + %w[check_repository]).freeze
@@ -45,6 +47,8 @@ module HrmKernel
     RC37_MANIFEST_PATH = File.join(RC37_CONTINUATION_DIRECTORY, "manifest.json")
     RC38_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc38")
     RC38_MANIFEST_PATH = File.join(RC38_CONTINUATION_DIRECTORY, "manifest.json")
+    RC39_CONTINUATION_DIRECTORY = File.join(CONTINUATION_DIRECTORY, "rc39")
+    RC39_MANIFEST_PATH = File.join(RC39_CONTINUATION_DIRECTORY, "manifest.json")
 
     class << self
       def clone(source_state_dir:, destination_state_dir:, new_run_id:, source_kernel_root:,
@@ -172,6 +176,8 @@ module HrmKernel
       source_revision = verify_git_checkout!(@source_kernel_root, expected: @declared_source_revision,
         require_clean: true, scope: "source kernel")
       source_version = source_kernel_version(source_revision)
+      @source_kernel_version = source_version
+      @failed_scratch_request_ids = failed_scratch_request_ids
       transition = TRANSITIONS.fetch(source_version) { fail!("declared source pin is not a supported continuation source") }
       environment_replacement = normalize_environment_replacement(source_version)
       target_root = File.realpath(File.expand_path("../..", __dir__))
@@ -213,7 +219,7 @@ module HrmKernel
       end
       verify_preflight_records!(config, preflight)
       verify_driver_requests!
-      verification = source_version == "AP-INTERACT RC.37" ? :historical_continuation : :current
+      verification = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source_version) ? :historical_continuation : :current
       Evidence.verify_completed_work!(state, state_dir: @source, verification: verification)
 
       supervisor = SupervisorInput.new(directory: File.join(@source, "driver")).snapshot
@@ -233,7 +239,7 @@ module HrmKernel
 
       if environment_replacement
         environment_replacement = validate_environment_replacement!(environment_replacement, config, source_version)
-        reject_old_environment_completion!(state, allow_completed: source_version == "AP-INTERACT RC.37")
+        reject_old_environment_completion!(state, allow_completed: %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source_version))
       end
 
       verify_source_unchanged!(tree)
@@ -275,6 +281,12 @@ module HrmKernel
         manifest = parse_object(read_private(manifest_path), "source RC37 continuation manifest")
         fail!("source continuation target version is not RC37") unless manifest["target_kernel_version"] == source_version
         verify_prior_continuation!(manifest, archive: RC37_CONTINUATION_DIRECTORY, schema: SCHEMA_VERSION)
+      elsif source_version == "AP-INTERACT RC.38"
+        manifest_path = File.join(@source, RC38_MANIFEST_PATH)
+        fail!("RC38 continuation provenance is missing") unless File.file?(manifest_path)
+        manifest = parse_object(read_private(manifest_path), "source RC38 continuation manifest")
+        fail!("source continuation target version is not RC38") unless manifest["target_kernel_version"] == source_version
+        verify_prior_continuation!(manifest, archive: RC38_CONTINUATION_DIRECTORY, schema: RC38_SCHEMA_VERSION)
       end
       if source_version == "AP-INTERACT RC.36"
         archive = File.join(@source, RC37_CONTINUATION_DIRECTORY)
@@ -283,6 +295,10 @@ module HrmKernel
       if source_version == "AP-INTERACT RC.37"
         archive = File.join(@source, RC38_CONTINUATION_DIRECTORY)
         fail!("RC38 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
+      end
+      if source_version == "AP-INTERACT RC.38"
+        archive = File.join(@source, RC39_CONTINUATION_DIRECTORY)
+        fail!("RC39 continuation archive already exists in the source") if File.exist?(archive) || File.symlink?(archive)
       end
     end
 
@@ -299,7 +315,7 @@ module HrmKernel
     end
 
     def validate_environment_replacement!(replacement, source_config, source_version)
-      fields = source_version == "AP-INTERACT RC.37" ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
+      fields = %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source_version) ? RC38_ENVIRONMENT_FIELDS : ENVIRONMENT_FIELDS
       fail!("environment replacement fields are invalid") unless replacement.keys.sort == fields.sort
       fail!("source environment configuration is incomplete") unless ENVIRONMENT_FIELDS.all? { |field| source_config.key?(field) }
       fail!("source environment_id is invalid") unless source_config["environment_id"].is_a?(String) &&
@@ -404,7 +420,8 @@ module HrmKernel
         project_root: config.fetch("project_root"), state_dir: @source,
         read_roots: config.fetch("read_roots", []),
         environment_allowlist: config.fetch("environment_allowlist", []),
-        forbidden_read_path: sentinel, forbidden_write_path: sentinel
+        forbidden_read_path: sentinel, forbidden_write_path: sentinel,
+        repository_view: config["check_repository"]
       )
       receipts.zip(specs).each do |entry, spec|
         descriptor = entry.fetch("execution").slice("receipt_path", "receipt_sha256")
@@ -479,7 +496,9 @@ module HrmKernel
     def request_record(source)
       environment = environment_transition_record(source)
       body = {
-        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.37"
+        "schema_version" => if source.fetch("source_kernel_version") == "AP-INTERACT RC.38"
+                              RC39_SCHEMA_VERSION
+                            elsif source.fetch("source_kernel_version") == "AP-INTERACT RC.37"
                               RC38_SCHEMA_VERSION
                             elsif environment
                               SCHEMA_VERSION
@@ -536,7 +555,7 @@ module HrmKernel
         "fresh_preflight_required" => true,
         "source_preflight_attribution" => "historical_only"
       }
-      if source["source_kernel_version"] == "AP-INTERACT RC.37"
+      if %w[AP-INTERACT\ RC.37 AP-INTERACT\ RC.38].include?(source["source_kernel_version"])
         record["completed_contributions"] = completed_contributions(source["state"])
       end
       record
@@ -603,8 +622,8 @@ module HrmKernel
       end
 
       runtime = JSON.parse(source.fetch("runtime_bytes"))
-      rc38 = request["schema_version"] == RC38_SCHEMA_VERSION
-      resume_job = rc38 ? nil : safe_astra_resume_job(source.fetch("statuses"), runtime)
+      fresh_context = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION].include?(request["schema_version"])
+      resume_job = fresh_context ? nil : safe_astra_resume_job(source.fetch("statuses"), runtime)
       runtime.delete("pending_dispatch")
       runtime.delete("pending_job_registration")
       runtime["orchestrator_job"] = nil
@@ -623,7 +642,7 @@ module HrmKernel
         runtime["seen_jobs"] = []
         runtime["history"] = []
       end
-      if rc38
+      if fresh_context
         runtime["resume_job"] = nil
         runtime["last_orchestrator_job"] = nil
         runtime["outcome"] = "active" if %w[active engineering_stalled host_failure].include?(source.dig("runtime", "outcome"))
@@ -634,11 +653,13 @@ module HrmKernel
     end
 
     def continuation_archive(request)
+      return RC39_CONTINUATION_DIRECTORY if request["schema_version"] == RC39_SCHEMA_VERSION
       return RC38_CONTINUATION_DIRECTORY if request["schema_version"] == RC38_SCHEMA_VERSION
       request["schema_version"] == SCHEMA_VERSION ? RC37_CONTINUATION_DIRECTORY : CONTINUATION_DIRECTORY
     end
 
     def manifest_path(request)
+      return RC39_MANIFEST_PATH if request["schema_version"] == RC39_SCHEMA_VERSION
       return RC38_MANIFEST_PATH if request["schema_version"] == RC38_SCHEMA_VERSION
       request["schema_version"] == SCHEMA_VERSION ? RC37_MANIFEST_PATH : MANIFEST_PATH
     end
@@ -740,7 +761,8 @@ module HrmKernel
     end
 
     def finalize_destination!(root, source, request)
-      resume_job = request["schema_version"] == RC38_SCHEMA_VERSION ? nil : safe_astra_resume_job(source.fetch("statuses"), source.fetch("runtime"))
+      resume_job = [RC38_SCHEMA_VERSION, RC39_SCHEMA_VERSION].include?(request["schema_version"]) ? nil :
+        safe_astra_resume_job(source.fetch("statuses"), source.fetch("runtime"))
       fresh = request["schema_version"] != LEGACY_SCHEMA_VERSION
       archive = continuation_archive(request)
       target_preflight = parse_array(read_private(File.join(root, "driver", "preflight.json")), "target preflight")
@@ -759,6 +781,9 @@ module HrmKernel
         "ledger_copied_unchanged" => true,
         "historical_receipts_copied_unchanged" => true,
         "authenticated_execution_scratch_run_ids" => source.fetch("tree").fetch("authenticated_execution_scratch_run_ids"),
+        "incomplete_failed_execution_attempts" => source.fetch("tree").fetch("incomplete_failed_execution_attempts", []),
+        "failed_scratch_driver_request_ids" => source.fetch("tree").fetch("failed_scratch_driver_request_ids", []),
+        "incomplete_execution_evidence_eligible" => false,
         "execution_scratch_mode_transformation" => "source_modes_recorded_destination_files_0600_directories_0700",
         "inert_execution_scratch_links" => source.fetch("tree").fetch("entries").select { |entry| entry["type"] == "symlink" },
         "execution_scratch_link_transformation" => "archived_as_inert_metadata_not_recreated_or_followed",
@@ -883,6 +908,15 @@ module HrmKernel
           "source_modes_recorded_destination_files_0600_directories_0700"
         fail!("execution scratch mode transformation is missing")
       end
+      incomplete = source_manifest.fetch("incomplete_failed_execution_attempts", [])
+      unless manifest.fetch("incomplete_failed_execution_attempts", []) == incomplete &&
+             (incomplete.empty? || manifest["incomplete_execution_evidence_eligible"] == false)
+        fail!("incomplete failed execution attribution changed")
+      end
+      unless manifest.fetch("failed_scratch_driver_request_ids", []) ==
+             source_manifest.fetch("failed_scratch_driver_request_ids", [])
+        fail!("failed Driver scratch-cleanup attribution changed")
+      end
       source_manifest.fetch("entries").each do |entry|
         next unless entry["type"] == "file"
         relative = entry.fetch("path")
@@ -920,6 +954,7 @@ module HrmKernel
 
     def snapshot_tree(root)
       @authenticated_execution_runs = {}
+      @incomplete_execution_runs = {}
       entries = []
       total = 0
       walk(root, allow_execution_scratch: true) do |path, relative, stat|
@@ -944,10 +979,18 @@ module HrmKernel
       body = {
         "entries" => entries,
         "authenticated_execution_scratch_run_ids" => @authenticated_execution_runs.keys.sort,
+        "incomplete_failed_execution_attempts" => @incomplete_execution_runs.keys.sort.map do |run_id|
+          { "run_id" => run_id, "receipt_present" => false,
+            "process_exit_known" => false, "evidence_eligible" => false }
+        end,
+        "failed_scratch_driver_request_ids" => Array(@failed_scratch_request_ids).sort,
         "file_count" => entries.count { |item| item["type"] == "file" },
         "symlink_count" => entries.count { |item| item["type"] == "symlink" },
         "total_bytes" => total
       }
+      unless @incomplete_execution_runs.length == Array(@failed_scratch_request_ids).length
+        fail!("incomplete execution scratch count differs from recorded failed Driver cleanup requests")
+      end
       body.merge("sha256" => digest(body))
     end
 
@@ -986,8 +1029,52 @@ module HrmKernel
       parts = Pathname.new(relative).each_filename.to_a
       minimum = directory ? 3 : 4
       return false unless parts.length >= minimum && parts[0] == "execution" && EXECUTION_RUN_ID.match?(parts[1])
-      authenticate_execution_scratch_run!(parts[1])
+      authenticate_or_classify_execution_scratch_run!(parts[1])
       true
+    end
+
+    def authenticate_or_classify_execution_scratch_run!(run_id)
+      receipt = File.join(@source, "execution", run_id, "receipt.json")
+      return authenticate_execution_scratch_run!(run_id) if File.file?(receipt)
+      classify_incomplete_execution_run!(run_id)
+    end
+
+    def classify_incomplete_execution_run!(run_id)
+      return true if @incomplete_execution_runs[run_id]
+      fail!("nonprivate execution scratch lacks an authenticated native receipt") unless @source_kernel_version == "AP-INTERACT RC.38" &&
+        run_id.match?(/\A[0-9a-f]{64}\z/)
+      run_root = File.join(@source, "execution", run_id)
+      stat = File.lstat(run_root)
+      unless stat.directory? && !stat.symlink? && stat.uid == Process.uid && (stat.mode & 0o777) == 0o700
+        fail!("incomplete execution scratch lacks a private run boundary")
+      end
+      %w[receipt.json stdout.bin stderr.bin].each do |control|
+        path = File.join(run_root, control)
+        fail!("incomplete execution scratch unexpectedly contains #{control}") if File.exist?(path) || File.symlink?(path)
+      end
+      candidate = File.join(run_root, "candidate")
+      unless File.directory?(candidate) && !File.symlink?(candidate) && File.directory?(File.join(candidate, ".git"))
+        fail!("incomplete execution scratch lacks its isolated candidate")
+      end
+      fail!("incomplete execution scratch lacks a recorded failed Driver cleanup request") if Array(@failed_scratch_request_ids).empty?
+      @incomplete_execution_runs[run_id] = true
+      true
+    rescue Errno::ENOENT, Errno::EACCES, Errno::ELOOP => error
+      fail!("incomplete execution scratch cannot be classified: #{error.message}")
+    end
+
+    def failed_scratch_request_ids
+      root = File.join(@source, "driver", "requests")
+      return [] unless File.directory?(root) && !File.symlink?(root)
+      Dir.children(root).sort.each_with_object([]) do |name, matches|
+        path = File.join(root, name, "receipt.json")
+        next unless File.file?(path) && !File.symlink?(path)
+        receipt = parse_object(read_private(path), "failed Driver request receipt")
+        if receipt["request_id"] == name && receipt["operation"] == "revalidate" &&
+           receipt["ok"] == false && receipt["error"] == "execution scratch contains a symlink or special file"
+          matches << name
+        end
+      end
     end
 
     def authenticate_execution_scratch_run!(run_id)

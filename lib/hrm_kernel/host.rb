@@ -617,7 +617,7 @@ module HrmKernel
       line = File.open(File.join(@state_dir, Store::LEDGER_NAME), &:gets)
       initial = JSON.parse(line).dig("command", "data")
       {
-        "host_contract" => "AP-INTERACT RC38 bounded Codex #{spec['role']}",
+        "host_contract" => "AP-INTERACT RC39 bounded Codex #{spec['role']}",
         "instructions" => [
           spec["role"] == "orchestrator" ? "Coordinate the original milestone from this projection and actual job/check feedback. Project sources are read-only. Return structured requests to the trusted driver; never act as the operator, manufacture a review/receipt, or reduce the declared outcome. Technical gaps and partial returns stay engineering work. Use bounded continuations, then smaller assignments when progress stalls. A blocked disposition is not automatically an operator approval request." : spec["role"] == "worker" ? "Implement only your declared work-order files. Do not commit, push, run tests, launch servers, or call providers. The kernel execution runner performs checks after you return." : "Independently review the exact candidate read-only. Do not edit files, run tests, launch servers, or call providers.",
           "Start with the supplied packet. Inspect needed project sources and declared dependency roots in bounded excerpts; do not preload full history. Return context_requests when needed context is unavailable. Technical discovery does not require operator approval.",

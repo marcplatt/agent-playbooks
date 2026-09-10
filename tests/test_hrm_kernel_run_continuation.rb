@@ -671,6 +671,147 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert File.file?(File.join(@destination, "driver", "continuation", "rc38", "manifest.json"))
   end
 
+  def test_rc38_to_rc39_archives_receiptless_pytest_failure_without_claiming_an_exit
+    make_source_kernel_rc36
+    rc37 = File.join(@temporary, "incomplete-source-rc37")
+    continue_run(destination: rc37, new_run_id: "incomplete-source-rc37",
+      environment_replacement: replacement_environment)
+    @source = rc37
+    rc38 = File.join(@temporary, "incomplete-source-rc38")
+    @destination = rc38
+    make_source_kernel_rc37
+    complete_rc37_contribution
+    continue_run(destination: rc38, new_run_id: "incomplete-source-rc38",
+      environment_replacement: replacement_environment_rc38)
+    @source = rc38
+    @destination = File.join(@temporary, "incomplete-target-rc39")
+    make_source_kernel_rc38
+
+    runtime_path = File.join(@source, "driver", "runtime.json")
+    runtime = read_json(runtime_path)
+    runtime["round"] = 2
+    write_json(runtime_path, runtime)
+    request_id = "rc38-t20-revalidate-fixture"
+    request_root = File.join(@source, "driver", "requests", request_id)
+    FileUtils.mkdir_p(request_root, mode: 0o700)
+    write_json(File.join(request_root, "request.json"), {
+      "request_id" => request_id, "operation" => "revalidate", "input_json" => "{}"
+    })
+    write_json(File.join(request_root, "receipt.json"), {
+      "request_id" => request_id, "operation" => "revalidate", "ok" => false,
+      "error" => "execution scratch contains a symlink or special file"
+    })
+    run_id = "f" * 64
+    run = File.join(@source, "execution", run_id)
+    candidate = File.join(run, "candidate")
+    test_root = File.join(run, "pytest-of-unknown", "pytest-0", "test_binding_fails_closed_for_0")
+    FileUtils.mkdir_p(File.join(candidate, ".git"), mode: 0o700)
+    FileUtils.mkdir_p(test_root, mode: 0o755)
+    File.chmod(0o700, run)
+    File.chmod(0o755, File.join(run, "pytest-of-unknown"))
+    File.chmod(0o755, File.join(run, "pytest-of-unknown", "pytest-0"))
+    database = File.join(test_root, "intake.sqlite3")
+    write_bytes(database, "failed-attempt scratch\0".b)
+    File.chmod(0o644, database)
+    current = File.join(run, "pytest-of-unknown", "pytest-current")
+    File.symlink(File.join(run, "pytest-of-unknown", "pytest-0"), current)
+    source_bytes = byte_snapshot(@source)
+    source_modes = mode_snapshot(@source)
+    source_ledger = File.binread(File.join(@source, HrmKernel::Store::LEDGER_NAME))
+    source_state = HrmKernel::Store.new(@source).read.fetch("state")
+
+    input = File.join(@temporary, "rc39-continuation-input.json")
+    write_json(input, {
+      "new_run_id" => "incomplete-target-rc39", "source_kernel_root" => @kernel,
+      "source_kernel_revision" => @source_revision, "controller_stopped" => true,
+      "supervisor_provenance" => {
+        "schema_version" => "ap-hrm-supervisor-continuation/1",
+        "supervisor_id" => "rc39-supervisor", "commission_id" => "rc39-cli-commission",
+        "asserted_at" => "2026-09-10T12:00:00Z", "source" => "RC39 CLI fixture"
+      },
+      "environment_replacement" => replacement_environment_rc39, "production" => false
+    })
+    script = File.realpath(File.join(__dir__, "..", "scripts", "hrm_kernel.rb"))
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby, script, "driver-continue", "--state-dir", @source,
+      "--destination-state-dir", @destination, "--input", input
+    )
+    assert status.success?, stderr
+    manifest = JSON.parse(stdout)
+
+    assert_equal source_bytes, byte_snapshot(@source)
+    assert_equal source_modes, mode_snapshot(@source)
+    assert_equal source_ledger, File.binread(File.join(@destination, HrmKernel::Store::LEDGER_NAME))
+    assert_equal source_state, HrmKernel::Store.new(@destination).read.fetch("state")
+    assert_equal "ap-hrm-run-continuation/4", manifest.fetch("schema_version")
+    assert_equal "driver/continuation/rc39", manifest.fetch("archive_root")
+    assert_equal false, manifest.fetch("incomplete_execution_evidence_eligible")
+    assert_equal [{
+      "run_id" => run_id, "receipt_present" => false,
+      "process_exit_known" => false, "evidence_eligible" => false
+    }], manifest.fetch("incomplete_failed_execution_attempts")
+    assert_equal [request_id], manifest.fetch("failed_scratch_driver_request_ids")
+    target_database = File.join(@destination, database.delete_prefix(@source + "/"))
+    assert_equal "failed-attempt scratch\0".b, File.binread(target_database)
+    assert_equal 0o600, File.stat(target_database).mode & 0o777
+    refute File.exist?(File.join(@destination, current.delete_prefix(@source + "/")))
+    continued = read_json(File.join(@destination, "driver", "runtime.json"))
+    continued_config = read_json(File.join(@destination, "driver", "config.json"))
+    assert_equal 2, continued.fetch("round")
+    assert_equal 3, continued_config.fetch("max_turns")
+    assert_equal [], continued.fetch("jobs")
+    assert_nil continued["resume_job"]
+    assert_nil continued["last_orchestrator_job"]
+    assert File.file?(File.join(@destination, "driver", "continuation", "rc39", "manifest.json"))
+  end
+
+  def test_rc38_receiptless_nonprivate_scratch_requires_recorded_cleanup_failure
+    make_source_kernel_rc36
+    rc37 = File.join(@temporary, "unattributed-source-rc37")
+    continue_run(destination: rc37, new_run_id: "unattributed-source-rc37",
+      environment_replacement: replacement_environment)
+    @source = rc37
+    @destination = File.join(@temporary, "unattributed-source-rc38")
+    make_source_kernel_rc37
+    continue_run(destination: @destination, new_run_id: "unattributed-source-rc38",
+      environment_replacement: replacement_environment_rc38)
+    @source = @destination
+    @destination = File.join(@temporary, "unattributed-target-rc39")
+    make_source_kernel_rc38
+    run = File.join(@source, "execution", "e" * 64)
+    FileUtils.mkdir_p(File.join(run, "candidate", ".git"), mode: 0o700)
+    scratch = File.join(run, "pytest-of-unknown", "pytest-0")
+    FileUtils.mkdir_p(scratch, mode: 0o755)
+    File.chmod(0o700, run)
+    File.chmod(0o755, File.join(run, "pytest-of-unknown"))
+    File.chmod(0o755, scratch)
+
+    error = assert_raises(HrmKernel::Error) do
+      continue_run(new_run_id: "unattributed-target-rc39",
+        environment_replacement: replacement_environment_rc39)
+    end
+    assert_match(/recorded failed Driver cleanup request/, error.message)
+    refute File.exist?(@destination)
+
+    FileUtils.remove_entry(run)
+    request_id = "rc38-cleanup-without-scratch"
+    request_root = File.join(@source, "driver", "requests", request_id)
+    FileUtils.mkdir_p(request_root, mode: 0o700)
+    write_json(File.join(request_root, "request.json"), {
+      "request_id" => request_id, "operation" => "revalidate", "input_json" => "{}"
+    })
+    write_json(File.join(request_root, "receipt.json"), {
+      "request_id" => request_id, "operation" => "revalidate", "ok" => false,
+      "error" => "execution scratch contains a symlink or special file"
+    })
+    error = assert_raises(HrmKernel::Error) do
+      continue_run(new_run_id: "unattributed-target-rc39",
+        environment_replacement: replacement_environment_rc39)
+    end
+    assert_match(/count differs/, error.message)
+    refute File.exist?(@destination)
+  end
+
   def test_historical_attempt_order_uses_dispatch_order_not_job_names
     source = {
       "environment_replacement" => { "environment_id" => "new" },
@@ -894,6 +1035,18 @@ class HrmKernelRunContinuationTest < Minitest::Test
     @source_revision = git(@kernel, "rev-parse", "HEAD").strip
   end
 
+  def make_source_kernel_rc38
+    File.write(File.join(@kernel, "kernel.txt"), "RC38\n")
+    File.write(File.join(@kernel, "playbooks", "hrm-interaction-kernel.md"), <<~MARKDOWN)
+      ---
+      title: AP-INTERACT RC.38 - test source kernel
+      ---
+    MARKDOWN
+    git(@kernel, "add", "kernel.txt", "playbooks/hrm-interaction-kernel.md")
+    git(@kernel, "commit", "--quiet", "-m", "frozen RC38 source kernel")
+    @source_revision = git(@kernel, "rev-parse", "HEAD").strip
+  end
+
   def complete_rc37_contribution(unrelated_candidate: false)
     File.write(File.join(@project, ".gitignore"), "/.codex/hrm-runs/\n")
     File.write(File.join(@project, "check.rb"), 'abort unless File.read("app.txt") == "submitted\\n"')
@@ -991,6 +1144,13 @@ class HrmKernelRunContinuationTest < Minitest::Test
       "check_repository" => { "schema_version" => HrmKernel::Execution::REPOSITORY_VIEW_SCHEMA,
         "kind" => "isolated_head_candidate", "git_executable" => git_executable }
     }
+  end
+
+  def replacement_environment_rc39
+    replacement = JSON.parse(JSON.generate(replacement_environment_rc38))
+    replacement["environment_id"] = "test-rc39"
+    replacement.fetch("preflight_checks").each { |check| check["environment_id"] = "test-rc39" }
+    replacement
   end
 
   def byte_snapshot(root)

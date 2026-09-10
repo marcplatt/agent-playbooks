@@ -1,22 +1,23 @@
 ---
 playbook_id: AP-INTERACT-001
-title: AP-INTERACT RC.38 - isolated repository validation and preserved contributions
-version: "0.7.0-rc38"
+title: AP-INTERACT RC.39 - bounded native scratch links and stopped RC.38 continuation
+version: "0.8.0-rc39"
 status: experimental
 owner: Adopting organization
 mode: local-implementation-review-and-remediation
-experiment_id: AP-INTERACT-RC38
+experiment_id: AP-INTERACT-RC39
 ---
 
 # HRM interaction kernel
 
-**AP-INTERACT RC.38** develops the [RC.37 experiment](../experiments/ap-interact-rc37/README.md).
-It uses software version `0.7.0-rc38` and protocol `ap-hrm-interaction/2`.
+**AP-INTERACT RC.39** develops the [RC.38 experiment](../experiments/ap-interact-rc38/README.md).
+It uses software version `0.8.0-rc39` and protocol `ap-hrm-interaction/2`.
 It preserves submitted contributions across a stopped environment transition,
-requires fresh validation in the replacement environment, and runs repository-aware
-checks against an isolated exact-HEAD candidate without exposing later Git history.
-The [RC.38 experiment record](../experiments/ap-interact-rc38/README.md) defines the
-transition and check contracts. Production Canary acceptance remains unproved.
+requires fresh validation in the replacement environment, and removes only bounded
+same-run scratch symlinks before authenticating native receipts. The
+[RC.39 experiment record](../experiments/ap-interact-rc39/README.md) defines the
+transition, incomplete-attempt archive and receipt contracts. Production Canary
+acceptance remains unproved.
 
 Protocol 2 starts in a fresh private state directory. It does not upgrade, resume,
 or rewrite a protocol 1 ledger. Historical AP-EXEC experiments and the earlier
@@ -94,11 +95,11 @@ engineering or host failure, but cannot override review, decision, preflight or
 turn-budget gates. Publication during a synchronized driver step returns an
 explicit retry error; the caller must retry the same input ID.
 
-For the supported RC.37 to RC.38 environment transition, stop the old controller between steps,
+For the supported RC.38 to RC.39 environment transition, stop the old controller between steps,
 allow its native jobs to finish and preserve the original state. Invoke
 `driver-continue --state-dir SOURCE --destination-state-dir DESTINATION --input CONTINUATION.json`
-from a clean committed RC.38 checkout. The source kernel must match its declared
-clean RC.37 pin. Supply an explicit `environment_replacement` with a new
+from a clean committed RC.39 checkout. The source kernel must match its declared
+clean RC.38 pin. Supply an explicit `environment_replacement` with a new
 `environment_id`, exact `read_roots`, `environment_allowlist`, `preflight_checks`,
 and `check_repository`. The repository object names the exact pinned Git executable
 and schema `ap-hrm-isolated-head-candidate/1`. The new environment requires fresh
@@ -114,6 +115,20 @@ dispatched. A completed contribution remains completed but is listed under
 current-environment receipts. Revalidation cannot change its artifacts, paths,
 requirements, ownership, revision, effect class or review state.
 
+Receipt-less RC.38 attempts that failed during post-process scratch cleanup never
+become native evidence. The RC.39 continuation accepts them only when private,
+owner-bound 64-hex execution roots correspond in count to exact failed Driver
+cleanup receipts. It copies regular bytes, records source modes and same-run link
+targets, and omits the links from the destination. The manifest records failed
+request IDs and incomplete run IDs as separate sets with unknown process exit and
+`evidence_eligible: false`; it does not invent a request-to-run pairing.
+
+New native receipts validate and remove bounded owned links whose final target is
+a regular file or directory in the same disposable execution root after the full
+process group ends. Sorted link descriptors and the removal transformation are
+authenticated with the receipt, and reuse fails if a link is recreated. Escaped,
+broken, root-level, candidate-targeting or special-file entries remain rejected.
+
 Each isolated repository check materializes the source repository's exact HEAD
 tree and overlays the captured current candidate. Its worktree is read-only to the
 check. Parent objects, source branch and tag refs, reflogs, remotes, hooks,
@@ -127,10 +142,10 @@ still names only configuration copied into `{run_root}`.
 The source lock establishes an observed safe boundary; it cannot prove an old
 external controller will never restart. Keep that controller stopped. The earlier
 RC.35 to RC.36 and RC.36 to RC.37 transitions remain available from their frozen
-kernel checkouts. See the RC.38 experiment record for exact JSON contracts and
+kernel checkouts. See the RC.39 experiment record for exact JSON contracts and
 limitations.
 
-The RC.38 replacement adds this exact repository policy beside the replacement
+The RC.39 replacement retains this exact repository policy beside the replacement
 environment ID, roots, allowlist and preflight checks:
 
 ```json
@@ -390,7 +405,7 @@ Preserve a failed ledger for diagnosis and use explicit recovery work.
 
 ## Adoption and validation
 
-Adoption is explicit. Use the [RC.38 dispatcher](../templates/hrm-interaction-agents.md)
+Adoption is explicit. Use the [RC.39 dispatcher](../templates/hrm-interaction-agents.md)
 in an isolated project pilot, pinned to one reviewed AP revision. For Alpine
 Estimating, this is an experimental project-profile recommendation only. Preserve
 the installed global and repository policies unless their own adoption change is
@@ -410,6 +425,8 @@ The historical `ruby tests/test_hrm_experiment.rb` remains available for compati
 Do not create documentation or receipt changes solely to report that checks ran.
 
 ## Change note
+
+- **0.8.0-rc39 — 2026-09-10:** Accepts bounded owned same-run scratch symlinks only after native process cleanup, removes them without following directory links, and authenticates their descriptors in new receipts. Adds an explicit stopped RC.38-to-RC.39 continuation that preserves ledger, contributions, human gates and remaining budget while archiving receipt-less cleanup failures without claiming a test exit or current evidence. No model task resumes and fresh environment validation remains mandatory.
 
 - **0.7.0-rc38 — 2026-09-10:** Preserves completed submissions across the
   stopped RC.37 environment transition while making old receipts ineligible for

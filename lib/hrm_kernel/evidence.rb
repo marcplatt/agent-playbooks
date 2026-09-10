@@ -218,7 +218,7 @@ module HrmKernel
       fail!("native receipt check id mismatch") unless receipt["check_id"] == check["id"]
       fail!("native receipt conclusion mismatch") unless receipt["conclusion"] == check["conclusion"]
       active_environment = active_environment_id(state_dir)
-      if active_environment && receipt["environment_id"] != active_environment
+      if !historical_continuation && active_environment && receipt["environment_id"] != active_environment
         fail!("native receipt belongs to historical environment #{receipt['environment_id'].inspect}; active environment is #{active_environment.inspect}")
       end
       verify_native_artifacts!(receipt.fetch("candidate"), work_order, artifacts)

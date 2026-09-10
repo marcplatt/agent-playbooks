@@ -209,7 +209,7 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb driver-status --state-dir DIR
           ruby scripts/hrm_kernel.rb driver-run --state-dir DIR
 
-        RC38 supports explicit stopped RC37 environment replacement with isolated Git candidate checks and fresh validation.
+        RC39 supports explicit stopped RC38 continuation, bounded same-run scratch links, isolated Git candidate checks, and fresh validation.
         Technical supervisor evidence uses driver-input and grants no execution or operator authority.
         Protocol ap-hrm-interaction/2 operator ledgers remain separate and are never upgraded in place.
         Native checks and Codex task identities are recorded by the local host adapter.
