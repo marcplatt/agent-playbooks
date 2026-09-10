@@ -763,6 +763,18 @@ class HrmKernelRunContinuationTest < Minitest::Test
     assert_nil continued["resume_job"]
     assert_nil continued["last_orchestrator_job"]
     assert File.file?(File.join(@destination, "driver", "continuation", "rc39", "manifest.json"))
+
+    @source = @destination
+    @destination = File.join(@temporary, "incomplete-target-rc40")
+    make_source_kernel_rc39
+    rc40 = continue_run(new_run_id: "incomplete-target-rc40",
+      environment_replacement: replacement_environment_rc40)
+    assert_equal "ap-hrm-run-continuation/5", rc40.fetch("schema_version")
+    assert_equal manifest.fetch("incomplete_failed_execution_attempts"),
+      rc40.fetch("incomplete_failed_execution_attempts")
+    assert_equal manifest.fetch("failed_scratch_driver_request_ids"),
+      rc40.fetch("failed_scratch_driver_request_ids")
+    assert_equal false, rc40.fetch("incomplete_execution_evidence_eligible")
   end
 
   def test_rc38_receiptless_nonprivate_scratch_requires_recorded_cleanup_failure

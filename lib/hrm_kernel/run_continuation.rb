@@ -183,6 +183,7 @@ module HrmKernel
       source_version = source_kernel_version(source_revision)
       @source_kernel_version = source_version
       @failed_scratch_request_ids = failed_scratch_request_ids
+      load_inherited_execution_attribution!
       transition = TRANSITIONS.fetch(source_version) { fail!("declared source pin is not a supported continuation source") }
       environment_replacement = normalize_environment_replacement(source_version)
       target_root = File.realpath(File.expand_path("../..", __dir__))
@@ -1001,22 +1002,52 @@ module HrmKernel
           fail!("state tree contains a symlink or special file: #{relative}")
         end
       end
+      inherited_attempts = @inherited_incomplete_execution_attempts || []
+      inherited_ids = inherited_attempts.map { |entry| entry.fetch("run_id") }
+      detected_attempts = @incomplete_execution_runs.keys.sort.map do |run_id|
+        { "run_id" => run_id, "receipt_present" => false,
+          "process_exit_known" => false, "evidence_eligible" => false }
+      end
+      fail!("inherited incomplete execution run was reclassified") unless
+        (inherited_ids & detected_attempts.map { |entry| entry.fetch("run_id") }).empty?
       body = {
         "entries" => entries,
         "authenticated_execution_scratch_run_ids" => @authenticated_execution_runs.keys.sort,
-        "incomplete_failed_execution_attempts" => @incomplete_execution_runs.keys.sort.map do |run_id|
-          { "run_id" => run_id, "receipt_present" => false,
-            "process_exit_known" => false, "evidence_eligible" => false }
-        end,
+        "incomplete_failed_execution_attempts" => (inherited_attempts + detected_attempts).sort_by { |entry| entry.fetch("run_id") },
         "failed_scratch_driver_request_ids" => Array(@failed_scratch_request_ids).sort,
         "file_count" => entries.count { |item| item["type"] == "file" },
         "symlink_count" => entries.count { |item| item["type"] == "symlink" },
         "total_bytes" => total
       }
-      unless @incomplete_execution_runs.length == Array(@failed_scratch_request_ids).length
+      inherited_requests = @inherited_failed_scratch_request_ids || []
+      new_failed_requests = Array(@failed_scratch_request_ids) - inherited_requests
+      unless inherited_requests.all? { |id| Array(@failed_scratch_request_ids).include?(id) } &&
+             @incomplete_execution_runs.length == new_failed_requests.length
         fail!("incomplete execution scratch count differs from recorded failed Driver cleanup requests")
       end
       body.merge("sha256" => digest(body))
+    end
+
+    def load_inherited_execution_attribution!
+      @inherited_incomplete_execution_attempts = []
+      @inherited_failed_scratch_request_ids = []
+      return unless @source_kernel_version == "AP-INTERACT RC.39"
+      path = File.join(@source, RC39_MANIFEST_PATH)
+      manifest = parse_object(read_private(path), "source RC39 continuation manifest")
+      attempts = manifest["incomplete_failed_execution_attempts"]
+      requests = manifest["failed_scratch_driver_request_ids"]
+      attempt_keys = %w[evidence_eligible process_exit_known receipt_present run_id]
+      valid_attempts = attempts.is_a?(Array) && attempts.length <= MAX_ENTRIES &&
+        attempts.all? do |entry|
+          entry.is_a?(Hash) && entry.keys.sort == attempt_keys && EXECUTION_RUN_ID.match?(entry["run_id"].to_s) &&
+            entry["receipt_present"] == false && entry["process_exit_known"] == false && entry["evidence_eligible"] == false
+        end
+      fail!("source RC39 incomplete execution attribution is malformed") unless valid_attempts &&
+        attempts.map { |entry| entry["run_id"] }.uniq.length == attempts.length
+      fail!("source RC39 failed Driver request attribution is malformed") unless
+        Host.strings?(requests) && requests.uniq == requests && requests.all? { |id| Host::IDENTIFIER.match?(id) }
+      @inherited_incomplete_execution_attempts = JSON.parse(JSON.generate(attempts))
+      @inherited_failed_scratch_request_ids = requests.dup
     end
 
     def validate_total_bytes!(total)
