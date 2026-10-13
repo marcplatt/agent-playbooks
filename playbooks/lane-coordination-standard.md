@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.6"
+version: "4.7"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -129,7 +129,7 @@ writer, not a second HRM orchestrator or operator route.
 
 ## Successor delivery-policy binding
 
-Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+Apply [AP-SYSBUILD-001/2.7 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
 for proportional planning, explicit execution modes, current human steering, bounded grants,
 validation reuse, review, and environment selection. That section supersedes conflicting
 older instructions here to require a separate planning merge, automatically delegate a
@@ -873,7 +873,7 @@ milestone_session:
   system_reference: "{{system_reference}}"
   process_binding:
     playbook_id: AP-LANE-001
-    version: "4.5"
+    version: "4.7"
     source_sha: null
     last_revalidated_at: null
   hrm_map:
@@ -1252,6 +1252,10 @@ milestone_cleanup:
 ```
 
 ## Change note
+
+- **4.7 — 2026-10-13:** Binds opt-in fresh role packets, representative/exploratory
+  completion evidence, one bounded recovery retry, and aggregate accounting without runtime
+  experiment activation or weakening safe provisional operator access.
 
 - **4.6 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
   authority, focused validation with exact final gates, and one coherent operator review.

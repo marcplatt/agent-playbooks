@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-CONFORM-001
 title: Operator-Workspace Conformance and Synchronization
-version: "1.2"
+version: "1.3"
 status: active
 owner: Adopting organization
 mode: read-only-audit-then-authorized-synchronization
@@ -25,13 +25,37 @@ operator's personal preferences remain a distinct local layer.
 
 ## Successor delivery-policy binding
 
-Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution).
+Apply [AP-SYSBUILD-001/2.7 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution).
 Execution modes, proportional planning, current human guidance, scoped grants, and serial
 checker roles supersede conflicting older conformance probes or steps below. Audit-only
 onboarding makes no writes. An explicit adoption grant supplied at invocation authorizes
 its bounded writes after a concrete scope read-back; do not ask for the same approval again.
 Absent that grant, present the proposed changes for authorization. No scope grants business
 meaning, credential access, experiment activation, integration, or live effects by implication.
+
+## Conditional fresh-role and recovery probes
+
+Apply these only to the selected mechanism and capabilities, alongside the affected
+instruction/CI probes. Probe actual observed behavior, not expected answers; distinguish a
+static scenario review from a fresh-session run. Use synthetic offline fixtures by default.
+Do not make routine onboarding load full history or activate a kernel to run these probes.
+
+| Condition | Probe and expected boundary |
+|---|---|
+| Fresh role packets selected | Orient a new role with effective and superseded requirements, ordered journey/stage owners, distinct source/candidate/runtime, findings/unknowns, authority and frozen refs. Reject a stale aggregate accounting revision for further budgeted action; retain already-debited amounts. |
+| Environment unchanged | Reuse the initialization revision; orient the new session and load only its required excerpts. An unavailable reference stays unknown, essential facts remain visible, and bytes are not total-context evidence. |
+| Bounded UI/effect grant and tools available | Exercise supported save/reload and unseen equivalent inputs without per-click approval. Record actual result and repair/class checks. Code or screenshot-only evidence cannot establish journey completion. |
+| UI/persistence capability absent | Report the unavailable capability, preserve safe provisional packet access and classify the missing completion proof; do not manufacture a pass or require unrelated UI for non-UI work. |
+| Selected stall trigger reached | Inspect eligible action/progress evidence first; empty requests alone do not prove a stall. Allow one authorized fresh recovery reviewer, a materially different compliant experiment and one retry using the same budget revision/debits. Return progress or an evidenced blocker, never reset budgets or arrange paused wakeups. |
+| Outcome examples supplied | Generalize to relevant unseen equivalents and defect classes, rather than treating examples as the whole acceptance list or optional ideas as added scope. |
+| Review packet safe, completion evidence incomplete | Make provisional operator access available while formal review_ready/acceptance remain gated. At actual readiness stop for human acceptance. |
+
+This successor binding takes precedence over older unconditional delegation, full-history
+orientation, or checkpoint-as-completion wording in this playbook and linked sources. It does
+not waive controlling instructions, required reads, integration evidence or stronger local
+restrictions. Model/role configuration comes from the adopted profile; availability gaps are
+reported and never activate an experimental runtime. One pilot provides measured learning
+only, not reliability or production claims.
 
 ## Project onboarding entrypoint
 
@@ -184,6 +208,10 @@ operator authorized and the fresh-session probes verified. Either may end as a c
 session without a durable report.
 
 ## Change note
+
+- **1.3 — 2026-10-13:** Binds opt-in fresh role packets, representative/exploratory
+  completion evidence, one bounded recovery retry, and aggregate accounting without runtime
+  experiment activation or weakening safe provisional operator access.
 
 - **1.2 — 2026-10-13:** Adds a reusable project onboarding fast path with exact organization
   adoption, actual instruction/CI inspection, scoped grants, and proportional delivery policy.

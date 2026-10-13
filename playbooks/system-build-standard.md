@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.6"
+version: "2.7"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -199,7 +199,113 @@ without proving equivalence. Avoid equivalent duplicate CI and cancel superseded
 when no required gate depends on them. Scheduled broad checks supplement required gates.
 Budgets and trial metrics signal improvement; they never waive a gate.
 
-### Review, environments, and maintenance
+#### Representative behavior, supporting tools, and generalization
+
+Examples guide implementation and evaluation; they are not exhaustive acceptance lists.
+Correct a defect's class, then check relevant unseen equivalent inputs and adjacent journey
+stages within accepted scope. Do not memorize example values or turn optional ideas into new
+scope. Acceptance remains the accepted outcome, supported classes, and invariants.
+
+Supporting tests, builds, and development tools are language-neutral implementation choices
+when reversible and inside authority. Evaluate a materially expanded service, operational
+language/runtime burden, ownership, deployment, debugging, and recovery cost separately.
+A helper language alone does not imply a service expansion or require a permission interrupt.
+
+### Opt-in fresh role packets and bounded orientation
+
+Fresh role packets are an **opt-in execution mechanism**, selected explicitly in an assignment
+or adopted profile. They are not a mandatory rewrite of an existing runtime or a compact-kernel
+upgrade. Use the [role packet template](../templates/fresh-role-packet.md) when selected.
+Include current effective and superseded requirements; the ordered journey and stage owners;
+source and candidate identities separately from observed runtime/artifact identity; observation
+and effect boundaries; current stage and eligible action; findings and unknowns; frozen source
+references and frozen artifact identities; authority; and shared role/recovery/repair/time/call
+accounting including an explicit current-session debit state and operation ID.
+
+Initialize and record the working environment once per environment revision. Orient each new
+role/session using its current projection and material changes. Read controlling instructions
+and conditional source excerpts needed for its action, rather than replaying the full history
+or reinitializing unchanged environments. Reinitialize when relevant environment bindings
+change. Keep references available for uncertainty; do not omit essential facts to meet a byte
+target. Packet bytes are not total context, tokens, cost, or a verified loading claim.
+
+Configure model/role assignments explicitly in the adopting profile with capability, cost,
+availability, and fallback boundaries. Organization-specific profiles remain in the owning
+master plan. No named model, role packet, source merge, or onboarding probe activates an
+experimental runtime or silently promotes an experiment revision.
+
+### Exploratory evaluation and truthful review readiness
+
+An evaluator may exercise supported UI, persistence, save/reload, errors, and unseen equivalent
+inputs within an explicit bounded interaction/effect grant without per-click approval. Remain
+inside its targets and limits; disclose unavailable UI, persistence, or observation capabilities.
+Code inspection and screenshots can support a claim, but neither alone proves an interactive
+journey, persistence, or runtime conformance. Document actual actions and authoritative
+read-backs; do not infer a UI pass from expected behavior or a static image.
+
+`review_ready` means the assigned outcome is complete enough for human acceptance: relevant
+representative real journeys work at the exact candidate/runtime binding, material findings
+are repaired and their classes checked, and applicable generalization/exploratory evaluation
+is complete within declared scope. Non-UI changes use their representative actual workflow;
+do not invent a dashboard requirement. Applicable final candidate/integration gates remain.
+If required capability/evidence is unavailable, or a material finding remains, state `blocked`
+with evidence and permitted continuation rather than claiming readiness. Optional ideas remain
+optional. A prepared safe packet may still be `operator_access_ready` for provisional input
+while completion or integration gates are outstanding; it does not become formal acceptance.
+
+This distinction governs older wording that suggests a visible UI, a narrowly reproduced
+example, a planning packet, or stopping at a checkpoint is completion. Authorized repair and
+class checks happen before readiness. Once formal `review_ready` is reached, stop for human
+acceptance; further remediation follows the operator's decision. Do not reinterpret that stop
+as an automatic review/remediation loop or begin another milestone without authority.
+
+### Selected bounded stall recovery
+
+When selected in an assignment/profile, declare a meaningful stall trigger before execution:
+evidence such as repeated failure at the same seam, an exhausted agreed progress window, or a
+measured lack of eligible progress. Empty requests are a signal to inspect state, not proof
+of no progress. Inspect stage, eligibility, outstanding actions and observations first.
+
+At the declared trigger, use **one fresh creative recovery-reviewer** within the authorized
+role topology. Provide current facts, requirements, authority, previous attempted approaches
+and remaining aggregate budgets. The reviewer proposes materially different compliant options
+and the smallest discriminating experiment, rather than retrying the same failing approach
+or changing the outcome. If delegation is unavailable, declare that capability gap and use
+only an expressly permitted serial fresh-role alternative; do not invent a worker grant.
+
+Select one compliant experiment and **one budgeted retry**. Then return evidenced progress or
+a classified terminal blocker with attempted approach, observed failure, missing capability
+or authority, and next permissible action. Do not reset budgets, repeatedly restart reviewers,
+create endless loops, or schedule wakeups while paused or awaiting operator input. A new
+recovery allowance requires explicit authority; budget exhaustion cannot waive evidence gates.
+
+Role, repair, recovery, elapsed-time and call budgets use a single aggregate accounting
+revision and already-debited amounts across all workers, continuations and retries. Record
+limits, consumption, remaining allowance and original operation identities where applicable;
+never make a fresh packet/session a fresh budget. A stale or unknown accounting revision
+blocks further budgeted action until reconciled, while safe observation may continue.
+
+### Evidence levels and bounded measurement
+
+Distinguish declared intent, structural/static inspection, automated deterministic checks,
+observed interactive journey/persistence, independent exploratory evaluation, human acceptance,
+and separately authorized production evidence. Report only levels actually reached, with
+candidate/source/runtime binding, observation time and limits. Higher evidence is not inferred
+from a lower level. Applicable non-UI proof differs without weakening declared acceptance.
+
+A bounded pilot may measure role calls, elapsed time, packet/context loading, budgets/debits,
+material defects and repaired classes, recovery attempts, operator interventions and cost.
+Distinguish supplied prompt bytes, cached input tokens, new input tokens, output tokens,
+reported usage, and elapsed time. Cached bytes are not cached-token accounting; byte counts
+are not total model context. Report unavailable fields explicitly and cost only when measured
+from valid usage/pricing evidence. Distinguish agent-reported pilot evidence from independent
+observation and operator attestation; do not promote one to another.
+Measure actual available data; do not fabricate missing context, reliability, savings or
+future model costs. One pilot is learning evidence, not a reliability claim or general proof
+of the standard, runtime, deployment, production, or autonomy. No private pilot data belongs
+in reusable process sources.
+
+## Review, environments, and maintenance
 
 Use a local dashboard when affected visuals, interaction, connectors, or debugging benefit;
 not for every backend or documentation edit. Use isolated cloud preview evidence for cloud
@@ -1133,6 +1239,10 @@ system_build_session:
 ```
 
 ## Change note
+
+- **2.7 — 2026-10-13:** Binds opt-in fresh role packets, representative/exploratory
+  completion evidence, one bounded recovery retry, and aggregate accounting without runtime
+  experiment activation or weakening safe provisional operator access.
 
 - **2.6 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
   authority, focused validation with exact final gates, and one coherent operator review.
