@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-CONFORM-001
 title: Operator-Workspace Conformance and Synchronization
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: read-only-audit-then-authorized-synchronization
@@ -22,6 +22,25 @@ operator asks about, and concentrate on evidence, drift, and repair.
 Account setup alone cannot establish conformance. Required method and project guidance must
 be portable, versioned, and reviewable outside one account's chat history or memory. The
 operator's personal preferences remain a distinct local layer.
+
+## Successor delivery-policy binding
+
+Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution).
+Execution modes, proportional planning, current human guidance, scoped grants, and serial
+checker roles supersede conflicting older conformance probes or steps below. Audit-only
+onboarding makes no writes. An explicit adoption grant supplied at invocation authorizes
+its bounded writes after a concrete scope read-back; do not ask for the same approval again.
+Absent that grant, present the proposed changes for authorization. No scope grants business
+meaning, credential access, experiment activation, integration, or live effects by implication.
+
+## Project onboarding entrypoint
+
+Use the [copy-paste project onboarding prompt](../templates/project-onboarding-prompt.md)
+to audit or explicitly adopt the organization's accepted development standard in one project.
+This is the project fast path within AP-CONFORM-001, not a second instruction stack. It
+inspects actual global/root/nested instructions and CI, binds exact accepted organization
+sources, preserves local restrictions and dirty state, and returns an immediately usable
+assignment example. Account-wide synchronization still uses the broader prompt below.
 
 ## Portable conformance layers
 
@@ -165,6 +184,9 @@ operator authorized and the fresh-session probes verified. Either may end as a c
 session without a durable report.
 
 ## Change note
+
+- **1.2 — 2026-10-13:** Adds a reusable project onboarding fast path with exact organization
+  adoption, actual instruction/CI inspection, scoped grants, and proportional delivery policy.
 
 - **1.1 — 2026-08-25:** Adds conformance probes for the source-read-only checker/merge
   controller and explicitly authorized targeted, affected, or full CI, including bounded

@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-SYSBUILD-001
 title: System Build and Human Review Milestone Standard
-version: "2.5"
+version: "2.6"
 status: active
 owner: Adopting organization
 mode: hrm-directed-system-build
@@ -102,6 +102,138 @@ published change units. Each published change unit gets one branch, normally one
 one integration receipt. A lane normally maps to one change unit. Split it when independent
 ownership, risk, validation, rollback, or integration boundaries emerge; do not force the
 whole HRM into one long-lived PR or create Git state merely because a task was opened.
+
+## Delivery policy: proportional planning and explicit execution
+
+This section governs planning depth, execution selection, and operator attention in this
+successor revision. It supersedes a conflicting requirement in older body text to merge a
+separate planning unit, automatically delegate, or generate a large bundle for a routine
+assignment. It preserves semantic readiness, exact-source final gates, human acceptance,
+and separately authorized external effects. Adopting organizations bind this revision
+explicitly; publication alone does not migrate projects or activate an experimental kernel.
+
+### Outcome and planning depth
+
+Optimize for a coherent usable outcome per human review, quality, machine wait, and operator
+rework. Lanes and Git units serve that outcome. Split units at independent ownership, risk,
+validation, rollback, or integration boundaries, rather than for each edit or worker.
+
+For routine changes, the human request supplies a compact brief. The agent captures the
+outcome, scope, checks, authority, and stop conditions inside the implementation unit; no
+separate planning lane, PR, or planning merge is required. Missing paperwork is work for the
+agent to capture, not grounds to refuse an otherwise clear authorized assignment.
+
+Prepare a larger package **before execution** when work crosses workflows or systems, has
+material business, ownership, or acceptance uncertainty, involves migration, replacement,
+or deployment complexity, or assigns several workers against a shared contract. Planning
+depth follows coordination and uncertainty, not line counts, files, subagents, or selected
+mode. Record exact accepted outcome and authority; prepare scenarios, dependencies, risks,
+checks, and stops. The package may remain local and need not be merged first. The human
+resolves material meaning and accepts the milestone, rather than approving every document.
+A local package never supplies cross-system promises absent from accepted contracts.
+
+Routine reversible implementation adjustments proceed autonomously within authority.
+A user refinement updates affected scope and checks before dependent non-disposable work.
+A distinct milestone, business authority, or external effect requires an explicit decision
+and, where applicable, discovery/rebaseline. Freeze only the affected boundary. Ask about
+missing meaning; capture missing records. Retain the smallest deliberately disposable proof
+of a risky semantic seam as learning evidence before a large implementation bundle.
+
+### Execution modes and roles
+
+| Mode | Sequencing and return boundary |
+|---|---|
+| Human-directed lane | Human selects each next assignment. Return its outcome; delegate only when authorized. |
+| Human with coordinator | Human selects the sequence. Coordinator retains context and combines named or bounded authorized subtasks. |
+| Bounded orchestrator | Agent sequences in-scope units within accepted topology and budget until the stated review gate or blocker. |
+
+Select the mode explicitly in the assignment or local policy. If unspecified, use the
+human-directed lane; do not infer bounded orchestration, delegation, or experiment
+activation. Builder, checker, reviewer, and observer are roles, not execution modes.
+A bounded worker receives its own outcome, scope, sources, candidate, authority, and stop;
+it does not inherit permission to enlarge scope, delegate, mutate outside the grant, or
+create a separate operator queue. Role separation may occur in serial steps when delegation
+is not authorized. A checker role does not require creating a subagent in every small task.
+
+Direct human guidance steers the current assignment. Capture material decisions durably
+before dependent non-disposable work, without ignoring current instructions or requesting
+answered approval again. A fresh correction task carries accepted outcome, exact candidate,
+findings, authority, and stop conditions; durable state is context, not a veto on guidance.
+
+### Operator attention and authority
+
+Perform routine reversible implementation and tests within authority without approval
+spam. Batch material schedulable findings without blocking unrelated authorized work. Ask
+only for unresolved meaning/acceptance or effects outside authority. A bounded action-class
+grant covers repeated actions under the same targets and limits until expiry or material
+change. Clarify an ambiguous “approve everything” once into a scoped grant; it is neither
+unlimited authority nor a permanent delegation veto. Silence and timeouts supply no authority.
+
+Classify test effects explicitly as disposable local, isolated remote sandbox, or live.
+Default to synthetic offline evidence; a bounded grant may cover sandbox use. Classification
+normally belongs in the plan/evidence, rather than repeated permission requests. Live
+provider, customer, money, deployment, activation, and autonomy effects retain separate gates.
+
+### Validation once per unit, with risk-triggered additions
+
+Plan changed behavior, consumers, plausible failures, local/CI/environment gates, broader
+triggers, exclusions, source identities, and freshness once per unit. Add checks for new
+relevant risk or failures, not reassurance. Preserve `review_packet`, `executable_contract`,
+and `runtime_change` profiles. Presentation, bounded behavior, and broad routes are subordinate
+selection tools, never replacements for mandatory profiles and consumer gates.
+
+Full-suite meaning comes from adopted repository policy, demonstrated reach, and verified
+hosting enforcement. Triggers include explicit gates, shared foundations, global configuration,
+dependencies, multiple consumers, broad reach, or unresolved reach for which narrow evidence
+is inadequate. Investigate reach first. Security and money require specific checks; unrelated
+full suites cannot substitute for them. Consider applicable permissions, secrets, encryption,
+privacy, pricing/tax/units, migrations/recovery, retry/duplication/order/reconnect, concurrency
+and stale saves, cross-system compatibility, cloud bindings/artifact identity, accessibility
+and errors, dependencies/reproducible builds, load/cost, model factual/routing replay, and
+clock/expiry risks. Record exclusions with reasons; do not invent blanket full-suite triggers.
+
+Reuse iteration evidence only under unchanged relevant source, behavior, dependency, oracle,
+environment, and freshness bindings. Strict final-candidate and integrated-head gates remain
+exact-source evidence and follow repository policy. Do not label PR/main checks duplicates
+without proving equivalence. Avoid equivalent duplicate CI and cancel superseded runs only
+when no required gate depends on them. Scheduled broad checks supplement required gates.
+Budgets and trial metrics signal improvement; they never waive a gate.
+
+### Review, environments, and maintenance
+
+Use a local dashboard when affected visuals, interaction, connectors, or debugging benefit;
+not for every backend or documentation edit. Use isolated cloud preview evidence for cloud
+authentication, bindings, queues, persistence, and deployment seams. Declare preview resources
+and effects. Local evidence does not prove cloud conformance.
+
+Use independent AI rendered-UI review selectively with a rubric, screens, workflows, and
+error states. Separate blockers from optional suggestions. Default to one review/correction
+cycle; repeat for a material unresolved finding or relevant change. Measure material defects
+and actual cost/usefulness; do not predict savings. Preserve deterministic financial/security
+checks and human acceptance. Merge follows declared final candidate/integration gates;
+release packaging and cloud seams need their own proof. No test, merge, preview, or package
+silently promotes deployment, activation, canary, production, or autonomy state.
+
+Provide one operator review with the working result/demo, material unknowns and decisions,
+exact candidate, deployment posture, and next authority. Do not repeat the full technical
+plan. Capture recurring requirements so later tasks do not need repeated prompting.
+
+Prefer existing runtimes and tools. An added language, container, or service needs a concrete
+benefit, owner, and total maintenance, deploy, debug, and recovery cost. Python does not imply
+containers or a forced rewrite; a Ruby helper is routine unless it creates material burden.
+Share check scripts between agents and CI, and keep instruction entrypoints concise.
+
+Track a bounded trial using review latency, CI wait, duplicate runs, flakes, operator
+interventions, repeated fixes, AI reviewer material defects and cost, escaped defects, and
+recovery. Preserve evidence limits; never fabricate savings. Organization-neutral reusable
+lessons include stable action identity and check reuse, conditional CI and early safe review,
+provenance/reproducible atomic recoverable publication, and offline synthetic/environment
+separation. Business catalogs, pricing, providers, and credentials remain project authority.
+
+Global instructions are a concise common floor. Local instructions select mode, accepted
+source pins, validation triggers, and check entrypoints. Historical revisions remain in Git;
+adoption declares compatibility and mixed-version posture. Verify hosting enforcement rather
+than treating an instruction as proof it exists.
 
 ## Operator model
 
@@ -1001,6 +1133,9 @@ system_build_session:
 ```
 
 ## Change note
+
+- **2.6 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
+  authority, focused validation with exact final gates, and one coherent operator review.
 
 - **2.5 — 2026-08-25:** Makes requirements acceptance floors for brownfield work, requires
   reuse/adapter/extension analysis before genuine implementation gaps or replacement, scopes

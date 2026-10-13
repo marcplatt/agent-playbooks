@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-INTEGRATE-001
 title: Dedicated Checker and Merge Controller
-version: "1.0"
+version: "1.1"
 status: active
 owner: Adopting organization
 mode: bounded-repository-check-and-integration
@@ -50,6 +50,17 @@ controller may check and report but may not mutate repository or hosting state.
 `Source-read-only` means the controller never authors or modifies candidate content. It may
 perform only the explicitly authorized Git and hosting state transitions in this playbook,
 such as a policy-permitted clean base update, expected-head merge, or eligible cleanup.
+
+## Successor delivery-policy binding
+
+Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+for proportional planning, explicit execution modes, current human steering, bounded grants,
+validation reuse, review, and environment selection. That section supersedes conflicting
+older instructions here to require a separate planning merge, automatically delegate a
+checker/worker, or expand routine work into a bundle. All applicable final exact-source
+checks, role boundaries, repository gates, human acceptance, and external-effect separation
+remain mandatory. Use a serial checker role when delegation is not authorized; publication
+does not adopt an experimental kernel or migrate an organization's source pins.
 
 ## Authority boundary
 
@@ -204,6 +215,9 @@ Only the HRM orchestrator may promote a controller exception to S0, interpret bu
 meaning, or contact the operator.
 
 ## Change note
+
+- **1.1 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
+  authority, focused validation with exact final gates, and one coherent operator review.
 
 - **1.0 — 2026-08-25:** Defines a source-read-only Codex checker/merge-controller subagent
   with exact-head and explicitly scoped validation, bounded-canary CI acceptance,
