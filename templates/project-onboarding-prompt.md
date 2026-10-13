@@ -40,11 +40,14 @@ Excluded effects: {{deployment/provider/customer/money/credentials/autonomy_or_s
    are not adoption. Keep reusable rules in AP, organization authority in its master plan,
    and project implementation/evidence local. Stop only the boundary needing unresolved meaning.
 4. Inspect actual CI workflows, classifiers, scripts, consumer reach, required checks and
-   accessible hosting enforcement. Inventory duplicates and broader triggers with evidence;
+   accessible hosting enforcement. A missing workflow or protection is reported absent, not
+   enforced. For a new project, propose minimal checks; create their setup only if the grant
+   covers it. Inventory duplicates and broader triggers with evidence;
    do not infer enforced checks from prose. If hosting/CI access is missing, say which claims
    remain unverified. Preserve stricter applicable gates until properly amended.
 5. Compare global common floor, root/nested project instructions, accepted sources and CI.
-   Classify pass/gap/stale/contradiction/unknown/not-applicable. Explain concrete consequences
+   Classify pass/gap/stale/contradiction/unknown/not-applicable and intended_local_restriction.
+   A valid stronger local restriction is intentional, not drift to erase. Explain consequences
    and the smallest repair. Never blindly overwrite global instructions, copy another account's
    preferences, weaken local restrictions, upgrade source pins, or activate experiments.
 6. In audit_only, return a concise gap summary and proposed exact writes; make no changes.
@@ -59,8 +62,9 @@ Excluded effects: {{deployment/provider/customer/money/credentials/autonomy_or_s
    from execution modes and use serial roles when delegation is not authorized.
 8. Make local entrypoints concise: exact accepted source pins, mode, validation triggers,
    check commands, stops and external-effect posture. Routine work captures outcome/scope/
-   checks/authority/stop inside its unit. Larger uncertain/coordinated work gets an accepted
-   package before execution; it may stay local with no separate planning PR/premerge. Missing
+   checks/authority/stop inside its unit. Larger uncertain/coordinated work gets a package
+   before execution with accepted scope and authority; the human need not approve every
+   document. It may stay local with no separate planning PR/premerge. Missing
    paperwork is agent capture; missing meaning is a scoped question. Current human guidance
    steers the assignment and material changes are recorded before dependent durable work.
 9. Validate changed instruction contracts, links/source bindings and affected consumers;
@@ -101,3 +105,20 @@ actual evidence instead of inventing commands.
 Instruction discovery reference for Codex: [official AGENTS.md configuration guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 This identifies product precedence, not organization adoption or evidence that a session
 loaded the complete chain.
+
+## Sample outcome report
+
+```text
+Audit state: complete for accessible surfaces; no writes. Adoption state: unchanged.
+Accepted source: <organization standard/version, adoption decision, exact AP revision>.
+Effective chain: <actual global override-or-AGENTS, root selection, workdir selection>;
+other nested files inventoried: <paths>; loading cap/fresh-session proof: <verified/unknown>.
+Changes: none. Checks: <read-only source/CI/hosting inspections actually completed>.
+Remaining drift: <specific gap and smallest repair>; intended local restrictions: <preserved>.
+Enforcement: <observed required checks/protection, absent, or inaccessible>; no implied pass.
+Next assignment: <copy-paste outcome/scope/mode/sources/named checks/stops/effect limits>.
+```
+
+For authorized adoption, replace “no writes/unchanged” with exact changed paths, candidate
+and PR, checks performed, remaining gates and separately verified integration/adoption state.
+These placeholders illustrate the report; they are not fabricated observations or conformance.
