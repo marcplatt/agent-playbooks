@@ -23,6 +23,13 @@ class HrmKernelStoreTest < Minitest::Test
     FileUtils.remove_entry(@temporary) if File.exist?(@temporary)
   end
 
+  def test_cli_help_discloses_opt_in_fresh_profile_without_activation
+    output = StringIO.new
+    assert_equal 0, HrmKernel::CLI.run(["--help"], stdout: output)
+    assert_includes output.string, "RC42 adds an explicit opt-in fresh_role_profile"
+    assert_includes output.string, "it grants no activation"
+  end
+
   def test_empty_store_has_no_materialized_state
     assert_equal({"cursor" => 0, "event_hash" => nil, "state" => nil}, @store.read)
     refute File.exist?(File.join(@state_dir, "events.jsonl"))

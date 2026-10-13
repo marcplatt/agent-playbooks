@@ -329,7 +329,7 @@ module HrmKernel
                  when "revalidate"
                    fail!("candidate revalidation must wait for active writers") if runtime["jobs"].any? { |job_id| job = @host.poll(job_id: job_id); job["role"] == "worker" && job["status"] == "running" }
                    @coordinator.revalidate(input, expected_cursor: expected_cursor)
-                 when "status" then @store.project(role: "orchestrator")
+                 when "status" then model_projection(config)
                  when "verify" then @store.verify!
                  else fail!("unsupported driver operation")
                  end
@@ -501,6 +501,8 @@ module HrmKernel
       }
       if config["fresh_role_profile"]
         packet["request_guide"]["host-dispatch"] = "Dispatch fresh worker model gpt-6.1-sol or fresh reviewer model gpt-6-astra. Never provide resume_job_id, historical_resume_job_id or fresh_role_profile. Durable current worker claims remain; use current owned order with a new job ID. Frozen check plans and all declared environment bounds still apply."
+        packet["request_guide"]["check"] = "input_json:{job_id,check_id}; normally automatic after collection. A corrected candidate needs a fresh worker result and fresh checks before submission."
+        packet["request_guide"]["pending_verification"] = "Workers cannot run trusted tests. If implementation is complete and only verification remains, use native check receipts and a fresh reviewer. Dispatch a fresh worker only for actual unfinished engineering."
         packet["workflow"] = "Use the selected current workflow stages and owners. Every model launch is fresh; durable claims, findings, authority and aggregate budgets persist. No automatic stall recovery or capability expansion."
         packet["current_workflow"] = fresh_profile(config).fetch("workflow")
         packet["task_authority"] = "Task text supplies operator outcome context; current effective requirements in the role projection govern implementation. Historical task facts cannot supersede amendments."
@@ -536,13 +538,25 @@ module HrmKernel
       config
     end
 
+    def model_projection(config)
+      projection = @store.project(role: "orchestrator")
+      if config["fresh_role_profile"]
+        projection.fetch("projection").fetch("milestone")["models"] = {
+          "orchestrator" => Host::ORCHESTRATOR_MODEL,
+          "worker" => Host::BUILDER_MODEL,
+          "reviewer" => Host::ORCHESTRATOR_MODEL
+        }
+      end
+      projection
+    end
+
     def fresh_profile(config)
       state = @store.read.fetch("state")
       selected = config.fetch("fresh_role_profile")
       fail!("declared journey requires reconciliation after milestone change") unless selected["milestone_revision"] == state.dig("milestone", "revision")
       projection = State.project(state, role: "orchestrator", actor_id: "astra-orchestrator")
       phase = state.dig("milestone", "phase")
-      pending_decisions = projection.fetch("decisions", {}).values.any? { |decision| decision["status"] == "pending" }
+      pending_decisions = state.fetch("decisions").values.any? { |decision| decision["status"] == "unresolved" && State.decision_current?(decision, state.fetch("milestone")) }
       action = if %w[review_ready accepted closed].include?(phase)
                  "Hold model work; human review/acceptance or explicit new operator input only. No activation."
                elsif pending_decisions

@@ -1,6 +1,6 @@
 # Opt-in fresh role packet
 
-Use only when selected under [AP-SYSBUILD-001/2.7 delivery policy](../playbooks/system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution).
+Use only when selected under [AP-SYSBUILD-001/2.7 delivery policy](https://github.com/marcplatt/agent-playbooks/blob/8364121bd3b95bb9371be6b7915d1e4272f58a39/playbooks/system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution).
 This is a capture template, not a machine schema, runtime upgrade, new authority grant, or
 permission to delegate. Fill material facts; mark unknowns explicitly. Project-owned packets
 hold project evidence. Keep credentials, private payloads and private pilot data out of AP.

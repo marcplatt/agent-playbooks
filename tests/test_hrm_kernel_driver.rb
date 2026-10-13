@@ -587,6 +587,46 @@ class HrmKernelDriverTest < Minitest::Test
     assert_match(/reconciliation/, error.message)
   end
 
+  def test_fresh_status_feedback_and_same_batch_decision_projection
+    @driver.start(configuration.merge("fresh_role_profile" => selected_fresh_profile))
+    config = JSON.parse(File.read(File.join(@state_dir, "driver", "config.json")))
+    runtime = JSON.parse(File.read(File.join(@state_dir, "driver", "runtime.json")))
+    decision = {"command_id" => "fresh-question", "type" => "decision.request",
+      "actor" => {"id" => "astra-orchestrator", "role" => "orchestrator"},
+      "data" => {"decision_id" => "copy-choice", "revision" => 1, "kind" => "business_meaning",
+        "exact_effect" => "select customer-visible wording", "requirement_ids" => ["behavior"],
+        "question" => "Which wording?", "authority_gap" => {"reason" => "Meaning is unspecified", "source_ref" => "requirements:behavior"}}}
+    # Supported operations in one response batch: apply, then status; the next
+    # packet must reflect the new unresolved decision and selected models.
+    [ ["fresh-question", "apply", decision], ["fresh-status", "status", {}] ].each do |id, operation, input|
+      receipt = @driver.send(:perform, {"request_id" => id, "operation" => operation, "input_json" => JSON.generate(input)}, config, runtime)
+      assert receipt["ok"], receipt.inspect
+      runtime["feedback"] << receipt
+    end
+    packet = JSON.parse(@driver.send(:prompt, config, runtime, {"cursor" => 0, "records" => []}))
+    assert_match(/Hold affected work/, packet.dig("current_workflow", "next_eligible_action"))
+    refute_match(/gpt-5\.6/, JSON.generate(packet))
+    refute_match(/resumed worker|do not resume/, JSON.generate(packet["request_guide"]))
+    assert_equal({"orchestrator" => "gpt-6-astra", "worker" => "gpt-6.1-sol", "reviewer" => "gpt-6-astra"},
+      packet["feedback"].last.dig("result", "projection", "milestone", "models"))
+    assert_includes @driver.send(:model_projection, configuration).dig("projection", "milestone", "models").values, "gpt-5.6-sol"
+
+    @store.transact("command_id" => "fresh-answer", "type" => "decision.respond",
+      "actor" => {"id" => "human", "role" => "operator"}, "data" => {
+        "decision_id" => "copy-choice", "revision" => 1, "kind" => "business_meaning",
+        "exact_effect" => "select customer-visible wording", "disposition" => "accepted",
+        "source" => {"thread_id" => "human", "message_id" => "answer"}, "text" => "Use approved wording"})
+    refute_match(/Hold affected work/, @driver.send(:fresh_profile, config).dig("workflow", "next_eligible_action"))
+    # A historical unresolved decision whose requirement binding is superseded
+    # cannot hold current work. Business amendments still require reconciliation.
+    state = @store.read.fetch("state")
+    state["decisions"]["copy-choice"]["status"] = "unresolved"
+    state["decisions"]["copy-choice"]["requirement_revisions"]["behavior"] = 0
+    original_read = @store.method(:read)
+    @store.define_singleton_method(:read) { original_read.call.merge("state" => state) }
+    refute_match(/Hold affected work/, @driver.send(:fresh_profile, config).dig("workflow", "next_eligible_action"))
+  end
+
   def test_fresh_driver_completes_offline_claim_check_review_journey
     profile = selected_fresh_profile
     profile["session_limits"]["orchestrator"] = 4
