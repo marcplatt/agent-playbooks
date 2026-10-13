@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-ONBOARD-001
 title: Operator-Workspace Onboarding and Method Orientation
-version: "1.2"
+version: "1.3"
 status: active
 owner: Adopting organization
 mode: adaptive-read-only-orientation
@@ -26,7 +26,7 @@ Business Plan Elicitation playbook rather than inventing it here.
 ## Project fast path and delivery-policy binding
 
 For one project, use the [project onboarding entrypoint](operator-workspace-conformance.md#project-onboarding-entrypoint)
-and its copy-paste prompt. Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+and its copy-paste prompt. Apply [AP-SYSBUILD-001/2.7 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
 for proportional planning, explicit execution modes, and current scoped authorization. An
 explicit bounded adoption grant in the invocation replaces the older requirement below to
 request a second synchronization approval; read back its concrete scope and proceed within
@@ -143,6 +143,10 @@ versus personalizable, and has received a truthful lifecycle audit and next-step
 Completion authorizes no writes or external effects.
 
 ## Change note
+
+- **1.3 — 2026-10-13:** Binds opt-in fresh role packets, representative/exploratory
+  completion evidence, one bounded recovery retry, and aggregate accounting without runtime
+  experiment activation or weakening safe provisional operator access.
 
 - **1.2 — 2026-10-13:** Links project onboarding fast path and scopes synchronization to
   explicit grants without repeated approval or automatic experiment/delegation activation.

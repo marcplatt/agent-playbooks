@@ -6,8 +6,8 @@ adoption, source pins, and project implementation belong in their owning reposit
 - Fetch literal `origin/main` and inspect status/worktrees before deriving changes. Preserve
   operator checkouts, experimental branches, active review runtimes, and private evidence.
 - Use one bounded task branch/PR per independently reviewable change unit; never push main.
-- Follow AP-SYSBUILD-001/2.6 delivery policy in `playbooks/system-build-standard.md`, with
-  AP-LANE-001/4.6, AP-VALIDATE-001/1.3 and AP-DECIDE-001/1.3 at their existing entrypoints.
+- Follow AP-SYSBUILD-001/2.7 delivery policy in `playbooks/system-build-standard.md`, with
+  AP-LANE-001/4.7, AP-VALIDATE-001/1.4 and AP-DECIDE-001/1.4 at their existing entrypoints.
   Their successor binding governs conflicts with older body text. Human-directed lane is
   the default; delegation and bounded orchestration require named/bounded authorization.
 - Routine assignments carry outcome/scope/checks/authority/stops inside the unit. Larger

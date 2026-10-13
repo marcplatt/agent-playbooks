@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-INTEGRATE-001
 title: Dedicated Checker and Merge Controller
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: bounded-repository-check-and-integration
@@ -53,7 +53,7 @@ such as a policy-permitted clean base update, expected-head merge, or eligible c
 
 ## Successor delivery-policy binding
 
-Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+Apply [AP-SYSBUILD-001/2.7 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
 for proportional planning, explicit execution modes, current human steering, bounded grants,
 validation reuse, review, and environment selection. That section supersedes conflicting
 older instructions here to require a separate planning merge, automatically delegate a
@@ -215,6 +215,10 @@ Only the HRM orchestrator may promote a controller exception to S0, interpret bu
 meaning, or contact the operator.
 
 ## Change note
+
+- **1.2 — 2026-10-13:** Binds opt-in fresh role packets, representative/exploratory
+  completion evidence, one bounded recovery retry, and aggregate accounting without runtime
+  experiment activation or weakening safe provisional operator access.
 
 - **1.1 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
   authority, focused validation with exact final gates, and one coherent operator review.

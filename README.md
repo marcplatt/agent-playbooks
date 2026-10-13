@@ -6,7 +6,7 @@ If the operator already knows the method and is configuring another account, mac
 project set, use [Operator-Workspace Conformance and Synchronization](playbooks/operator-workspace-conformance.md)
 instead. For a single project, start with the
 [copy-paste project onboarding prompt](templates/project-onboarding-prompt.md) through
-AP-CONFORM-001/1.2. In every playbook ID, `AP` means **Agent Playbooks**.
+AP-CONFORM-001/1.3. In every playbook ID, `AP` means **Agent Playbooks**.
 
 Version-controlled, human-readable, and machine-readable workflows for turning an
 organization's business intent into governed system delivery. The repository is
@@ -65,11 +65,16 @@ deployed, activated, canary, or production-verified states as interchangeable.
 
 ## Proportional delivery amendment
 
-[AP-SYSBUILD-001/2.6 delivery policy](playbooks/system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+[AP-SYSBUILD-001/2.7 delivery policy](playbooks/system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
 sets proportional planning, explicit execution modes, human steering, validation selection,
-and review. AP-LANE-001/4.6, AP-VALIDATE-001/1.3, AP-DECIDE-001/1.3,
-AP-INTEGRATE-001/1.1 and AP-WORKSPACE-001/1.3 bind it at their existing entrypoints.
+and review. AP-LANE-001/4.7, AP-VALIDATE-001/1.4, AP-DECIDE-001/1.4,
+AP-INTEGRATE-001/1.2 and AP-WORKSPACE-001/1.4 bind it at their existing entrypoints.
 Organizations adopt exact revisions explicitly. This does not activate the compact kernel.
+
+The successor delivery policy also provides [opt-in fresh role packets](templates/fresh-role-packet.md)
+and conditional project-onboarding probes for representative journeys, exploratory evidence,
+and one bounded recovery retry. These are reusable process choices; model profiles belong to
+adopting organizations, and no experimental runtime is activated.
 
 ## Experimental compact execution
 

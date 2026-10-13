@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-DECIDE-001
 title: Operator Decision Frontier
-version: "1.3"
+version: "1.4"
 status: active
 owner: Adopting organization
 mode: early-human-input-routing
@@ -19,7 +19,7 @@ that could make later work semantically wrong. The orchestrator is the single op
 
 ## Successor delivery-policy binding
 
-Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+Apply [AP-SYSBUILD-001/2.7 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
 for proportional planning, explicit execution modes, current human steering, bounded grants,
 validation reuse, review, and environment selection. That section supersedes conflicting
 older instructions here to require a separate planning merge, automatically delegate a
@@ -89,6 +89,10 @@ Current HRM: {{current_hrm_or_none}}
 ```
 
 ## Change note
+
+- **1.4 — 2026-10-13:** Binds opt-in fresh role packets, representative/exploratory
+  completion evidence, one bounded recovery retry, and aggregate accounting without runtime
+  experiment activation or weakening safe provisional operator access.
 
 - **1.3 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
   authority, focused validation with exact final gates, and one coherent operator review.

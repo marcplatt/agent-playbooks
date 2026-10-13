@@ -1,6 +1,6 @@
 # Project onboarding prompt
 
-Use through [AP-CONFORM-001/1.2](../playbooks/operator-workspace-conformance.md#project-onboarding-entrypoint).
+Use through [AP-CONFORM-001/1.3](../playbooks/operator-workspace-conformance.md#project-onboarding-entrypoint).
 Replace the fields; retain `audit_only` unless intentionally granting bounded adoption writes.
 The agent identifies missing source facts instead of asking the operator to reconstruct them.
 
@@ -15,6 +15,8 @@ Adoption grant (empty for audit): {{exact repositories/files/action classes/limi
 Execution mode: {{human-directed lane | human with coordinator | bounded orchestrator}}
 Delegation grant: {{none | named_or_bounded_subtasks}}
 Desired first outcome: {{concrete_operator_visible_result}}
+Optional mechanism: {{none | fresh_role_packets_and_selected_bounded_recovery}}
+Mechanism authority/profile, aggregate accounting revision and remaining budgets: {{none_or_refs}}
 Excluded effects: {{deployment/provider/customer/money/credentials/autonomy_or_specific_limits}}
 
 1. Inspect before writing. Discover the actual account's global instruction file and its
@@ -72,6 +74,25 @@ Excluded effects: {{deployment/provider/customer/money/credentials/autonomy_or_s
    disposable local/isolated sandbox/live; default synthetic offline. Final candidate gates
    remain exact-source. Fresh-session instruction probes verify changes when accessible;
    report unperformed probes honestly rather than claiming conformance from edited files.
+9a. If fresh role packets or bounded recovery are explicitly selected, inspect the adopted
+    mechanism/profile and verify only applicable AP-CONFORM conditional probes. Capture
+    effective/superseded requirements, ordered journey/stage owners, candidate/source/runtime
+    distinctions, observations/effects, eligible action, findings/unknowns, frozen source and
+    artifact refs and
+    authority, plus one shared accounting revision with role/repair/recovery/time/call limits,
+    already-debited amounts, explicit current-session debit yes/no/unknown and operation ID,
+    and remaining allowances. Initialize the environment once per
+    relevant revision and orient each fresh role/session with essential facts and conditional
+    excerpts; do not mandate full history or infer total context from bytes. Configure model
+    roles from the adopting profile, not an experimental branch. No mechanism activation here.
+    If interaction tools/grants exist, test supported journey persistence/reload and relevant
+    unseen equivalents; otherwise say what is unavailable. No code/screenshot-only UI proof.
+    A selected declared stall trigger permits one fresh authorized creative reviewer and one
+    compliant experiment/retry under the same aggregate budgets, then progress or evidenced
+    blocker. Empty requests alone do not prove no progress; do not reset budgets or arrange
+    endless/paused wakeups. Formal review_ready requires completed representative journeys,
+    repaired material findings/class checks and relevant exploration at the exact candidate;
+    safe provisional operator access remains available. Optional ideas do not enlarge scope.
 10. Return exact source versions, actual audit/adoption/integration state, changes/checks,
     remaining gates and one copy-paste first-assignment prompt. That prompt names the outcome,
     scope, execution/delegation mode, accepted sources, checks/stops and external-effect posture.
