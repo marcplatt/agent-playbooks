@@ -43,6 +43,16 @@ class HrmKernelRunContinuationTest < Minitest::Test
     FileUtils.remove_entry(@temporary)
   end
 
+  def test_fresh_profile_cannot_reset_budget_through_historical_continuation
+    config_path = File.join(@source, "driver", "config.json")
+    config = read_json(config_path)
+    config["fresh_role_profile"] = {"schema" => HrmKernel::Host::FRESH_PROFILE}
+    write_json(config_path, config)
+    error = assert_raises(HrmKernel::Error) { continue_run }
+    assert_match(/aggregate budgets cannot use historical run continuation/, error.message)
+    refute File.exist?(@destination)
+  end
+
   def test_copies_historical_state_unchanged_and_derives_only_new_driver_state
     before = byte_snapshot(@source)
     source_store = HrmKernel::Store.new(@source).read

@@ -210,6 +210,7 @@ module HrmKernel
           ruby scripts/hrm_kernel.rb driver-run --state-dir DIR
 
         RC41 supports explicit stopped RC40 continuation and authenticated tracked public templates in isolated checks.
+        RC42 adds an explicit opt-in fresh_role_profile for fresh role packets and selected models; it grants no activation.
         Technical supervisor evidence uses driver-input and grants no execution or operator authority.
         Protocol ap-hrm-interaction/2 operator ledgers remain separate and are never upgraded in place.
         Native checks and Codex task identities are recorded by the local host adapter.

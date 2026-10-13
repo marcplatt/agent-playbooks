@@ -17,6 +17,8 @@ module HrmKernel
   class Host
     DEFAULT_CODEX = "/Applications/ChatGPT.app/Contents/Resources/codex"
     MODEL = "gpt-5.6-sol"
+    FRESH_PROFILE = "rc42-fresh-roles/1"
+    BUILDER_MODEL = "gpt-6.1-sol"
     ORCHESTRATOR_MODEL = "gpt-6-astra"
     MAX_RESULT_BYTES = 1024 * 1024
     SENSITIVE_SOURCE = /\A(?:\.env(?:\..*)?|auth\.json|credentials[^\/]*\.json|[^\/]*\.(?:db|sqlite|sqlite3|pem|key))\z/i
@@ -86,6 +88,11 @@ module HrmKernel
           return poll(job_id: spec.fetch("job_id"))
         end
         fail!("Codex executable is unavailable") unless File.file?(@codex_path) && File.executable?(@codex_path)
+        fail!("fresh-role state cannot launch legacy sessions") if File.exist?(File.join(@directory, "fresh-budget.json")) && !spec["fresh_role_profile"]
+        if spec["fresh_role_profile"]
+          prior_admission = read_optional_json(File.join(@directory, "fresh-budget.json"))&.dig("admissions", spec["job_id"])
+          fail!("prior admission has no durable job; launch outcome is uncertain") if prior_admission
+        end
         state = @store.read.fetch("state")
         fail!("milestone is not initialized") unless state && state["milestone"]
         if spec["role"] == "reviewer"
@@ -102,6 +109,7 @@ module HrmKernel
                 else "reviewer-#{spec.fetch('job_id')}"
                 end
         resumed = resume_parent(spec, actor)
+        validate_fresh_state!(spec, state)
         order = spec["role"] == "worker" ? state.fetch("work_orders").fetch(spec["work_order_id"]) { fail!("unknown work order") } : nil
         if order
           plan_ids = spec.fetch("check_plan").fetch("checks").map { |item| item["id"] }
@@ -116,10 +124,13 @@ module HrmKernel
           preview = preview_state.fetch("work_orders").fetch(spec["work_order_id"])
           preview.merge!("status" => "running", "owner_id" => actor, "last_owner_id" => actor, "claim_id" => "claim-#{spec['job_id']}")
         end
-        preview_prompt = JSON.pretty_generate(build_packet(spec, actor, preview_state, context))
+        accounting = admit_fresh_session!(spec)
+        preview_packet = build_packet(spec, actor, preview_state, context)
+        preview_packet["budget_accounting"] = accounting if accounting
+        preview_prompt = JSON.pretty_generate(preview_packet)
         fail!("bounded prompt exceeds max_context_bytes") if preview_prompt.bytesize > spec["max_context_bytes"]
         if order
-          unless order["status"] == "queued" || (resumed && order["status"] == "running" && order["owner_id"] == actor)
+          unless order["status"] == "queued" || ((resumed || spec["fresh_role_profile"]) && order["status"] == "running" && order["owner_id"] == actor)
             fail!("worker requires a queued order or its own resumed active claim")
           end
           # Exact-file permissions cannot create a missing ancestor. Prepare only
@@ -139,6 +150,7 @@ module HrmKernel
           order = state.fetch("work_orders").fetch(spec["work_order_id"])
         end
         packet = build_packet(spec, actor, state, context)
+        packet["budget_accounting"] = accounting if accounting
         prompt = JSON.pretty_generate(packet)
         fail!("bounded prompt exceeds max_context_bytes") if prompt.bytesize > spec["max_context_bytes"]
         binding = binding_for(state, order, role: spec["role"])
@@ -299,6 +311,14 @@ module HrmKernel
         result_status = parsed_result["status"]
         result_sha = Digest::SHA256.hexdigest(result_bytes)
       end
+      if valid_thread && job.dig("spec", "fresh_role_profile")
+        Dir.children(@directory).each do |id|
+          next if id == job_id || !IDENTIFIER.match?(id) || !File.file?(File.join(@directory, id, "job.json"))
+          other = read_job(id)
+          next unless other.dig("spec", "fresh_role_profile")
+          valid_thread = false if read_events(job_path(id)).any? { |event| event["type"] == "thread.started" && event["thread_id"] == thread_ids.first }
+        end
+      end
       succeeded = status.success? && valid_thread && completed && !failed_event && result_sha
       succeeded &&= !job["resume_thread_id"] || thread_ids.first == job["resume_thread_id"]
       self.class.atomic_json(File.join(path, "completion.json"), {
@@ -425,11 +445,13 @@ module HrmKernel
     def normalize_spec(value)
       fail!("dispatch specification must be an object") unless value.is_a?(Hash)
       spec = JSON.parse(JSON.generate(value))
-      allowed = %w[job_id role work_order_id model prompt context_paths max_context_bytes check_plan resume_job_id forbidden_roots execution_read_roots execution_environment_allowlist reasoning_effort]
+      allowed = %w[job_id role work_order_id model prompt context_paths max_context_bytes check_plan resume_job_id forbidden_roots execution_read_roots execution_environment_allowlist reasoning_effort fresh_role_profile]
       fail!("unknown dispatch fields") unless (spec.keys - allowed).empty?
       fail!("invalid job_id") unless spec["job_id"].is_a?(String) && IDENTIFIER.match?(spec["job_id"])
       fail!("invalid role") unless %w[worker reviewer orchestrator].include?(spec["role"])
-      expected_model = spec["role"] == "orchestrator" ? ORCHESTRATOR_MODEL : MODEL
+      validate_fresh_profile!(spec["fresh_role_profile"]) if spec["fresh_role_profile"]
+      fail!("fresh role profile forbids resume_job_id") if spec["fresh_role_profile"] && spec["resume_job_id"]
+      expected_model = spec["fresh_role_profile"] ? (spec["role"] == "worker" ? BUILDER_MODEL : ORCHESTRATOR_MODEL) : (spec["role"] == "orchestrator" ? ORCHESTRATOR_MODEL : MODEL)
       fail!("role requires #{expected_model}") unless spec["model"] == expected_model
       if spec["reasoning_effort"]
         fail!("invalid reasoning effort") unless %w[low medium high xhigh max ultra].include?(spec["reasoning_effort"])
@@ -616,6 +638,7 @@ module HrmKernel
       # Only the immutable initial command is extracted; no history is sent.
       line = File.open(File.join(@state_dir, Store::LEDGER_NAME), &:gets)
       initial = JSON.parse(line).dig("command", "data")
+      return fresh_packet(spec, actor, state, context) if spec["fresh_role_profile"]
       {
         "host_contract" => "AP-INTERACT RC41 bounded Codex #{spec['role']}",
         "instructions" => [
@@ -632,6 +655,82 @@ module HrmKernel
         "declared_sources" => context, "check_plan" => spec["check_plan"],
         "forbidden_roots" => spec["forbidden_roots"]
       }
+    end
+
+    def validate_fresh_profile!(profile)
+      keys = %w[schema run_id session_limits workflow state_revision milestone_revision]
+      fail!("invalid fresh role profile") unless profile.is_a?(Hash) && profile.keys.sort == keys.sort && profile["schema"] == FRESH_PROFILE && IDENTIFIER.match?(profile["run_id"].to_s)
+      fail!("invalid milestone revision") unless profile["milestone_revision"].is_a?(Integer) && profile["milestone_revision"].positive?
+      limits = profile["session_limits"]
+      fail!("invalid aggregate session limits") unless limits.is_a?(Hash) && limits.keys.sort == %w[orchestrator reviewer worker] && limits.values.all? { |n| n.is_a?(Integer) && n.between?(0, 100) }
+      workflow = profile["workflow"]
+      fail!("invalid current workflow packet") unless workflow.is_a?(Hash) && workflow.keys.sort == %w[current_stage next_eligible_action ordered_stages] && %w[current_stage next_eligible_action].all? { |key| workflow[key].is_a?(String) && !workflow[key].empty? } && workflow["ordered_stages"].is_a?(Array) && !workflow["ordered_stages"].empty?
+      fail!("stages require explicit stage and owner") unless workflow["ordered_stages"].all? { |item| item.is_a?(Hash) && %w[stage owner].all? { |key| item[key].is_a?(String) && !item[key].empty? } }
+      fail!("invalid state revision") unless profile["state_revision"].is_a?(String) && /\A[0-9a-f]{64}\z/.match?(profile["state_revision"])
+    end
+
+    def validate_fresh_state!(spec, state)
+      profile = spec["fresh_role_profile"]
+      return unless profile
+      fail!("declared journey requires reconciliation after milestone change") unless profile["milestone_revision"] == state.dig("milestone", "revision")
+      fail!("stale fresh role packet") unless profile["state_revision"] == self.class.digest(state)
+      if spec["role"] == "worker"
+        admissions = read_optional_json(File.join(@directory, "fresh-budget.json"))&.fetch("admissions", {}) || {}
+        admissions.each do |id, admission|
+          next unless admission["role"] == "worker" && admission["work_order_id"] == spec["work_order_id"]
+          fail!("fresh worker has an uncertain orphan admission") unless File.file?(File.join(@directory, id, "job.json"))
+        end
+        Dir.children(@directory).each do |id|
+          next unless IDENTIFIER.match?(id) && File.file?(File.join(@directory, id, "job.json"))
+          prior = read_job(id)
+          next unless prior["role"] == "worker" && prior["work_order_id"] == spec["work_order_id"]
+          fail!("fresh worker has an active or uncertain prior launch") unless %w[succeeded failed].include?(poll(job_id: id)["status"])
+        end
+      end
+    end
+
+    # Registry lock serializes admission across every role. Reservations survive
+    # failed launches/restarts and are never refunded by a fresh model session.
+    def admit_fresh_session!(spec)
+      profile = spec["fresh_role_profile"]
+      return unless profile
+      path = File.join(@directory, "fresh-budget.json")
+      accounting = read_optional_json(path) || { "run_id" => profile["run_id"], "revision" => 0, "session_limits" => profile["session_limits"], "admissions" => {} }
+      fail!("fresh-role run identity cannot reset aggregate accounting") unless accounting["run_id"] == profile["run_id"]
+      fail!("aggregate session limits cannot change") unless accounting["session_limits"] == profile["session_limits"]
+      role = spec.fetch("role")
+      admitted = accounting["admissions"][spec.fetch("job_id")]
+      fail!("admission job changed specification") if admitted && admitted != { "role" => role, "work_order_id" => spec["work_order_id"], "spec_digest" => self.class.digest(spec) }
+      count = accounting["admissions"].values.count { |entry| entry["role"] == role }
+      fail!("aggregate #{role} session budget exhausted") if !admitted && count >= accounting["session_limits"].fetch(role)
+      accounting["admissions"][spec.fetch("job_id")] = { "role" => role, "work_order_id" => spec["work_order_id"], "spec_digest" => self.class.digest(spec) }
+      accounting["revision"] += 1 unless admitted
+      self.class.atomic_json(path, accounting)
+      accounting.merge("timing" => "after admission; current session already debited", "current_session_debited" => true,
+        "remaining" => accounting["session_limits"].to_h { |key, limit| [key, limit - accounting["admissions"].values.count { |entry| entry["role"] == key }] },
+        "limits_enforced" => "aggregate role session counts only; tokens, time and tool calls are observations, not caps")
+    end
+
+    def fresh_packet(spec, actor, state, context)
+      projection = State.project(state, role: spec["role"], actor_id: actor)
+      milestone = projection.fetch("milestone")
+      # initial_contract is provenance in the ledger, never effective instructions.
+      milestone.delete("initial_contract")
+      milestone.delete("requirement_amendments")
+      milestone["models"] = { "orchestrator" => ORCHESTRATOR_MODEL, "worker" => BUILDER_MODEL, "reviewer" => ORCHESTRATOR_MODEL }
+      { "host_contract" => "AP-INTERACT RC42 experimental fresh role packet/1",
+        "actor_id" => actor, "task" => spec["prompt"], "state_revision" => self.class.digest(state),
+        "effective_requirements" => milestone.fetch("requirements"),
+        "initial_contract_digest" => state.dig("milestone", "initial_contract_digest"),
+        "workflow" => spec.dig("fresh_role_profile", "workflow"),
+        "role_projection" => projection, "declared_sources" => context, "check_plan" => spec["check_plan"],
+        "authority_and_effect_constraints" => [
+          "Current effective requirements supersede historical initial text. Missing essential facts must be reported, not guessed. Examples generalize to equivalent cases.",
+          "Work only within current ledger authority and declared owned paths; no operator impersonation or authority expansion. Reviewer and orchestrator are read-only; worker may edit owned files only.",
+          "No tests, servers, providers, browser, network commands, commits, pushes, deployment or activation. Trusted driver owns checks and human gates remain separate.",
+          "Use bounded declared sources and current packet; do not preload history. Return required structured JSON and context_requests for missing sources.",
+          "changed_paths contains only owned worker outputs; reviewers return an empty array. Assessments are not verified checks or human acceptance."
+        ], "forbidden_roots" => spec["forbidden_roots"] }
     end
 
     def codex_arguments(job, path)
