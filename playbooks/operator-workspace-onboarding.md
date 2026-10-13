@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-ONBOARD-001
 title: Operator-Workspace Onboarding and Method Orientation
-version: "1.1"
+version: "1.2"
 status: active
 owner: Adopting organization
 mode: adaptive-read-only-orientation
@@ -22,6 +22,17 @@ This is an adaptive FAQ and setup conversation, not a required document-producti
 It audits the available organization-to-system lifecycle, but it does not perform business
 elicitation. When authoritative organization meaning is absent, route that work to the
 Business Plan Elicitation playbook rather than inventing it here.
+
+## Project fast path and delivery-policy binding
+
+For one project, use the [project onboarding entrypoint](operator-workspace-conformance.md#project-onboarding-entrypoint)
+and its copy-paste prompt. Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+for proportional planning, explicit execution modes, and current scoped authorization. An
+explicit bounded adoption grant in the invocation replaces the older requirement below to
+request a second synchronization approval; read back its concrete scope and proceed within
+it. Audit-only mode remains read-only. A serial checker role is valid without delegation;
+no onboarding activates an experimental kernel, supplies missing organization meaning, or
+authorizes effects beyond the grant.
 
 ## Entry modes
 
@@ -132,6 +143,9 @@ versus personalizable, and has received a truthful lifecycle audit and next-step
 Completion authorizes no writes or external effects.
 
 ## Change note
+
+- **1.2 — 2026-10-13:** Links project onboarding fast path and scopes synchronization to
+  explicit grants without repeated approval or automatic experiment/delegation activation.
 
 - **1.1 — 2026-08-25:** Adds the dedicated source-read-only checker/merge controller and
   explicitly scoped CI to the fixed HRM workflow orientation.

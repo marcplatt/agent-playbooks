@@ -4,7 +4,9 @@
 [Operator-Workspace Onboarding and Method Orientation](playbooks/operator-workspace-onboarding.md).
 If the operator already knows the method and is configuring another account, machine, or
 project set, use [Operator-Workspace Conformance and Synchronization](playbooks/operator-workspace-conformance.md)
-instead. In every playbook ID, `AP` means **Agent Playbooks**.
+instead. For a single project, start with the
+[copy-paste project onboarding prompt](templates/project-onboarding-prompt.md) through
+AP-CONFORM-001/1.2. In every playbook ID, `AP` means **Agent Playbooks**.
 
 Version-controlled, human-readable, and machine-readable workflows for turning an
 organization's business intent into governed system delivery. The repository is
