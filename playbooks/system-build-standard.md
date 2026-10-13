@@ -295,6 +295,11 @@ from a lower level. Applicable non-UI proof differs without weakening declared a
 
 A bounded pilot may measure role calls, elapsed time, packet/context loading, budgets/debits,
 material defects and repaired classes, recovery attempts, operator interventions and cost.
+Distinguish supplied prompt bytes, cached input tokens, new input tokens, output tokens,
+reported usage, and elapsed time. Cached bytes are not cached-token accounting; byte counts
+are not total model context. Report unavailable fields explicitly and cost only when measured
+from valid usage/pricing evidence. Distinguish agent-reported pilot evidence from independent
+observation and operator attestation; do not promote one to another.
 Measure actual available data; do not fabricate missing context, reliability, savings or
 future model costs. One pilot is learning evidence, not a reliability claim or general proof
 of the standard, runtime, deployment, production, or autonomy. No private pilot data belongs
