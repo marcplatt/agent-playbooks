@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-LANE-001
 title: HRM Bundle Coordination Standard
-version: "4.5"
+version: "4.6"
 status: active
 owner: Adopting organization
 mode: hrm-bundle-execution
@@ -126,6 +126,17 @@ By default, the coordinator delegates frozen-candidate checks, hosted-gate obser
 serialized merge, remote-main verification, and eligible cleanup to the Dedicated Checker
 and Merge Controller. The controller is a source-read-only Codex subagent and one integration
 writer, not a second HRM orchestrator or operator route.
+
+## Successor delivery-policy binding
+
+Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+for proportional planning, explicit execution modes, current human steering, bounded grants,
+validation reuse, review, and environment selection. That section supersedes conflicting
+older instructions here to require a separate planning merge, automatically delegate a
+checker/worker, or expand routine work into a bundle. All applicable final exact-source
+checks, role boundaries, repository gates, human acceptance, and external-effect separation
+remain mandatory. Use a serial checker role when delegation is not authorized; publication
+does not adopt an experimental kernel or migrate an organization's source pins.
 
 ## Inputs
 
@@ -1241,6 +1252,9 @@ milestone_cleanup:
 ```
 
 ## Change note
+
+- **4.6 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
+  authority, focused validation with exact final gates, and one coherent operator review.
 
 - **4.5 — 2026-08-25:** Rebinds active sessions to the current playbook version at decision
   and stage transitions, requires noisy decision-transition receipts and immediate same-HRM

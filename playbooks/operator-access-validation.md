@@ -1,7 +1,7 @@
 ---
 playbook_id: AP-VALIDATE-001
 title: Operator Access and Validation Routing
-version: "1.2"
+version: "1.3"
 status: active
 owner: Adopting organization
 mode: early-operator-access-risk-scaled-validation
@@ -17,6 +17,17 @@ controls: [operator-access-before-integration, validation-profile-routing, claim
 Use this playbook to make completed discovery and decision material available to the
 operator promptly while preserving risk-scaled integration evidence. Operator access,
 integration eligibility, and activation authority are separate gates.
+
+## Successor delivery-policy binding
+
+Apply [AP-SYSBUILD-001/2.6 delivery policy](system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+for proportional planning, explicit execution modes, current human steering, bounded grants,
+validation reuse, review, and environment selection. That section supersedes conflicting
+older instructions here to require a separate planning merge, automatically delegate a
+checker/worker, or expand routine work into a bundle. All applicable final exact-source
+checks, role boundaries, repository gates, human acceptance, and external-effect separation
+remain mandatory. Use a serial checker role when delegation is not authorized; publication
+does not adopt an experimental kernel or migrate an organization's source pins.
 
 ## Validation profiles
 
@@ -117,6 +128,9 @@ Checker/merge-controller handoff: {{checker_merge_controller_handoff_or_none}}
 ```
 
 ## Change note
+
+- **1.3 — 2026-10-13:** Adopts proportional delivery planning, explicit modes and bounded
+  authority, focused validation with exact final gates, and one coherent operator review.
 
 - **1.2 — 2026-08-25:** Delegates deterministic validation and integration evidence to the
   source-read-only checker/merge controller and makes targeted, affected, or full CI--

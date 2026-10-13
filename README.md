@@ -61,6 +61,14 @@ deployed, activated, canary, or production-verified states as interchangeable.
 | Workspace | [Workspace Topology and Review Handoff](playbooks/workspace-topology-review-handoff.md) | Maintain one stable operator desk while conditionally creating and promptly reconciling worker branches/worktrees. |
 | Rollout | [Activation, Canary, and Production Rollout](playbooks/activation-production-rollout.md) | Govern deployment, activation, canary, production observation, and autonomy as separate evidence-bound decisions. |
 
+## Proportional delivery amendment
+
+[AP-SYSBUILD-001/2.6 delivery policy](playbooks/system-build-standard.md#delivery-policy-proportional-planning-and-explicit-execution)
+sets proportional planning, explicit execution modes, human steering, validation selection,
+and review. AP-LANE-001/4.6, AP-VALIDATE-001/1.3, AP-DECIDE-001/1.3,
+AP-INTEGRATE-001/1.1 and AP-WORKSPACE-001/1.3 bind it at their existing entrypoints.
+Organizations adopt exact revisions explicitly. This does not activate the compact kernel.
+
 ## Experimental compact execution
 
 [Compact HRM Execution Kernel](playbooks/hrm-execution-kernel.md) is a self-contained,
