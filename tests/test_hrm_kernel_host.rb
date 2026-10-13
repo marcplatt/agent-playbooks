@@ -36,7 +36,9 @@ class HrmKernelHostTest < Minitest::Test
       JSON.parse(File.read(ARGV[ARGV.index("--output-schema") + 1]))
       permissions = JSON.parse(File.read(File.join(File.dirname(ARGV[ARGV.index("-o") + 1]), "permissions.json")))
       puts JSON.generate("type" => "fixture.argv", "argv" => ARGV)
-      thread = if ARGV.include?("resume")
+      thread = if packet["host_contract"].include?("RC42")
+                 SecureRandom.uuid
+               elsif ARGV.include?("resume")
                  ARGV[ARGV.index("resume") + 1]
                elsif packet["actor_id"].start_with?("reviewer-")
                  "11234567-89ab-cdef-0123-456789abcdef"
@@ -141,6 +143,50 @@ class HrmKernelHostTest < Minitest::Test
       Dir.rmdir(File.dirname(temporary)) if temporary && File.directory?(File.dirname(temporary)) && Dir.empty?(File.dirname(temporary))
     end
     FileUtils.remove_entry(@temporary) if File.exist?(@temporary)
+  end
+
+  def fresh_profile
+    { "schema" => HrmKernel::Host::FRESH_PROFILE, "run_id" => "fresh-test",
+      "milestone_revision" => @store.read.dig("state", "milestone", "revision"), "state_revision" => HrmKernel::Host.digest(@store.read.fetch("state")),
+      "session_limits" => { "worker" => 2, "reviewer" => 1, "orchestrator" => 1 },
+      "workflow" => { "ordered_stages" => [{ "stage" => "Implement", "owner" => "worker" }],
+        "current_stage" => "Implement", "next_eligible_action" => "Edit owned files only" } }
+  end
+
+  def test_exhausted_fresh_budget_does_not_claim_and_orphan_reservation_fails_closed
+    profile = fresh_profile
+    profile["session_limits"]["worker"] = 0
+    error = assert_raises(HrmKernel::Error) { dispatch("no-budget", model: "gpt-6.1-sol", fresh_role_profile: profile) }
+    assert_match(/budget exhausted/, error.message)
+    assert_equal "queued", @store.read.dig("state", "work_orders", "work", "status")
+    profile["session_limits"]["worker"] = 2
+    normalized = @host.send(:normalize_spec, specification("uncertain", model: "gpt-6.1-sol", fresh_role_profile: profile))
+    @host.send(:admit_fresh_session!, normalized)
+    reopened = HrmKernel::Host.new(state_dir: @state_dir, codex_path: @fake)
+    error = assert_raises(HrmKernel::Error) { reopened.dispatch(normalized) }
+    assert_match(/uncertain/, error.message)
+    assert_equal "queued", @store.read.dig("state", "work_orders", "work", "status")
+    error = assert_raises(HrmKernel::Error) { reopened.dispatch(specification("alternate", model: "gpt-6.1-sol", fresh_role_profile: profile)) }
+    assert_match(/uncertain orphan/, error.message)
+  end
+
+  def test_fresh_sessions_preserve_claim_and_budget_without_resume
+    first = dispatch("fresh-one", model: "gpt-6.1-sol", prompt: "slow", fresh_role_profile: fresh_profile)
+    @host.dispatch(specification("fresh-one", model: "gpt-6.1-sol", prompt: "slow", fresh_role_profile: JSON.parse(File.read(first["artifact_paths"]["job.json"])).dig("spec", "fresh_role_profile")))
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("parallel", model: "gpt-6.1-sol", fresh_role_profile: fresh_profile)) }
+    await_job("fresh-one")
+    second = dispatch("fresh-two", model: "gpt-6.1-sol", fresh_role_profile: fresh_profile)
+    done = await_job("fresh-two")
+    assert_equal first["claim_id"], second["claim_id"]
+    assert_equal first["revision"], second["revision"]
+    packet = JSON.parse(File.read(done["artifact_paths"]["prompt.json"]))
+    assert_equal 2, packet.dig("budget_accounting", "revision")
+    assert_equal 0, packet.dig("budget_accounting", "remaining", "worker")
+    argv = JSON.parse(File.readlines(done["artifact_paths"]["events.jsonl"]).first)["argv"]
+    refute_includes argv, "resume"
+    assert_includes argv, "gpt-6.1-sol"
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("fresh-three", model: "gpt-6.1-sol", fresh_role_profile: fresh_profile)) }
+    assert_raises(HrmKernel::Error) { @host.dispatch(specification("legacy-bypass")) }
   end
 
   def test_real_child_dispatch_persists_thread_usage_claim_and_structured_artifacts

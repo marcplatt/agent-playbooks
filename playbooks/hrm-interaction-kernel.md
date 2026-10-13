@@ -503,3 +503,46 @@ Do not create documentation or receipt changes solely to report that checks ran.
   durable operator intent, exact decision binding, general work orders, writer claims,
   and repeated human review/remediation. Keeps legacy RC history intact and makes
   the future host-transport and external-effect boundaries explicit.
+
+### RC42 experimental fresh-role successor (not activated)
+
+RC42 is a bounded successor to RC41, selected explicitly through Driver
+`fresh_role_profile`. Existing RC41 runs keep their transport behavior when this
+profile has never been admitted. The profile is not an application adoption,
+model-quality result, or deployment grant. The normative
+[fresh-role capture template](../templates/fresh-role-packet.md) is contextual;
+the runtime schema below is intentionally narrower.
+
+The profile object requires exactly `schema: rc42-fresh-roles/1`, `run_id`,
+`milestone_revision`, `state_revision` (Host canonical SHA256 of the current
+state), `session_limits` (nonnegative integer worker/orchestrator/reviewer counts),
+and `workflow` containing `ordered_stages` (each names `stage` and `owner`),
+`current_stage`, and `next_eligible_action`. Driver refreshes trusted current state
+identity and derives current stage/action from current phase, candidate and
+unresolved decisions. It never refreshes a declared journey across a milestone
+revision: reconcile that journey before continuing after business amendments.
+Role authority and work-order eligibility still come from the ledger.
+
+Every selected model launch is fresh: GPT6.1 Sol workers and Astra orchestrator
+and independent reviewers. Resume inputs, including historical resume inputs,
+fail closed. A finished fresh worker may continue its existing running owned
+claim through a new job; active or uncertain earlier launches prevent parallel
+reuse. Duplicate native thread identities fail transport completion. Requested
+model arguments are recorded; they do not prove the provider's model identity.
+
+Packets contain current effective requirements, current role projection,
+ordered journey/current action, candidate and evidence references, bounded
+explicit source excerpts, and authority/effect constraints. The immutable initial
+contract remains ledger provenance via its digest. Historical requirement text
+and amendment history are not sent as effective instructions. Examples represent
+equivalent cases, not exhaustive acceptance lists.
+
+`host-jobs/fresh-budget.json` is one durable aggregate admission ledger for all
+roles in the state directory. It binds run identity and immutable session limits;
+job admission binds the exact specification and reports one revision after admission with the
+current session already debited. Existing durable jobs replay idempotently. An admission without a durable job fails closed as uncertain, including alternate worker IDs for that order; it never redispatches automatically. Budget exhaustion is checked before claiming queued work. Failed or uncertain launches are not refunded.
+Fresh sessions, process restarts and alternate run IDs cannot reset counters.
+Legacy dispatch into admitted fresh state and historical run continuation are
+rejected. Tokens, wall time and tool calls are not enforced caps in this slice.
+No automatic creative stall recovery, browser capability, application checks,
+provider effects, live activation or adoption is added.

@@ -36,10 +36,12 @@ class HrmKernelDriverTest < Minitest::Test
     File.write(@fake, <<~'CODEX'.sub("RUBY_EXECUTABLE", RbConfig.ruby))
       #!RUBY_EXECUTABLE
       require "json"
+      require "securerandom"
       packet = JSON.parse(STDIN.read)
       orchestrator = packet["actor_id"] == "astra-orchestrator"
       reviewer = packet["actor_id"].start_with?("reviewer-")
       uuid = orchestrator ? "11234567-89ab-cdef-0123-456789abcdef" : reviewer ? "21234567-89ab-cdef-0123-456789abcdef" : "31234567-89ab-cdef-0123-456789abcdef"
+      uuid = SecureRandom.uuid if packet["host_contract"].include?("RC42")
       abort "resume changed identity" if ARGV.include?("resume") && ARGV[ARGV.index("resume") + 1] != uuid
       puts JSON.generate("type" => "thread.started", "thread_id" => uuid)
       if orchestrator
@@ -53,8 +55,9 @@ class HrmKernelDriverTest < Minitest::Test
           spec = {"job_id" => id, "role" => role, "model" => "gpt-5.6-sol", "prompt" => id, "context_paths" => [], "max_context_bytes" => 65536,
             "check_plan" => {"environment_id" => env["environment_id"], "checks" => role == "worker" ? [check] : []},
             "execution_read_roots" => env["read_roots"], "execution_environment_allowlist" => env["environment_allowlist"]}
+          spec["model"] = role == "worker" ? "gpt-6.1-sol" : "gpt-6-astra" if control["current_workflow"]
           spec["work_order_id"] = "implement" if role == "worker"
-          spec["resume_job_id"] = parent if parent
+          spec["resume_job_id"] = parent if parent && !control["current_workflow"]
           request.call("dispatch-#{id}", "host-dispatch", spec)
         }
         requests = []
@@ -543,6 +546,63 @@ class HrmKernelDriverTest < Minitest::Test
     HrmKernel::Host.atomic_json(File.join(@state_dir, "driver", "runtime.json"), runtime)
     error = assert_raises(HrmKernel::Error) { @driver.step }
     assert_match(/metadata is incomplete/, error.message)
+  end
+
+  private
+
+  def selected_fresh_profile
+    { "schema" => HrmKernel::Host::FRESH_PROFILE, "run_id" => "test",
+      "milestone_revision" => @store.read.dig("state", "milestone", "revision"),
+      "state_revision" => HrmKernel::Host.digest(@store.read.fetch("state")),
+      "session_limits" => { "worker" => 2, "reviewer" => 1, "orchestrator" => 2 },
+      "workflow" => { "ordered_stages" => [{ "stage" => "Build", "owner" => "worker" }, { "stage" => "Review", "owner" => "reviewer" }],
+        "current_stage" => "stale initial stage", "next_eligible_action" => "stale initial action" } }
+  end
+
+  public
+
+  def test_fresh_driver_projects_workflow_and_selects_models_without_resume
+    config = configuration.merge("fresh_role_profile" => selected_fresh_profile)
+    @driver.start(config)
+    config = JSON.parse(File.read(File.join(@state_dir, "driver", "config.json")))
+    runtime = JSON.parse(File.read(File.join(@state_dir, "driver", "runtime.json")))
+    packet = JSON.parse(@driver.send(:prompt, config, runtime, {"cursor" => 0, "records" => []}))
+    refute_includes JSON.generate(packet), "stale initial stage"
+    refute_includes JSON.generate(packet), "stale initial action"
+    assert_equal selected_fresh_profile.dig("workflow", "ordered_stages"), packet.dig("current_workflow", "ordered_stages")
+    assert_includes packet.dig("request_guide", "host-dispatch"), "gpt-6.1-sol"
+    assert_includes packet.dig("request_guide", "host-dispatch"), "gpt-6-astra"
+    %w[worker reviewer].each do |role|
+      input = {"role" => role, "model" => role == "worker" ? "gpt-6.1-sol" : "gpt-6-astra", "check_plan" => {"environment_id" => config["environment_id"], "checks" => []}}
+      @driver.send(:validate_dispatch!, input, config, runtime)
+      assert_equal HrmKernel::Host.digest(@store.read.fetch("state")), input.dig("fresh_role_profile", "state_revision")
+      %w[resume_job_id historical_resume_job_id fresh_role_profile].each do |field|
+        invalid = input.reject { |key, _| key == "fresh_role_profile" }.merge(field => "old")
+        assert_raises(HrmKernel::Error) { @driver.send(:validate_dispatch!, invalid, config, runtime) }
+      end
+    end
+    @store.transact("command_id" => "fresh-amend", "type" => "intent.record", "actor" => {"role" => "operator", "id" => "human"}, "data" => {
+      "intent_id" => "changed", "kind" => "milestone_change", "text" => "Current behavior", "source" => {"thread_id" => "human", "message_id" => "changed"}, "requirement_ids" => ["behavior"], "requirements" => [{"id" => "behavior", "text" => "Current behavior"}]})
+    error = assert_raises(HrmKernel::Error) { @driver.send(:fresh_profile, config) }
+    assert_match(/reconciliation/, error.message)
+  end
+
+  def test_fresh_driver_completes_offline_claim_check_review_journey
+    profile = selected_fresh_profile
+    profile["session_limits"]["orchestrator"] = 4
+    assert_equal "active", @driver.start(configuration.merge("fresh_role_profile" => profile))["outcome"]
+    final = finish
+    assert_equal "review_ready", final["outcome"], final.inspect
+    jobs = Dir.glob(File.join(@state_dir, "host-jobs", "*", "job.json")).map { |path| JSON.parse(File.read(path)) }
+    assert_equal 7, jobs.length
+    assert jobs.all? { |job| job["resume_thread_id"].nil? }
+    assert_equal ["gpt-6-astra"], jobs.reject { |job| job["role"] == "worker" }.map { |job| job["model_requested"] }.uniq
+    assert_equal ["gpt-6.1-sol"], jobs.select { |job| job["role"] == "worker" }.map { |job| job["model_requested"] }.uniq
+    budget = JSON.parse(File.read(File.join(@state_dir, "host-jobs", "fresh-budget.json")))
+    assert_equal 7, budget["revision"]
+    state = @store.read.fetch("state")
+    assert_equal "completed", state.dig("work_orders", "implement", "status")
+    assert_equal "pending", state.dig("reviews", "human-review", "status")
   end
 
   private

@@ -203,7 +203,11 @@ module HrmKernel
           "execution_environment_allowlist" => config["environment_allowlist"]
         }
         spec["reasoning_effort"] = config["orchestrator_reasoning_effort"] if config["orchestrator_reasoning_effort"]
-        spec["resume_job_id"] = runtime["resume_job"] if runtime["resume_job"]
+        if config["fresh_role_profile"]
+          spec["fresh_role_profile"] = fresh_profile(config)
+        else
+          spec["resume_job_id"] = runtime["resume_job"] if runtime["resume_job"]
+        end
         # Persist identity before dispatch; Host dispatch is idempotent on job ID.
         runtime["orchestrator_job"] = job_id
         runtime["orchestrator_technical_input_cursor"] = technical_inputs.fetch("cursor")
@@ -354,7 +358,16 @@ module HrmKernel
     end
 
     def validate_dispatch!(input, config, runtime)
-      fail!("driver may dispatch only Sol workers or fresh reviewers") unless %w[worker reviewer].include?(input["role"]) && input["model"] == Host::MODEL
+      if config["fresh_role_profile"]
+        fail!("fresh role profile forbids inherited resume inputs") if input["resume_job_id"] || input["historical_resume_job_id"]
+        fail!("model cannot supply its own fresh role profile") if input["fresh_role_profile"]
+        expected = input["role"] == "worker" ? Host::BUILDER_MODEL : Host::ORCHESTRATOR_MODEL
+        fail!("fresh role model mismatch") unless %w[worker reviewer].include?(input["role"]) && input["model"] == expected
+        input["fresh_role_profile"] = fresh_profile(config)
+      else
+        fail!("fresh profile requires selected driver configuration") if input["fresh_role_profile"]
+        fail!("driver may dispatch only Sol workers or fresh reviewers") unless %w[worker reviewer].include?(input["role"]) && input["model"] == Host::MODEL
+      end
       transition = environment_transition(config, runtime)
       historical_resume = input["historical_resume_job_id"]
       fail!("resume_job_id and historical_resume_job_id are mutually exclusive") if historical_resume && input["resume_job_id"]
@@ -486,6 +499,12 @@ module HrmKernel
         "budget" => { "turn" => runtime["round"], "max_turns" => config["max_turns"] },
         "external_state_cursor" => @store.read.fetch("cursor")
       }
+      if config["fresh_role_profile"]
+        packet["request_guide"]["host-dispatch"] = "Dispatch fresh worker model gpt-6.1-sol or fresh reviewer model gpt-6-astra. Never provide resume_job_id, historical_resume_job_id or fresh_role_profile. Durable current worker claims remain; use current owned order with a new job ID. Frozen check plans and all declared environment bounds still apply."
+        packet["workflow"] = "Use the selected current workflow stages and owners. Every model launch is fresh; durable claims, findings, authority and aggregate budgets persist. No automatic stall recovery or capability expansion."
+        packet["current_workflow"] = fresh_profile(config).fetch("workflow")
+        packet["task_authority"] = "Task text supplies operator outcome context; current effective requirements in the role projection govern implementation. Historical task facts cannot supersede amendments."
+      end
       packet["environment_transition"] = transition_packet if transition_packet
       JSON.generate(packet)
     end
@@ -493,7 +512,7 @@ module HrmKernel
     def validate_config(input)
       fail!("driver configuration must be an object") unless input.is_a?(Hash)
       config = JSON.parse(JSON.generate(input))
-      allowed = %w[run_id prompt environment_id read_roots environment_allowlist forbidden_roots preflight_checks check_repository max_turns max_parallel_workers orchestrator_reasoning_effort worker_reasoning_effort]
+      allowed = %w[run_id prompt environment_id read_roots environment_allowlist forbidden_roots preflight_checks check_repository max_turns max_parallel_workers orchestrator_reasoning_effort worker_reasoning_effort fresh_role_profile]
       fail!("unknown driver configuration fields") unless (config.keys - allowed).empty?
       %w[run_id prompt environment_id].each { |key| fail!("#{key} must be nonempty text") unless config[key].is_a?(String) && !config[key].empty? }
       fail!("invalid run id") unless Host::IDENTIFIER.match?(config["run_id"]) && config["run_id"].length <= 40
@@ -513,7 +532,28 @@ module HrmKernel
       %w[orchestrator_reasoning_effort worker_reasoning_effort].each do |key|
         fail!("invalid reasoning effort") if config[key] && !%w[low medium high xhigh max ultra].include?(config[key])
       end
+      @host.send(:validate_fresh_profile!, config["fresh_role_profile"]) if config["fresh_role_profile"]
       config
+    end
+
+    def fresh_profile(config)
+      state = @store.read.fetch("state")
+      selected = config.fetch("fresh_role_profile")
+      fail!("declared journey requires reconciliation after milestone change") unless selected["milestone_revision"] == state.dig("milestone", "revision")
+      projection = State.project(state, role: "orchestrator", actor_id: "astra-orchestrator")
+      phase = state.dig("milestone", "phase")
+      pending_decisions = projection.fetch("decisions", {}).values.any? { |decision| decision["status"] == "pending" }
+      action = if %w[review_ready accepted closed].include?(phase)
+                 "Hold model work; human review/acceptance or explicit new operator input only. No activation."
+               elsif pending_decisions
+                 "Hold affected work for unresolved operator decisions; do not infer approval."
+               elsif projection.dig("milestone", "current_candidate")
+                 "Review exact current candidate or assess current reviewer evidence; preserve findings and separate human gate."
+               else
+                 "Coordinate current queued/running owned work orders only, within existing authority; unmet requirements remain engineering work."
+               end
+      workflow = selected.fetch("workflow").merge("current_stage" => "Kernel phase: #{phase}; current revision: #{state.dig('milestone', 'revision')}", "next_eligible_action" => action)
+      selected.merge("state_revision" => Host.digest(state), "workflow" => workflow)
     end
 
     def environment_transition(config, runtime)

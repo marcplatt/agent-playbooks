@@ -212,6 +212,7 @@ module HrmKernel
       runtime_bytes = read_private(File.join(@source, "driver", "runtime.json"))
       preflight_bytes = read_private(File.join(@source, "driver", "preflight.json"))
       config = parse_object(config_bytes, "source Driver configuration")
+      fail!("RC42 fresh-role aggregate budgets cannot use historical run continuation") if config["fresh_role_profile"]
       runtime = parse_object(runtime_bytes, "source Driver runtime")
       preflight = parse_array(preflight_bytes, "source Driver preflight")
       validate_source_generation!(source_version, config, runtime)
